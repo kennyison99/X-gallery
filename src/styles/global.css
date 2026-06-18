@@ -1,0 +1,213 @@
+/* Define Color Palettes for Light and Dark Modes */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9f9f9;
+  --bg-card: #ffffff;
+  --border-color: #eaeaea;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --accent-color: #000000;
+  --accent-light: #f3f3f3;
+  --heart-color: #ff3e6c;
+  --font-family: "LXGW WenKai TC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.08);
+  --transition-speed: 0.25s;
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #121212;
+  --bg-card: #161616;
+  --border-color: #262626;
+  --text-primary: #f3f3f3;
+  --text-secondary: #a0a0a0;
+  --accent-color: #ffffff;
+  --accent-light: #222222;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.7);
+}
+
+/* CSS Reset and Global Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  transition: background-color var(--transition-speed) ease, color var(--transition-speed) ease;
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--transition-speed) ease;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Typography styles */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Shared UI Components */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  gap: 0.5rem;
+}
+
+.btn:hover {
+  border-color: var(--text-primary);
+  background: var(--accent-light);
+}
+
+.btn-primary {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
+}
+
+.btn-primary:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.tag-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.9rem;
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
+
+.tag-badge:hover, .tag-badge.active {
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
+}
+
+/* Image grid */
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  padding: 1.5rem 0;
+}
+
+@media (min-width: 600px) {
+  .image-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.25rem;
+  }
+}
+
+/* Multi-photo badge */
+.media-count-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.65);
+  color: #ffffff;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Thoughts (description) text */
+.card-desc {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-top: 0.15rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Original Post Link button */
+.post-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  transition: all var(--transition-speed) ease;
+}
+
+.post-link-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+  background: var(--accent-light);
+}
+
+/* Hidden links for PhotoSwipe */
+.hidden-pswp-link {
+  display: none !important;
+}
+
+/* Force PhotoSwipe SVG icons to be white on its dark overlay background */
+.pswp {
+  --pswp-icon-color: #ffffff !important;
+  color: #ffffff !important;
+}
+
+.pswp__button {
+  color: #ffffff !important;
+}
+
+

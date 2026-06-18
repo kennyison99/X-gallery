@@ -1,0 +1,47 @@
+---
+interface Props {
+  activeTag: string | null;
+  tags: string[];
+}
+
+const { activeTag, tags } = Astro.props;
+---
+
+<div class="tag-filter-container">
+  <div class="tag-list">
+    <a 
+      href="/" 
+      class={`tag-badge ${!activeTag ? 'active' : ''}`}
+    >
+      全部
+    </a>
+    {tags.map((tag) => (
+      <a 
+        href={`/?tag=${encodeURIComponent(tag)}`} 
+        class={`tag-badge ${activeTag === tag ? 'active' : ''}`}
+      >
+        #{tag}
+      </a>
+    ))}
+  </div>
+</div>
+
+<style>
+  .tag-filter-container {
+    padding: 1.5rem 0 0.5rem 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .tag-filter-container::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
+
+  .tag-list {
+    display: flex;
+    gap: 0.6rem;
+    white-space: nowrap;
+    padding-bottom: 0.5rem;
+  }
+</style>

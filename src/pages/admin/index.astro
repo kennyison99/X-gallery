@@ -1,0 +1,1189 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+if (!env || !env.DB) {
+  return new Response('D1 DB binding not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
+}
+
+// 1. Fetch all existing tags for reusable selection
+let allTags = [];
+try {
+  const tagsQuery = await env.DB.prepare('SELECT * FROM tags ORDER BY name ASC').all();
+  allTags = tagsQuery.results || [];
+} catch (err) {
+  console.error('Error fetching tags for admin:', err);
+}
+
+// 2. Fetch all images/posts for management list
+let images = [];
+try {
+  const query = `
+    SELECT i.*, group_concat(t.name) as tags_list
+    FROM images i
+    LEFT JOIN image_tags it ON i.id = it.image_id
+    LEFT JOIN tags t ON it.tag_id = t.id
+    GROUP BY i.id
+    ORDER BY i.created_at DESC
+  `;
+  const { results } = await env.DB.prepare(query).all();
+  images = results || [];
+} catch (err) {
+  console.error('Error fetching images for admin:', err);
+}
+
+// 3. Fetch crawl accounts
+let crawlAccounts = [];
+try {
+  const { results } = await env.DB.prepare('SELECT * FROM crawl_accounts ORDER BY created_at DESC').all();
+  crawlAccounts = results || [];
+} catch (err) {
+  console.error('Error fetching crawl accounts:', err);
+}
+
+const formattedImages = images.map((img: any) => ({
+  ...img,
+  tags: img.tags_list ? img.tags_list.split(',') : []
+}));
+---
+
+<BaseLayout title="CMS 後台管理 - Twitter 照片牆">
+  <div class="admin-container">
+    <div class="admin-header">
+      <h1>CMS 管理後台</h1>
+      <p>上傳多張相片作為單一卡片貼文到 R2，並管理所有照片與標籤資料。</p>
+    </div>
+
+    <div class="admin-grid">
+      <!-- Upload Panel -->
+      <section class="admin-panel upload-panel">
+        <h2 id="form-title-text">發佈相片貼文</h2>
+        <form id="upload-form" class="admin-form">
+          <div class="form-group">
+            <label for="image-file">選擇照片 (支援多選) <span class="required" id="file-required-star">*</span></label>
+            <div class="file-dropzone">
+              <input type="file" id="image-file" name="file" accept="image/*" multiple required />
+              <div class="dropzone-text">
+                <span class="upload-icon">📁</span>
+                <span class="upload-prompt">點擊選擇照片 (可選多張)</span>
+                <span class="file-name-display">尚未選擇任何檔案</span>
+              </div>
+            </div>
+            
+            <!-- Image Previews -->
+            <div id="image-preview-container" style="display: none; margin-top: 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.6rem; background-color: var(--bg-secondary);">
+              <div id="existing-images-preview" class="preview-section" style="display: none; margin-bottom: 0.5rem;">
+                <span class="preview-label" style="font-size: 0.8rem; font-weight: 500; display: block; margin-bottom: 0.25rem; color: var(--text-secondary);">目前相片：</span>
+                <div class="preview-grid" id="existing-images-grid" style="display: flex; gap: 0.4rem; flex-wrap: wrap;"></div>
+              </div>
+              <div id="new-images-preview" class="preview-section" style="display: none;">
+                <span class="preview-label" style="font-size: 0.8rem; font-weight: 500; display: block; margin-bottom: 0.25rem; color: var(--text-secondary);">即將上傳之新相片：</span>
+                <div class="preview-grid" id="new-images-grid" style="display: flex; gap: 0.4rem; flex-wrap: wrap;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="image-title">貼文標題</label>
+            <input type="text" id="image-title" name="title" placeholder="例如：推文寫真集 #1" />
+          </div>
+
+          <div class="form-group">
+            <label for="image-description">感想 / 內文</label>
+            <textarea id="image-description" name="description" rows="3" placeholder="寫點關於這組照片的感想或推文內容..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="image-author">作者 (Twitter 帳號) <span class="required">*</span></label>
+            <input type="text" id="image-author" name="author" value="foglantau" placeholder="例如：foglantau" required />
+          </div>
+
+          <div class="form-group">
+            <label for="image-author-url">作者 Twitter 連結</label>
+            <input type="url" id="image-author-url" name="author_url" value="https://x.com/foglantau" placeholder="https://x.com/username" />
+          </div>
+
+          <div class="form-group">
+            <label for="image-post-url">原推文連結 (post_url)</label>
+            <input type="url" id="image-post-url" name="post_url" placeholder="https://x.com/username/status/123456789" />
+          </div>
+
+          <!-- Reusable Tags Selection -->
+          <div class="form-group">
+            <label>選擇已有標籤</label>
+            <div class="existing-tags-wrapper">
+              {allTags.length > 0 ? (
+                allTags.map((tag: any) => (
+                  <label class="tag-checkbox-label">
+                    <input type="checkbox" name="existing_tags" value={tag.name} />
+                    <span>#{tag.name}</span>
+                  </label>
+                ))
+              ) : (
+                <p class="empty-text">尚無已有標籤</p>
+              )}
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="new-tags">新增其他標籤 (以逗號或空格分隔)</label>
+            <input type="text" id="new-tags" name="new_tags" placeholder="例如：絲襪, 日常" />
+            <p class="form-help">新標籤會自動去重並加入資料庫供下次使用。</p>
+          </div>
+
+          <div class="form-actions" style="display: flex; gap: 0.5rem; width: 100%;">
+            <button type="submit" class="btn btn-primary btn-submit" style="flex: 1;">
+              <span class="btn-text">確認上傳</span>
+              <span class="loader-spinner" style="display: none;"></span>
+            </button>
+            <button type="button" id="cancel-edit-btn" class="btn" style="display: none; flex: 1;">
+              取消編輯
+            </button>
+          </div>
+          <div id="upload-message" class="form-message"></div>
+        </form>
+      </section>
+
+      <!-- Manage List Panel -->
+      <section class="admin-panel list-panel">
+        <h2>照片貼文列表 ({formattedImages.length})</h2>
+        <div class="table-wrapper">
+          {formattedImages.length > 0 ? (
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>預覽</th>
+                  <th>貼文資訊</th>
+                  <th>標籤</th>
+                  <th style="text-align: right;">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {formattedImages.map((image) => {
+                  const keys = image.r2_keys.split(',');
+                  const firstKey = keys[0] || '';
+                  const totalCount = keys.length;
+                  return (
+                    <tr class="image-row" data-id={image.id}>
+                      <td>
+                        <div class="thumb-container" style="position: relative; width: 48px; height: 48px;">
+                          <img 
+                            src={`/api/r2/${encodeURIComponent(firstKey)}`} 
+                            alt={image.title} 
+                            class="admin-thumb" 
+                          />
+                          {totalCount > 1 && (
+                            <span class="thumb-count-badge">+{totalCount - 1}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div class="image-title">{image.title || '無標題'}</div>
+                        <div class="image-author">@{image.author}</div>
+                        {image.description && <div class="image-desc-preview" title={image.description}>{image.description}</div>}
+                        <div class="image-date">{new Date(image.created_at).toLocaleDateString()}</div>
+                      </td>
+                      <td>
+                        <div class="table-tags">
+                          {image.tags.map((tag: string) => (
+                            <span class="table-tag">#{tag}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td style="text-align: right;">
+                        <div class="table-actions" style="display: flex; gap: 0.3rem; justify-content: flex-end;">
+                          <button 
+                            class="btn edit-btn" 
+                            style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                            data-id={image.id}
+                            data-title={image.title}
+                            data-description={image.description || ''}
+                            data-author={image.author}
+                            data-author-url={image.author_url || ''}
+                            data-post-url={image.post_url || ''}
+                            data-tags={image.tags.join(',')}
+                            data-keys={image.r2_keys}
+                          >
+                            編輯
+                          </button>
+                          <button class="btn btn-danger delete-btn" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;" data-id={image.id}>
+                            刪除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div class="empty-table-state">
+              <p>資料庫目前無照片，請從左側上傳。</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <!-- Crawl Accounts Panel -->
+      <section class="admin-panel crawl-panel" style="grid-column: 1 / -1;">
+        <h2>自動爬取帳號管理</h2>
+        <p class="crawl-desc">新增 Twitter/X 帳號後，GitHub Actions 將每日自動爬取該帳號的最新圖片並上傳。</p>
+        
+        <div class="crawl-add-form">
+          <input type="text" id="crawl-username" placeholder="輸入 Twitter 帳號（例如 foglantau）" />
+          <button type="button" id="add-crawl-btn" class="btn btn-primary" style="white-space: nowrap;">新增帳號</button>
+        </div>
+        <div id="crawl-message" class="form-message" style="margin-top: 0.5rem;"></div>
+
+        <div class="crawl-accounts-list" id="crawl-accounts-list">
+          {crawlAccounts.length > 0 ? (
+            crawlAccounts.map((account: any) => (
+              <div class="crawl-account-item" data-username={account.username}>
+                <div class="crawl-account-info">
+                  <span class="crawl-account-name">@{account.username}</span>
+                  <a href={`https://x.com/${account.username}`} target="_blank" rel="noopener noreferrer" class="crawl-account-link" title="前往 Twitter">↗</a>
+                  {account.last_crawled_at && (
+                    <span class="crawl-last-time">上次爬取：{new Date(account.last_crawled_at).toLocaleString('zh-TW')}</span>
+                  )}
+                </div>
+                <button class="btn btn-danger remove-crawl-btn" data-username={account.username} style="font-size: 0.8rem; padding: 0.25rem 0.5rem;">移除</button>
+              </div>
+            ))
+          ) : (
+            <p class="empty-text" id="crawl-empty-text">尚未新增任何爬取帳號。</p>
+          )}
+        </div>
+      </section>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  // UI interactions for file input
+  const fileInput = document.getElementById('image-file') as HTMLInputElement | null;
+  const fileNameDisplay = document.querySelector('.file-name-display');
+  const uploadPrompt = document.querySelector('.upload-prompt');
+  const fileRequiredStar = document.getElementById('file-required-star');
+  const formTitleText = document.getElementById('form-title-text');
+  const cancelBtn = document.getElementById('cancel-edit-btn') as HTMLButtonElement | null;
+  const newTagsInput = document.getElementById('new-tags') as HTMLInputElement | null;
+
+  const titleInput = document.getElementById('image-title') as HTMLInputElement | null;
+  const descInput = document.getElementById('image-description') as HTMLTextAreaElement | null;
+  const authorInput = document.getElementById('image-author') as HTMLInputElement | null;
+  const authorUrlInput = document.getElementById('image-author-url') as HTMLInputElement | null;
+  const postUrlInput = document.getElementById('image-post-url') as HTMLInputElement | null;
+
+  // Previews elements
+  const previewContainer = document.getElementById('image-preview-container');
+  const existingPreviewSection = document.getElementById('existing-images-preview');
+  const existingGrid = document.getElementById('existing-images-grid');
+  const newPreviewSection = document.getElementById('new-images-preview');
+  const newGrid = document.getElementById('new-images-grid');
+
+  let isEditMode = false;
+  let editingId: string | null = null;
+
+  // Keep track of files and existing keys
+  let remainingExistingKeys: string[] = [];
+  let selectedNewFiles: File[] = [];
+
+  // Render new selected files preview
+  function renderNewFilesPreview() {
+    if (!newGrid || !newPreviewSection || !previewContainer) return;
+    newGrid.innerHTML = '';
+    
+    if (selectedNewFiles.length > 0) {
+      newPreviewSection.style.display = 'block';
+      previewContainer.style.display = 'block';
+      
+      selectedNewFiles.forEach((file, index) => {
+        const itemWrapper = document.createElement('div');
+        itemWrapper.style.position = 'relative';
+        itemWrapper.style.width = '60px';
+        itemWrapper.style.height = '60px';
+        
+        const img = document.createElement('img');
+        img.style.width = '60px';
+        img.style.height = '60px';
+        img.style.objectFit = 'cover';
+        img.style.borderRadius = '4px';
+        img.style.border = '1px solid var(--border-color)';
+        
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.innerHTML = '×';
+        removeBtn.style.position = 'absolute';
+        removeBtn.style.top = '-4px';
+        removeBtn.style.right = '-4px';
+        removeBtn.style.background = 'var(--heart-color)';
+        removeBtn.style.color = 'white';
+        removeBtn.style.border = 'none';
+        removeBtn.style.borderRadius = '50%';
+        removeBtn.style.width = '18px';
+        removeBtn.style.height = '18px';
+        removeBtn.style.fontSize = '10px';
+        removeBtn.style.fontWeight = 'bold';
+        removeBtn.style.cursor = 'pointer';
+        removeBtn.style.display = 'flex';
+        removeBtn.style.alignItems = 'center';
+        removeBtn.style.justifyContent = 'center';
+        removeBtn.style.padding = '0';
+        
+        removeBtn.addEventListener('click', () => {
+          selectedNewFiles.splice(index, 1);
+          renderNewFilesPreview();
+          updateFileInputDisplay();
+        });
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          img.src = e.target?.result as string;
+        };
+        reader.readAsDataURL(file);
+        
+        itemWrapper.appendChild(img);
+        itemWrapper.appendChild(removeBtn);
+        newGrid.appendChild(itemWrapper);
+      });
+    } else {
+      newPreviewSection.style.display = 'none';
+      if (remainingExistingKeys.length === 0) {
+        previewContainer.style.display = 'none';
+      }
+    }
+  }
+
+  // Render existing images preview
+  function renderExistingImagesPreview() {
+    if (!existingGrid || !existingPreviewSection || !previewContainer) return;
+    existingGrid.innerHTML = '';
+    
+    if (remainingExistingKeys.length > 0) {
+      existingPreviewSection.style.display = 'block';
+      previewContainer.style.display = 'block';
+      
+      remainingExistingKeys.forEach((key, index) => {
+        const itemWrapper = document.createElement('div');
+        itemWrapper.style.position = 'relative';
+        itemWrapper.style.width = '60px';
+        itemWrapper.style.height = '60px';
+        
+        const img = document.createElement('img');
+        img.src = `/api/r2/${encodeURIComponent(key)}`;
+        img.style.width = '60px';
+        img.style.height = '60px';
+        img.style.objectFit = 'cover';
+        img.style.borderRadius = '4px';
+        img.style.border = '1px solid var(--border-color)';
+        
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.innerHTML = '×';
+        removeBtn.style.position = 'absolute';
+        removeBtn.style.top = '-4px';
+        removeBtn.style.right = '-4px';
+        removeBtn.style.background = 'var(--heart-color)';
+        removeBtn.style.color = 'white';
+        removeBtn.style.border = 'none';
+        removeBtn.style.borderRadius = '50%';
+        removeBtn.style.width = '18px';
+        removeBtn.style.height = '18px';
+        removeBtn.style.fontSize = '10px';
+        removeBtn.style.fontWeight = 'bold';
+        removeBtn.style.cursor = 'pointer';
+        removeBtn.style.display = 'flex';
+        removeBtn.style.alignItems = 'center';
+        removeBtn.style.justifyContent = 'center';
+        removeBtn.style.padding = '0';
+        
+        removeBtn.addEventListener('click', () => {
+          remainingExistingKeys.splice(index, 1);
+          renderExistingImagesPreview();
+        });
+        
+        itemWrapper.appendChild(img);
+        itemWrapper.appendChild(removeBtn);
+        existingGrid.appendChild(itemWrapper);
+      });
+    } else {
+      existingPreviewSection.style.display = 'none';
+      if (selectedNewFiles.length === 0) {
+        previewContainer.style.display = 'none';
+      }
+    }
+  }
+
+  function updateFileInputDisplay() {
+    if (!fileNameDisplay) return;
+    const count = selectedNewFiles.length;
+    if (count > 0) {
+      fileNameDisplay.textContent = `已選取 ${count} 個檔案`;
+    } else {
+      fileNameDisplay.textContent = '尚未選擇任何檔案';
+    }
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files) {
+        // Accumulate newly selected files
+        Array.from(fileInput.files).forEach(file => {
+          selectedNewFiles.push(file);
+        });
+        // Clear file input value so user can select the same file again
+        fileInput.value = '';
+        updateFileInputDisplay();
+        renderNewFilesPreview();
+      }
+    });
+  }
+
+  function resetForm() {
+    isEditMode = false;
+    editingId = null;
+    remainingExistingKeys = [];
+    selectedNewFiles = [];
+    
+    if (uploadForm) uploadForm.reset();
+    if (formTitleText) formTitleText.textContent = '發佈相片貼文';
+    if (btnText) btnText.textContent = '確認上傳';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (fileInput) fileInput.required = true;
+    if (fileRequiredStar) fileRequiredStar.style.display = 'inline';
+    if (uploadPrompt) uploadPrompt.textContent = '點擊選擇照片 (可選多張)';
+    if (fileNameDisplay) fileNameDisplay.textContent = '尚未選擇任何檔案';
+    
+    // Reset previews
+    if (existingGrid) existingGrid.innerHTML = '';
+    if (existingPreviewSection) existingPreviewSection.style.display = 'none';
+    if (newGrid) newGrid.innerHTML = '';
+    if (newPreviewSection) newPreviewSection.style.display = 'none';
+    if (previewContainer) previewContainer.style.display = 'none';
+
+    if (uploadMessage) {
+      uploadMessage.textContent = '';
+      uploadMessage.style.display = 'none';
+    }
+  }
+
+  function enterEditMode(id: string, data: any) {
+    isEditMode = true;
+    editingId = id;
+    selectedNewFiles = [];
+    remainingExistingKeys = data.keys.split(',').map((k: string) => k.trim()).filter(Boolean);
+
+    if (formTitleText) formTitleText.textContent = '修改相片貼文';
+    if (btnText) btnText.textContent = '確認修改';
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    if (fileInput) {
+      fileInput.required = false;
+      fileInput.value = '';
+    }
+    if (fileRequiredStar) fileRequiredStar.style.display = 'none';
+    if (uploadPrompt) uploadPrompt.textContent = '上傳新照片以附加至貼文 (可選多張)';
+    if (fileNameDisplay) fileNameDisplay.textContent = '尚未選擇任何檔案';
+    
+    if (titleInput) titleInput.value = data.title;
+    if (descInput) descInput.value = data.description;
+    if (authorInput) authorInput.value = data.author;
+    if (authorUrlInput) authorUrlInput.value = data.authorUrl;
+    if (postUrlInput) postUrlInput.value = data.postUrl;
+
+    // Check tags checkboxes
+    document.querySelectorAll('input[name="existing_tags"]').forEach((cb) => {
+      (cb as HTMLInputElement).checked = false;
+    });
+
+    const tagsArray = data.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+    tagsArray.forEach((tag: string) => {
+      const checkbox = document.querySelector(`input[name="existing_tags"][value="${tag}"]`) as HTMLInputElement | null;
+      if (checkbox) checkbox.checked = true;
+    });
+
+    if (newTagsInput) newTagsInput.value = '';
+
+    // Render previews
+    renderExistingImagesPreview();
+    renderNewFilesPreview();
+
+    if (uploadMessage) {
+      uploadMessage.textContent = '';
+      uploadMessage.style.display = 'none';
+    }
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', resetForm);
+  }
+
+  // Hook up Edit buttons
+  document.querySelectorAll('.edit-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const title = btn.getAttribute('data-title') || '';
+      const description = btn.getAttribute('data-description') || '';
+      const author = btn.getAttribute('data-author') || '';
+      const authorUrl = btn.getAttribute('data-author-url') || '';
+      const postUrl = btn.getAttribute('data-post-url') || '';
+      const tags = btn.getAttribute('data-tags') || '';
+      const keys = btn.getAttribute('data-keys') || '';
+      
+      if (id) {
+        enterEditMode(id, { title, description, author, authorUrl, postUrl, tags, keys });
+        if (uploadForm) {
+          uploadForm.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    });
+  });
+
+  // Handle Form Upload / Modify
+  const uploadForm = document.getElementById('upload-form') as HTMLFormElement | null;
+  const submitBtn = document.querySelector('.btn-submit') as HTMLButtonElement | null;
+  const btnText = document.querySelector('.btn-text');
+  const loaderSpinner = document.querySelector('.loader-spinner') as HTMLElement | null;
+  const uploadMessage = document.getElementById('upload-message');
+
+  if (uploadForm && submitBtn && btnText && loaderSpinner && uploadMessage) {
+    uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Check if we have at least one image in total
+      const totalImages = (isEditMode ? remainingExistingKeys.length : 0) + selectedNewFiles.length;
+      if (totalImages === 0) {
+        uploadMessage.textContent = '錯誤：貼文必須至少包含一張照片。';
+        uploadMessage.className = 'form-message error';
+        uploadMessage.style.display = 'block';
+        return;
+      }
+      
+      // Update loading UI
+      submitBtn.disabled = true;
+      btnText.textContent = isEditMode ? '正在修改中...' : '正在上傳中...';
+      if (loaderSpinner) loaderSpinner.style.display = 'inline-block';
+      uploadMessage.textContent = '';
+      uploadMessage.className = 'form-message';
+      uploadMessage.style.display = 'none';
+
+      // 1. Prepare FormData
+      const formData = new FormData();
+      
+      // Add manual selected files
+      selectedNewFiles.forEach(file => {
+        formData.append('file', file);
+      });
+
+      // Add existing keys to keep if in edit mode
+      if (isEditMode) {
+        formData.append('existing_keys', remainingExistingKeys.join(','));
+      }
+
+      formData.append('title', titleInput?.value || '');
+      formData.append('description', descInput?.value || '');
+      formData.append('author', authorInput?.value || '');
+      formData.append('author_url', authorUrlInput?.value || '');
+      formData.append('post_url', postUrlInput?.value || '');
+
+      // Combine existing tags and new tags
+      const checkedTags: string[] = [];
+      document.querySelectorAll('input[name="existing_tags"]:checked').forEach((checkbox) => {
+        checkedTags.push((checkbox as HTMLInputElement).value);
+      });
+
+      const newTagsRaw = newTagsInput?.value || '';
+
+      const tagsCombined = [
+        ...checkedTags,
+        ...newTagsRaw.split(/[\s,]+/).map(t => t.trim().replace(/^#/, '')).filter(t => t.length > 0)
+      ].join(',');
+
+      formData.append('tags', tagsCombined);
+
+      try {
+        const url = isEditMode ? `/api/images/${editingId}` : '/api/images';
+        const method = isEditMode ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+          method: method,
+          body: formData
+        });
+
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          uploadMessage.textContent = isEditMode ? '貼文修改成功！正在重新整理頁面...' : '貼文上傳成功！正在重新整理頁面...';
+          uploadMessage.className = 'form-message success';
+          uploadMessage.style.display = 'block';
+          resetForm();
+          
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          uploadMessage.textContent = `${isEditMode ? '修改' : '上傳'}失敗：${data.error || '未知錯誤'}`;
+          uploadMessage.className = 'form-message error';
+          uploadMessage.style.display = 'block';
+          submitBtn.disabled = false;
+          btnText.textContent = isEditMode ? '確認修改' : '確認上傳';
+          if (loaderSpinner) loaderSpinner.style.display = 'none';
+        }
+      } catch (err) {
+        console.error(err);
+        uploadMessage.textContent = '網路或伺服器錯誤，請稍後再試。';
+        uploadMessage.className = 'form-message error';
+        uploadMessage.style.display = 'block';
+        submitBtn.disabled = false;
+        btnText.textContent = isEditMode ? '確認修改' : '確認上傳';
+        if (loaderSpinner) loaderSpinner.style.display = 'none';
+      }
+    });
+  }
+
+  // Handle Deletion
+  document.querySelectorAll('.delete-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const imgId = btn.getAttribute('data-id');
+      if (!imgId) return;
+
+      if (!confirm('你確定要刪除這張照片貼文嗎？此操作將會從資料庫與 Cloudflare R2 中永久刪除該貼文的所有照片！')) {
+        return;
+      }
+
+      (btn as HTMLButtonElement).disabled = true;
+      btn.textContent = '刪除中...';
+
+      try {
+        const response = await fetch(`/api/images/${imgId}`, {
+          method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          const row = document.querySelector(`.image-row[data-id="${imgId}"]`);
+          if (row) {
+            row.remove();
+          }
+          const remainingRows = document.querySelectorAll('.image-row');
+          if (remainingRows.length === 0) {
+            window.location.reload();
+          }
+        } else {
+          alert(`刪除失敗：${data.error || '未知錯誤'}`);
+          (btn as HTMLButtonElement).disabled = false;
+          btn.textContent = '刪除';
+        }
+      } catch (err) {
+        console.error(err);
+        alert('刪除失敗，伺服器發生錯誤。');
+        (btn as HTMLButtonElement).disabled = false;
+        btn.textContent = '刪除';
+      }
+    });
+  });
+
+  // =========== Crawl Accounts Management ===========
+  const crawlUsernameInput = document.getElementById('crawl-username') as HTMLInputElement | null;
+  const addCrawlBtn = document.getElementById('add-crawl-btn') as HTMLButtonElement | null;
+  const crawlMessage = document.getElementById('crawl-message') as HTMLElement | null;
+  const crawlAccountsList = document.getElementById('crawl-accounts-list');
+  const crawlEmptyText = document.getElementById('crawl-empty-text');
+
+  function showCrawlMessage(text: string, type: 'success' | 'error') {
+    if (!crawlMessage) return;
+    crawlMessage.textContent = text;
+    crawlMessage.className = `form-message ${type}`;
+    crawlMessage.style.display = 'block';
+    setTimeout(() => {
+      crawlMessage.style.display = 'none';
+    }, 3000);
+  }
+
+  if (addCrawlBtn && crawlUsernameInput) {
+    addCrawlBtn.addEventListener('click', async () => {
+      const username = crawlUsernameInput.value.trim().replace(/^@/, '');
+      if (!username) {
+        showCrawlMessage('請輸入帳號名稱', 'error');
+        return;
+      }
+
+      addCrawlBtn.disabled = true;
+      addCrawlBtn.textContent = '新增中...';
+
+      try {
+        const res = await fetch('/api/crawl-accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          showCrawlMessage(`已新增 @${username}`, 'success');
+          crawlUsernameInput.value = '';
+          
+          // Add to DOM
+          if (crawlEmptyText) crawlEmptyText.remove();
+          const item = document.createElement('div');
+          item.className = 'crawl-account-item';
+          item.setAttribute('data-username', username);
+          item.innerHTML = `
+            <div class="crawl-account-info">
+              <span class="crawl-account-name">@${username}</span>
+              <a href="https://x.com/${username}" target="_blank" rel="noopener noreferrer" class="crawl-account-link" title="前往 Twitter">↗</a>
+            </div>
+            <button class="btn btn-danger remove-crawl-btn" data-username="${username}" style="font-size: 0.8rem; padding: 0.25rem 0.5rem;">移除</button>
+          `;
+          crawlAccountsList?.appendChild(item);
+          
+          // Attach remove handler
+          item.querySelector('.remove-crawl-btn')?.addEventListener('click', handleRemoveCrawl);
+        } else {
+          showCrawlMessage(data.error || '新增失敗', 'error');
+        }
+      } catch (err) {
+        showCrawlMessage('網路錯誤，請稍後再試', 'error');
+      } finally {
+        addCrawlBtn.disabled = false;
+        addCrawlBtn.textContent = '新增帳號';
+      }
+    });
+  }
+
+  async function handleRemoveCrawl(this: HTMLElement) {
+    const username = this.getAttribute('data-username');
+    if (!username) return;
+    if (!confirm(`確定要移除 @${username} 嗎？`)) return;
+
+    (this as HTMLButtonElement).disabled = true;
+    this.textContent = '移除中...';
+
+    try {
+      const res = await fetch('/api/crawl-accounts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        const item = document.querySelector(`.crawl-account-item[data-username="${username}"]`);
+        if (item) item.remove();
+
+        const remaining = document.querySelectorAll('.crawl-account-item');
+        if (remaining.length === 0 && crawlAccountsList) {
+          const empty = document.createElement('p');
+          empty.className = 'empty-text';
+          empty.id = 'crawl-empty-text';
+          empty.textContent = '尚未新增任何爬取帳號。';
+          crawlAccountsList.appendChild(empty);
+        }
+        showCrawlMessage(`已移除 @${username}`, 'success');
+      } else {
+        showCrawlMessage(data.error || '移除失敗', 'error');
+        (this as HTMLButtonElement).disabled = false;
+        this.textContent = '移除';
+      }
+    } catch (err) {
+      showCrawlMessage('網路錯誤', 'error');
+      (this as HTMLButtonElement).disabled = false;
+      this.textContent = '移除';
+    }
+  }
+
+  // Attach remove handlers to existing buttons
+  document.querySelectorAll('.remove-crawl-btn').forEach(btn => {
+    btn.addEventListener('click', handleRemoveCrawl);
+  });
+</script>
+
+<style>
+  .admin-container {
+    padding: 2.5rem 0;
+  }
+
+  .admin-header {
+    margin-bottom: 2rem;
+  }
+
+  .admin-header h1 {
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .admin-header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+  }
+
+  .admin-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    align-items: start;
+  }
+
+  @media (min-width: 992px) {
+    .admin-grid {
+      grid-template-columns: 380px 1fr;
+    }
+  }
+
+  .admin-panel {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .admin-panel h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.75rem;
+  }
+
+  /* Form Styling */
+  .admin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .form-group label {
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  .required {
+    color: var(--heart-color);
+  }
+
+  .form-group input[type="text"],
+  .form-group input[type="url"],
+  .form-group textarea {
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color var(--transition-speed) ease;
+  }
+
+  .form-group input:focus,
+  .form-group textarea:focus {
+    border-color: var(--text-primary);
+  }
+
+  .form-help {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  /* Reusable tags select checkbox */
+  .existing-tags-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    max-height: 120px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    padding: 0.6rem;
+    border-radius: 6px;
+    background-color: var(--bg-secondary);
+  }
+
+  .tag-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+
+  .tag-checkbox-label input {
+    cursor: pointer;
+  }
+
+  .empty-text {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+
+  /* File upload dropzone styles */
+  .file-dropzone {
+    position: relative;
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    padding: 1.25rem;
+    text-align: center;
+    background-color: var(--bg-secondary);
+    cursor: pointer;
+    transition: border-color var(--transition-speed) ease;
+  }
+
+  .file-dropzone:hover {
+    border-color: var(--text-primary);
+  }
+
+  .file-dropzone input[type="file"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .dropzone-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  .upload-icon {
+    font-size: 1.3rem;
+  }
+
+  .upload-prompt {
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .file-name-display {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  .btn-submit {
+    width: 100%;
+    padding: 0.7rem;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .loader-spinner {
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--border-color);
+    border-top: 2px solid var(--text-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .form-message {
+    font-size: 0.85rem;
+    text-align: center;
+    border-radius: 4px;
+    padding: 0.4rem;
+    display: none;
+  }
+
+  .form-message.success {
+    display: block;
+    background-color: rgba(40, 167, 69, 0.1);
+    color: #28a745;
+  }
+
+  .form-message.error {
+    display: block;
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+  }
+
+  /* Table styling */
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .admin-table th {
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .admin-thumb {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+  }
+
+  .thumb-count-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    background-color: rgba(0, 0, 0, 0.75);
+    color: #ffffff;
+    font-size: 0.65rem;
+    padding: 0.05rem 0.2rem;
+    border-radius: 4px;
+    font-weight: bold;
+  }
+
+  .image-title {
+    font-weight: 600;
+  }
+
+  .image-author {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+
+  .image-desc-preview {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .image-date {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+  }
+
+  .table-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  .table-tag {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+  }
+
+  .btn-danger {
+    color: var(--heart-color);
+    border-color: var(--border-color);
+    font-size: 0.8rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .btn-danger:hover {
+    background-color: rgba(255, 62, 108, 0.1);
+    border-color: var(--heart-color);
+  }
+
+  .empty-table-state {
+    padding: 3rem 1rem;
+    text-align: center;
+    color: var(--text-secondary);
+  }
+
+  /* Crawl Accounts Panel */
+  .crawl-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+  }
+
+  .crawl-add-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .crawl-add-form input {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color var(--transition-speed) ease;
+  }
+
+  .crawl-add-form input:focus {
+    border-color: var(--text-primary);
+  }
+
+  .crawl-accounts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .crawl-account-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    transition: border-color var(--transition-speed) ease;
+  }
+
+  .crawl-account-item:hover {
+    border-color: var(--text-primary);
+  }
+
+  .crawl-account-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .crawl-account-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .crawl-account-link {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+  }
+
+  .crawl-account-link:hover {
+    color: var(--text-primary);
+  }
+
+  .crawl-last-time {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+  }
+</style>

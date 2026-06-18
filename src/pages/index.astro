@@ -1,0 +1,160 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import TagFilter from '../components/TagFilter.astro';
+import ImageCard from '../components/ImageCard.astro';
+
+if (!env || !env.DB) {
+  return new Response('D1 DB binding "DB" is not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
+}
+
+const activeTag = Astro.url.searchParams.get('tag');
+
+// 1. Fetch tags for TagFilter component
+const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
+const tagsList = tagsQuery.results.map((t: any) => t.name);
+
+// 2. Fetch images based on active tag filter
+let images = [];
+try {
+  if (activeTag) {
+    const query = `
+      SELECT i.*, group_concat(t2.name) as tags_list 
+      FROM images i
+      JOIN image_tags it ON i.id = it.image_id
+      JOIN tags t ON it.tag_id = t.id
+      LEFT JOIN image_tags it2 ON i.id = it2.image_id
+      LEFT JOIN tags t2 ON it2.tag_id = t2.id
+      WHERE t.name = ? AND i.published = 1
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `;
+    const { results } = await env.DB.prepare(query).bind(activeTag).all();
+    images = results || [];
+  } else {
+    const query = `
+      SELECT i.*, group_concat(t.name) as tags_list
+      FROM images i
+      LEFT JOIN image_tags it ON i.id = it.image_id
+      LEFT JOIN tags t ON it.tag_id = t.id
+      WHERE i.published = 1
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `;
+    const { results } = await env.DB.prepare(query).all();
+    images = results || [];
+  }
+} catch (err) {
+  console.error('Error fetching images:', err);
+}
+
+const formattedImages = images.map((img: any) => ({
+  ...img,
+  tags: img.tags_list ? img.tags_list.split(',') : []
+}));
+---
+
+<BaseLayout title={activeTag ? `分類 #${activeTag} - Twitter 照片牆` : "極簡 Twitter 照片牆"}>
+  <div style="margin-top: 1.5rem;"></div>
+
+  <TagFilter activeTag={activeTag} tags={tagsList} />
+
+  {formattedImages.length > 0 ? (
+    <div class="image-grid">
+      {formattedImages.map((image) => (
+        <ImageCard image={image} />
+      ))}
+    </div>
+  ) : (
+    <div class="empty-state">
+      <p class="empty-emoji">🍃</p>
+      <h3>這裡空空如也</h3>
+      <p>沒有找到符合該標籤的相片，請前往管理後台新增圖片。</p>
+      <a href="/admin" class="btn btn-primary" style="margin-top: 1rem;">前往管理頁</a>
+    </div>
+  )}
+</BaseLayout>
+
+<script>
+  // Restore liked state from localStorage on load
+  function restoreLikes() {
+    const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
+    likedImages.forEach((id: number) => {
+      const card = document.querySelector(`.image-card[data-id="${id}"]`);
+      if (card) {
+        const btn = card.querySelector('.like-button');
+        if (btn) btn.classList.add('liked');
+      }
+    });
+  }
+
+  // Setup click listeners for like buttons
+  function setupLikes() {
+    document.querySelectorAll('.image-card').forEach((card) => {
+      const imgId = card.getAttribute('data-id');
+      const likeBtn = card.querySelector('.like-button');
+      const likeCountSpan = card.querySelector('.like-count');
+
+      if (!likeBtn || !likeCountSpan || imgId === null) return;
+
+      likeBtn.addEventListener('click', async () => {
+        const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
+        const idNum = parseInt(imgId, 10);
+        
+        // Prevent double likes on client side
+        if (likedImages.includes(idNum)) {
+          return; // Already liked
+        }
+
+        try {
+          likeBtn.classList.add('liked');
+          const response = await fetch(`/api/likes/${imgId}`, {
+            method: 'POST'
+          });
+          const data = await response.json();
+          if (data.success) {
+            likeCountSpan.textContent = data.likes;
+            likedImages.push(idNum);
+            localStorage.setItem('liked-images', JSON.stringify(likedImages));
+          } else {
+            likeBtn.classList.remove('liked');
+          }
+        } catch (err) {
+          console.error('Failed to like image:', err);
+          likeBtn.classList.remove('liked');
+        }
+      });
+    });
+  }
+
+  // Initial setup
+  restoreLikes();
+  setupLikes();
+</script>
+
+<style>
+  .empty-state {
+    padding: 5rem 1rem;
+    text-align: center;
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+    margin-top: 2rem;
+  }
+
+  .empty-emoji {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .empty-state h3 {
+    font-size: 1.25rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .empty-state p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    max-width: 400px;
+    margin: 0 auto;
+  }
+</style>

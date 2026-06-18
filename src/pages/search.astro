@@ -1,0 +1,333 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ImageCard from '../components/ImageCard.astro';
+
+if (!env || !env.DB) {
+  return new Response('D1 DB binding not configured.', { status: 500 });
+}
+
+// 1. Get search parameters
+const q = Astro.url.searchParams.get('q') || '';
+const filterTag = Astro.url.searchParams.get('tag') || '';
+const filterAuthor = Astro.url.searchParams.get('author') || '';
+
+// 2. Fetch all tags for listing
+const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
+const allTags = tagsQuery.results.map((t: any) => t.name);
+
+// 3. Fetch all distinct authors for listing
+const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_url FROM images ORDER BY author ASC').all();
+const allAuthors = authorsQuery.results as { author: string; author_url: string }[];
+
+// 4. Perform search query if any filter is active
+let images = [];
+let searchHeading = '';
+
+try {
+  if (q) {
+    searchHeading = `🔍 搜尋關鍵字："${q}"`;
+    const sql = `
+      SELECT i.*, group_concat(t2.name) as tags_list 
+      FROM images i
+      LEFT JOIN image_tags it ON i.id = it.image_id
+      LEFT JOIN tags t ON it.tag_id = t.id
+      LEFT JOIN image_tags it2 ON i.id = it2.image_id
+      LEFT JOIN tags t2 ON it2.tag_id = t2.id
+      WHERE i.title LIKE ? 
+         OR i.description LIKE ? 
+         OR i.author LIKE ? 
+         OR t.name LIKE ?
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `;
+    const searchVal = `%${q}%`;
+    const { results } = await env.DB.prepare(sql)
+      .bind(searchVal, searchVal, searchVal, searchVal)
+      .all();
+    images = results || [];
+  } else if (filterTag) {
+    searchHeading = `🏷️ 標籤篩選：#${filterTag}`;
+    const sql = `
+      SELECT i.*, group_concat(t2.name) as tags_list 
+      FROM images i
+      JOIN image_tags it ON i.id = it.image_id
+      JOIN tags t ON it.tag_id = t.id
+      LEFT JOIN image_tags it2 ON i.id = it2.image_id
+      LEFT JOIN tags t2 ON it2.tag_id = t2.id
+      WHERE t.name = ?
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `;
+    const { results } = await env.DB.prepare(sql).bind(filterTag).all();
+    images = results || [];
+  } else if (filterAuthor) {
+    searchHeading = `👤 博主篩選：@${filterAuthor}`;
+    const sql = `
+      SELECT i.*, group_concat(t.name) as tags_list
+      FROM images i
+      LEFT JOIN image_tags it ON i.id = it.image_id
+      LEFT JOIN tags t ON it.tag_id = t.id
+      WHERE i.author = ?
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `;
+    const { results } = await env.DB.prepare(sql).bind(filterAuthor).all();
+    images = results || [];
+  }
+} catch (err) {
+  console.error('Search query failed:', err);
+}
+
+const formattedImages = images.map((img: any) => ({
+  ...img,
+  tags: img.tags_list ? img.tags_list.split(',') : []
+}));
+---
+
+<BaseLayout title="搜尋與篩選 - Twitter 照片牆">
+  <div class="search-page-container">
+    <div class="search-bar-section">
+      <form action="/search" method="GET" class="search-form">
+        <input 
+          type="text" 
+          name="q" 
+          value={q} 
+          placeholder="搜尋相片標題、博主、標籤或感想..." 
+          class="search-input"
+          required
+        />
+        <button type="submit" class="btn btn-primary search-submit-btn">搜尋</button>
+      </form>
+    </div>
+
+    <!-- Tags and Authors Directory -->
+    <div class="directory-section">
+      <div class="directory-column">
+        <h3>👤 依博主瀏覽</h3>
+        <div class="author-links">
+          {allAuthors.length > 0 ? (
+            allAuthors.map((item) => (
+              <a 
+                href={`/search?author=${encodeURIComponent(item.author)}`} 
+                class={`author-badge ${filterAuthor === item.author ? 'active' : ''}`}
+              >
+                @{item.author}
+              </a>
+            ))
+          ) : (
+            <p class="empty-text">尚無博主資料</p>
+          )}
+        </div>
+      </div>
+
+      <div class="directory-column">
+        <h3>🏷️ 依標籤瀏覽</h3>
+        <div class="tag-badges">
+          {allTags.length > 0 ? (
+            allTags.map((tag) => (
+              <a 
+                href={`/search?tag=${encodeURIComponent(tag)}`} 
+                class={`tag-badge ${filterTag === tag ? 'active' : ''}`}
+              >
+                #{tag}
+              </a>
+            ))
+          ) : (
+            <p class="empty-text">尚無標籤資料</p>
+          )}
+        </div>
+      </div>
+    </div>
+
+    <!-- Search Results Section -->
+    {(q || filterTag || filterAuthor) && (
+      <div class="results-section">
+        <h2 class="results-heading">{searchHeading} ({formattedImages.length})</h2>
+        {formattedImages.length > 0 ? (
+          <div class="image-grid">
+            {formattedImages.map((image) => (
+              <ImageCard image={image} />
+            ))}
+          </div>
+        ) : (
+          <div class="no-results">
+            <p class="no-results-emoji">🔍</p>
+            <h3>找不到相關照片</h3>
+            <p>請嘗試使用其他關鍵字或點擊上方標籤進行篩選。</p>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+</BaseLayout>
+
+<script>
+  // Setup click listeners for like buttons on search page
+  function setupLikes() {
+    document.querySelectorAll('.image-card').forEach((card) => {
+      const imgId = card.getAttribute('data-id');
+      const likeBtn = card.querySelector('.like-button');
+      const likeCountSpan = card.querySelector('.like-count');
+
+      if (!likeBtn || !likeCountSpan || !imgId) return;
+
+      // Restore likes
+      const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
+      if (likedImages.includes(parseInt(imgId, 10))) {
+        likeBtn.classList.add('liked');
+      }
+
+      likeBtn.addEventListener('click', async () => {
+        const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
+        const idNum = parseInt(imgId, 10);
+        
+        if (likedImages.includes(idNum)) {
+          return; // Already liked
+        }
+
+        try {
+          likeBtn.classList.add('liked');
+          const response = await fetch(`/api/likes/${imgId}`, {
+            method: 'POST'
+          });
+          const data = await response.json();
+          if (data.success) {
+            likeCountSpan.textContent = data.likes;
+            likedImages.push(idNum);
+            localStorage.setItem('liked-images', JSON.stringify(likedImages));
+          } else {
+            likeBtn.classList.remove('liked');
+          }
+        } catch (err) {
+          console.error('Failed to like image:', err);
+          likeBtn.classList.remove('liked');
+        }
+      });
+    });
+  }
+
+  setupLikes();
+  document.addEventListener('astro:after-swap', setupLikes);
+</script>
+
+<style>
+  .search-page-container {
+    padding: 2.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  .search-bar-section {
+    max-width: 600px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .search-form {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .search-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color var(--transition-speed) ease;
+  }
+
+  .search-input:focus {
+    border-color: var(--text-primary);
+  }
+
+  .search-submit-btn {
+    padding: 0.75rem 1.5rem;
+  }
+
+  .directory-section {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    padding: 2rem 0;
+  }
+
+  @media (min-width: 768px) {
+    .directory-section {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .directory-column h3 {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+  }
+
+  .author-links, .tag-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .author-badge {
+    display: inline-block;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    transition: all var(--transition-speed) ease;
+  }
+
+  .author-badge:hover, .author-badge.active {
+    background-color: var(--text-primary);
+    color: var(--bg-primary);
+    border-color: var(--text-primary);
+  }
+
+  .empty-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  .results-section {
+    padding-top: 1rem;
+  }
+
+  .results-heading {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .no-results {
+    padding: 4rem 1rem;
+    text-align: center;
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+  }
+
+  .no-results-emoji {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .no-results h3 {
+    font-size: 1.15rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .no-results p {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+  }
+</style>
