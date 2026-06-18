@@ -11,7 +11,8 @@
     "preview": "astro preview",
     "astro": "astro",
     "generate-types": "wrangler types",
-    "fix-links": "node scripts/fix-db-links.mjs"
+    "fix-links": "node scripts/fix-db-links.mjs",
+    "dedup-media": "node scripts/dedup-media.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.7.0",
