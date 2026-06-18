@@ -57,20 +57,38 @@ async function main() {
     return;
   }
 
-  // 2. Apply fixes
-  console.log("\nApplying fixes...");
-  const fixRes = await fetch(`${SITE_URL}/api/dedup-scan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ api_key: CRAWL_API_KEY, fixes: duplicates }),
-  });
-  if (!fixRes.ok) {
-    const text = await fixRes.text();
-    throw new Error(`Fix failed: HTTP ${fixRes.status} - ${text}`);
+  // 2. Apply fixes in batches to stay under Cloudflare Workers' 1000
+  //    subrequest limit (each fix ~6 subrequests: D1 select + R2 head +
+  //    R2 delete + D1 update). Batches of 50 = ~300 subrequests, safe margin.
+  const BATCH_SIZE = 50;
+  let totalDeleted = 0;
+  let totalFreedBytes = 0;
+  const allFixedIds = [];
+
+  console.log(`\nApplying fixes in batches of ${BATCH_SIZE}...`);
+  for (let i = 0; i < duplicates.length; i += BATCH_SIZE) {
+    const batch = duplicates.slice(i, i + BATCH_SIZE);
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(duplicates.length / BATCH_SIZE);
+    console.log(`  Batch ${batchNum}/${totalBatches} (${batch.length} fixes)...`);
+
+    const fixRes = await fetch(`${SITE_URL}/api/dedup-scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: CRAWL_API_KEY, fixes: batch }),
+    });
+    if (!fixRes.ok) {
+      const text = await fixRes.text();
+      throw new Error(`Fix failed on batch ${batchNum}: HTTP ${fixRes.status} - ${text}`);
+    }
+    const result = await fixRes.json();
+    totalDeleted += result.count;
+    totalFreedBytes += result.freed_bytes;
+    if (result.fixed_ids) allFixedIds.push(...result.fixed_ids);
   }
-  const result = await fixRes.json();
-  console.log(`\nDone! Deleted ${result.count} duplicate R2 object(s) from ${result.fixed_ids.length} record(s).`);
-  console.log(`Freed ${(result.freed_bytes / 1024 / 1024).toFixed(2)} MB of R2 storage.`);
+
+  console.log(`\nDone! Deleted ${totalDeleted} duplicate R2 object(s) from ${allFixedIds.length} record(s).`);
+  console.log(`Freed ${(totalFreedBytes / 1024 / 1024).toFixed(2)} MB of R2 storage.`);
 }
 
 main().catch((err) => {
