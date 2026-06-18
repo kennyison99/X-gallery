@@ -59,12 +59,27 @@ const formattedImages = images.map((img: any) => ({
 
   <TagFilter activeTag={activeTag} tags={tagsList} />
 
-  {formattedImages.length > 0 ? (
-    <div class="image-grid">
-      {formattedImages.map((image) => (
-        <ImageCard image={image} />
-      ))}
+  {formattedImages.length > 0 && (
+    <div class="media-filter-container">
+      <button type="button" class="media-filter-btn active" data-media-type="all">全部</button>
+      <button type="button" class="media-filter-btn" data-media-type="photo">📷 僅相片</button>
+      <button type="button" class="media-filter-btn" data-media-type="video">🎥 僅影片</button>
     </div>
+  )}
+
+  {formattedImages.length > 0 ? (
+    <>
+      <div class="image-grid">
+        {formattedImages.map((image) => (
+          <ImageCard image={image} />
+        ))}
+      </div>
+      <div id="empty-media-state" class="empty-state" style="display: none; margin-top: 2rem;">
+        <p class="empty-emoji">🍃</p>
+        <h3>這裡空空如也</h3>
+        <p>沒有找到符合該媒體類型的貼文。</p>
+      </div>
+    </>
   ) : (
     <div class="empty-state">
       <p class="empty-emoji">🍃</p>
@@ -146,12 +161,88 @@ const formattedImages = images.map((img: any) => ({
     });
   }
 
+  // Setup media filtering (All / Photo / Video)
+  function setupMediaFilter() {
+    const container = document.querySelector('.media-filter-container');
+    if (!container) return;
+
+    const buttons = container.querySelectorAll('.media-filter-btn');
+    const cards = document.querySelectorAll('.image-card') as NodeListOf<HTMLElement>;
+    const emptyState = document.getElementById('empty-media-state');
+
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // Remove active class from all buttons
+        buttons.forEach((b) => b.classList.remove('active'));
+        // Add active class to clicked button
+        btn.classList.add('active');
+
+        const filterType = btn.getAttribute('data-media-type');
+        let visibleCount = 0;
+
+        cards.forEach((card) => {
+          const hasPhoto = card.getAttribute('data-has-photo') === 'true';
+          const hasVideo = card.getAttribute('data-has-video') === 'true';
+
+          let matches = false;
+          if (filterType === 'all') {
+            matches = true;
+          } else if (filterType === 'photo') {
+            matches = hasPhoto;
+          } else if (filterType === 'video') {
+            matches = hasVideo;
+          }
+
+          if (matches) {
+            card.style.display = '';
+            visibleCount++;
+          } else {
+            card.style.display = 'none';
+          }
+        });
+
+        // Toggle empty media state
+        if (emptyState) {
+          emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+        }
+      });
+    });
+  }
+
   // Initial setup
   restoreLikes();
   setupLikes();
+  setupMediaFilter();
 </script>
 
 <style>
+  .media-filter-container {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .media-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.85rem;
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all var(--transition-speed) ease;
+    font-family: inherit;
+  }
+  .media-filter-btn:hover, .media-filter-btn.active {
+    background-color: var(--text-primary);
+    color: var(--bg-primary);
+    border-color: var(--text-primary);
+  }
+
   .empty-state {
     padding: 5rem 1rem;
     text-align: center;

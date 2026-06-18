@@ -53,6 +53,9 @@ try {
   console.error('Error fetching crawl accounts:', err);
 }
 
+const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
+const isVideoKey = (key: string) => VIDEO_EXTS.has((key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
+
 const formattedImages = images.map((img: any) => {
   // Calculate remaining time for pending images (3 days from created_at)
   let remainingText = '';
@@ -77,11 +80,18 @@ const formattedImages = images.map((img: any) => {
     }
   }
 
+  // Calculate media types
+  const keys = img.r2_keys ? img.r2_keys.split(',').map((k: string) => k.trim()).filter(Boolean) : [];
+  const hasPhoto = keys.some((k: string) => !isVideoKey(k));
+  const hasVideo = keys.some((k: string) => isVideoKey(k));
+
   return {
     ...img,
     tags: img.tags_list ? img.tags_list.split(',') : [],
     remainingText,
-    isCritical
+    isCritical,
+    hasPhoto,
+    hasVideo
   };
 });
 ---
@@ -223,6 +233,11 @@ const formattedImages = images.map((img: any) => {
           <select id="tag-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
             <option value="">所有標籤</option>
           </select>
+          <select id="media-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="">所有類型</option>
+            <option value="photo">僅相片</option>
+            <option value="video">僅影片</option>
+          </select>
         </div>
 
         <!-- Bulk Actions Bar -->
@@ -257,7 +272,7 @@ const formattedImages = images.map((img: any) => {
                   const firstIsVideo = /\.(mp4|webm|mov|m4v)$/i.test(firstKey);
 
                   return (
-                    <tr class="image-row" data-id={image.id} data-published={image.published}>
+                    <tr class="image-row" data-id={image.id} data-published={image.published} data-has-photo={image.hasPhoto ? "true" : "false"} data-has-video={image.hasVideo ? "true" : "false"}>
                       <td style="text-align: center; vertical-align: middle;">
                         <input type="checkbox" class="image-select-checkbox" data-id={image.id} style="cursor: pointer;" />
                       </td>
@@ -1113,6 +1128,7 @@ const formattedImages = images.map((img: any) => {
   const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
   const authorFilter = document.getElementById('author-filter') as HTMLSelectElement | null;
   const tagFilter = document.getElementById('tag-filter') as HTMLSelectElement | null;
+  const mediaFilter = document.getElementById('media-filter') as HTMLSelectElement | null;
   const paginationInfo = document.getElementById('pagination-info');
   const prevPageBtn = document.getElementById('prev-page-btn') as HTMLButtonElement | null;
   const nextPageBtn = document.getElementById('next-page-btn') as HTMLButtonElement | null;
@@ -1130,12 +1146,14 @@ const formattedImages = images.map((img: any) => {
     const author = (el.querySelector('.image-author')?.textContent || '').toLowerCase().replace(/^@/, '').split('⏰')[0].trim();
     const description = (el.querySelector('.image-desc-preview')?.textContent || '').toLowerCase();
     const published = el.getAttribute('data-published') === '1';
+    const hasPhoto = el.getAttribute('data-has-photo') === 'true';
+    const hasVideo = el.getAttribute('data-has-video') === 'true';
     const tags: string[] = [];
     el.querySelectorAll('.table-tag').forEach(tagEl => {
       tags.push((tagEl.textContent || '').replace(/^#/, '').trim());
     });
 
-    return { el, title, author, description, published, tags };
+    return { el, title, author, description, published, hasPhoto, hasVideo, tags };
   });
 
   // Populate filter selectors
@@ -1169,6 +1187,7 @@ const formattedImages = images.map((img: any) => {
     const searchVal = (searchInput?.value || '').trim().toLowerCase();
     const authorVal = (authorFilter?.value || '').toLowerCase();
     const tagVal = (tagFilter?.value || '');
+    const mediaVal = (mediaFilter?.value || '');
 
     filteredRows = [];
 
@@ -1188,7 +1207,15 @@ const formattedImages = images.map((img: any) => {
       // Check tag
       const matchesTag = !tagVal || row.tags.includes(tagVal);
 
-      if (matchesSearch && matchesAuthor && matchesTag && matchesTab) {
+      // Check media type
+      let matchesMedia = true;
+      if (mediaVal === 'photo') {
+        matchesMedia = row.hasPhoto;
+      } else if (mediaVal === 'video') {
+        matchesMedia = row.hasVideo;
+      }
+
+      if (matchesSearch && matchesAuthor && matchesTag && matchesTab && matchesMedia) {
         filteredRows.push(row.el);
       } else {
         row.el.style.display = 'none';
@@ -1242,6 +1269,7 @@ const formattedImages = images.map((img: any) => {
   searchInput?.addEventListener('input', applyFilters);
   authorFilter?.addEventListener('change', applyFilters);
   tagFilter?.addEventListener('change', applyFilters);
+  mediaFilter?.addEventListener('change', applyFilters);
 
   prevPageBtn?.addEventListener('click', () => {
     if (currentPage > 1) {

@@ -32,6 +32,9 @@ const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 const isVideoKey = (key: string) => VIDEO_EXTS.has((key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
 const firstIsVideo = isVideoKey(firstKey);
 
+const hasPhoto = keys.some(k => !isVideoKey(k));
+const hasVideo = keys.some(k => isVideoKey(k));
+
 // Format date for display
 function formatDate(dateStr?: string): string {
   if (!dateStr) return '';
@@ -46,7 +49,7 @@ const displayDate = image.updated_at
   : (image.created_at ? `${formatDate(image.created_at)}` : '');
 ---
 
-<div class="image-card" data-id={image.id}>
+<div class="image-card" data-id={image.id} data-has-photo={hasPhoto ? "true" : "false"} data-has-video={hasVideo ? "true" : "false"}>
   <!-- Image gallery group wrapper for PhotoSwipe -->
   <div class="card-media image-gallery-group">
     {totalImages > 1 && (
