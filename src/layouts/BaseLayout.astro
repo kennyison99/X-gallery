@@ -1,5 +1,4 @@
 ---
-import { execSync } from 'node:child_process';
 import Header from '../components/Header.astro';
 import '../styles/global.css';
 import 'photoswipe/style.css';
@@ -15,21 +14,7 @@ const {
   description = "展示精選 Twitter 博主的相簿，極簡設計，支援標籤分類與喜愛功能。" 
 } = Astro.props;
 
-let commitHash = 'unknown';
-try {
-  commitHash = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-} catch (e) {
-  // Fallback
-}
-
-const buildDate = new Date().toLocaleDateString('zh-TW', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  timeZone: 'Asia/Hong_Kong'
-}).replace(/\//g, '.');
-
-const versionString = `v${buildDate}-${commitHash}`;
+const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
 ---
 
 <!DOCTYPE html>
