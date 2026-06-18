@@ -75,7 +75,6 @@ const displayDate = image.updated_at
             data-index={idx}
             data-video={isVid ? '1' : null} 
             title={image.title || 'Twitter media'}
-            style={idx === 0 ? '' : 'display: none;'}
           >
             {isVid ? (
               <div class="video-container">
@@ -385,6 +384,23 @@ const displayDate = image.updated_at
   .slider-slide {
     width: 100%;
     display: block;
+    transition: opacity 0.3s ease;
+  }
+
+  .slider-slide:not(.active) {
+    position: absolute;
+    top: 0;
+    left: 0;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .slider-slide.active {
+    position: relative;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 2;
   }
 
   .slider-btn {
@@ -403,7 +419,7 @@ const displayDate = image.updated_at
     justify-content: center;
     font-size: 1.5rem;
     cursor: pointer;
-    z-index: 5;
+    z-index: 10;
     opacity: 0;
     transition: opacity var(--transition-speed) ease, background-color var(--transition-speed) ease;
     user-select: none;
@@ -435,7 +451,7 @@ const displayDate = image.updated_at
     transform: translateX(-50%);
     display: flex;
     gap: 6px;
-    z-index: 5;
+    z-index: 10;
     background: rgba(0, 0, 0, 0.25);
     padding: 4px 8px;
     border-radius: 9999px;

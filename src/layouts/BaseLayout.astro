@@ -56,12 +56,6 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       </div>
     </footer>
 
-    <!-- Video lightbox modal (separate from PhotoSwipe, which is image-only) -->
-    <div id="video-lightbox" class="video-lightbox" hidden>
-      <button class="video-lightbox-close" aria-label="關閉">✕</button>
-      <video id="video-lightbox-player" class="video-lightbox-player" controls autoplay playsinline></video>
-    </div>
-
     <!-- PhotoSwipe 5 script bundled locally by Vite -->
     <script>
       import PhotoSwipeLightbox from 'photoswipe/lightbox';
@@ -81,24 +75,33 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
           img.src = href;
         });
 
-        // Initialize PhotoSwipe Lightbox (image links only; video links are
-        // handled by the custom video lightbox below).
+        // Initialize PhotoSwipe Lightbox
         const lightbox = new PhotoSwipeLightbox({
           gallery: '.image-gallery-group',
-          children: 'a.gallery-link:not([data-video="1"])',
+          children: 'a.gallery-link', // Include all links, even videos!
           pswpModule: PhotoSwipe,
-          // Fallback dimensions if images haven't preloaded yet
-          errorMsg: 'The image cannot be loaded',
+          errorMsg: '無法載入內容',
         });
 
-        // If dimensions aren't preloaded yet, load them on the fly
+        // Add filter to handle video slides
         lightbox.addFilter('itemData', (itemData: any) => {
-          if (!itemData.w || !itemData.h) {
-            // Use sensible defaults; PhotoSwipe will resize once real dims load
-            itemData.w = itemData.w || 1600;
-            itemData.h = itemData.h || 1200;
+          const element = itemData.element;
+          if (element && element.getAttribute('data-video') === '1') {
+            itemData.html = `
+              <div class="pswp__video-wrapper" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                <video 
+                  src="${itemData.src}" 
+                  controls 
+                  playsinline 
+                  autoplay
+                  style="max-width: 100%; max-height: 100%; object-fit: contain; background: #000;"
+                ></video>
+              </div>
+            `;
+          } else if (!itemData.w || !itemData.h) {
+            itemData.w = 1600;
+            itemData.h = 1200;
 
-            // Async-load real dimensions and update the slide
             const img = new Image();
             img.onload = () => {
               itemData.w = img.naturalWidth;
@@ -110,39 +113,33 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
           return itemData;
         });
 
-        lightbox.init();
-      }
+        // Pause other videos when changing slides
+        lightbox.on('afterChange', () => {
+          const pswp = lightbox.pswp;
+          if (!pswp) return;
+          
+          const container = pswp.container;
+          if (!container) return;
 
-      // ---- Custom video lightbox (PhotoSwipe is image-only) ----
-      function initVideoLightbox() {
-        const lb = document.getElementById('video-lightbox');
-        const player = document.getElementById('video-lightbox-player') as HTMLVideoElement | null;
-        const closeBtn = document.querySelector('.video-lightbox-close');
-        if (!lb || !player) return;
-
-        function close() {
-          player.pause();
-          player.removeAttribute('src');
-          player.load();
-          lb.hidden = true;
-        }
-        function open(src: string) {
-          player.src = src;
-          lb.hidden = false;
-          player.play().catch(() => { /* autoplay may be blocked; controls still work */ });
-        }
-
-        closeBtn?.addEventListener('click', close);
-        lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !lb.hidden) close(); });
-
-        document.querySelectorAll('a.gallery-link[data-video="1"]').forEach((link) => {
-          link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const href = link.getAttribute('href');
-            if (href) open(href);
+          container.querySelectorAll('video').forEach((video) => {
+            if (pswp.currSlide && pswp.currSlide.container && pswp.currSlide.container.contains(video)) {
+              // Active slide video
+              video.play().catch(() => {});
+            } else {
+              // Slide away - pause
+              video.pause();
+            }
           });
         });
+
+        // Pause all videos when closed
+        lightbox.on('close', () => {
+          document.querySelectorAll('.pswp video').forEach((video: any) => {
+            video.pause();
+          });
+        });
+
+        lightbox.init();
       }
 
       function initSliders() {
@@ -205,15 +202,15 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       }
 
       // Run on initial load
+      // Run on initial load
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initPhotoSwipe(); initVideoLightbox(); initSliders(); });
+        document.addEventListener('DOMContentLoaded', () => { initPhotoSwipe(); initSliders(); });
       } else {
         initPhotoSwipe();
-        initVideoLightbox();
         initSliders();
       }
       // Support Astro page transitions
-      document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initVideoLightbox(); initSliders(); });
+      document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initSliders(); });
     </script>
   </body>
 </html>
@@ -238,38 +235,19 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
     color: var(--text-secondary);
     background-color: var(--bg-secondary);
   }
-  .video-lightbox {
-    position: fixed;
-    inset: 0;
-    z-index: 2000;
-    background: rgba(0, 0, 0, 0.92);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-  }
-  .video-lightbox[hidden] { display: none; }
-  .video-lightbox-player {
-    max-width: 90vw;
-    max-height: 85vh;
-    border-radius: 8px;
-    background: #000;
-  }
-  .video-lightbox-close {
-    position: absolute;
-    top: 1rem;
-    right: 1.2rem;
-    background: rgba(255, 255, 255, 0.12);
-    border: none;
-    color: #fff;
-    font-size: 1.4rem;
-    width: 2.4rem;
-    height: 2.4rem;
-    border-radius: 50%;
-    cursor: pointer;
+
+  /* PhotoSwipe video container styles */
+  .pswp__video-wrapper {
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .video-lightbox-close:hover { background: rgba(255, 255, 255, 0.22); }
+  .pswp__video-wrapper video {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    outline: none;
+  }
 </style>

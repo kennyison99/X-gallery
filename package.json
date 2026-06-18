@@ -10,7 +10,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "generate-types": "wrangler types"
+    "generate-types": "wrangler types",
+    "fix-links": "node scripts/fix-db-links.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.7.0",
