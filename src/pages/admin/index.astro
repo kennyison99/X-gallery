@@ -178,6 +178,10 @@ const formattedImages = images.map((img: any) => ({
             刪除所選
           </button>
         </div>
+        <div id="bulk-delete-progress" class="operation-progress" hidden>
+          <progress id="bulk-delete-progress-bar" value="0" max="1"></progress>
+          <span id="bulk-delete-progress-text">準備刪除...</span>
+        </div>
 
         <div class="table-wrapper">
           {formattedImages.length > 0 ? (
@@ -269,6 +273,16 @@ const formattedImages = images.map((img: any) => ({
         </div>
       </section>
 
+      <section class="admin-panel auto-tag-panel" style="grid-column: 1 / -1;">
+        <h2>Auto-tag 管理</h2>
+        <p class="crawl-desc">重新掃描所有現有圖片，只新增缺少的自動標籤，不會移除人工標籤。</p>
+        <button type="button" id="auto-tag-btn" class="btn btn-primary">重新執行 Auto-tag</button>
+        <div id="auto-tag-progress" class="operation-progress" hidden>
+          <progress id="auto-tag-progress-bar" value="0" max="1"></progress>
+          <span id="auto-tag-progress-text">準備掃描...</span>
+        </div>
+      </section>
+
       <!-- Crawl Accounts Panel -->
       <section class="admin-panel crawl-panel" style="grid-column: 1 / -1;">
         <h2>自動爬取帳號管理</h2>
@@ -314,11 +328,36 @@ const formattedImages = images.map((img: any) => ({
 </BaseLayout>
 
 <script>
+  import { runSequentialBatches } from '../../lib/batches.ts';
+
   // Bulk action UI bindings
   const selectAllCheckbox = document.getElementById('select-all-checkbox') as HTMLInputElement | null;
   const bulkActionsBar = document.getElementById('bulk-actions-bar');
   const selectedCountDisplay = document.getElementById('selected-count-display');
   const bulkDeleteBtn = document.getElementById('bulk-delete-btn') as HTMLButtonElement | null;
+  const bulkDeleteProgress = document.getElementById('bulk-delete-progress');
+  const bulkDeleteProgressBar = document.getElementById('bulk-delete-progress-bar') as HTMLProgressElement | null;
+  const bulkDeleteProgressText = document.getElementById('bulk-delete-progress-text');
+  const autoTagBtn = document.getElementById('auto-tag-btn') as HTMLButtonElement | null;
+  const autoTagProgress = document.getElementById('auto-tag-progress');
+  const autoTagProgressBar = document.getElementById('auto-tag-progress-bar') as HTMLProgressElement | null;
+  const autoTagProgressText = document.getElementById('auto-tag-progress-text');
+
+  function updateOperationProgress(
+    container: HTMLElement | null,
+    progress: HTMLProgressElement | null,
+    text: HTMLElement | null,
+    current: number,
+    total: number,
+    message: string
+  ) {
+    if (container) container.hidden = false;
+    if (progress) {
+      progress.max = Math.max(total, 1);
+      progress.value = current;
+    }
+    if (text) text.textContent = message;
+  }
 
   function updateBulkActionsState() {
     const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
@@ -1100,6 +1139,70 @@ const formattedImages = images.map((img: any) => ({
     updateBulkActionsState();
   });
 
+  autoTagBtn?.addEventListener('click', async () => {
+    const confirmed = confirm('確定要重新掃描所有圖片嗎？\n只會新增缺少的 Auto-tags，不會移除人工標籤。');
+    if (!confirmed) return;
+
+    autoTagBtn.disabled = true;
+    let cursor = 0;
+    let scanned = 0;
+    let added = 0;
+    let total = 0;
+
+    updateOperationProgress(
+      autoTagProgress,
+      autoTagProgressBar,
+      autoTagProgressText,
+      0,
+      1,
+      '準備掃描...'
+    );
+
+    try {
+      while (true) {
+        const response = await fetch('/admin/api/auto-tag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cursor, limit: 50 })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Auto-tag 執行失敗');
+
+        scanned += Number(data.scanned || 0);
+        added += Number(data.added || 0);
+        total = Number(data.total || total);
+        updateOperationProgress(
+          autoTagProgress,
+          autoTagProgressBar,
+          autoTagProgressText,
+          scanned,
+          total,
+          `已掃描 ${scanned} / ${total}，已新增 ${added} 個標籤關聯`
+        );
+
+        if (data.done) break;
+        const nextCursor = Number(data.nextCursor);
+        if (!Number.isFinite(nextCursor) || nextCursor <= cursor) {
+          throw new Error('Auto-tag cursor 沒有前進');
+        }
+        cursor = nextCursor;
+      }
+
+      if (autoTagProgressText) {
+        autoTagProgressText.textContent = `完成：已掃描 ${scanned} 張，新增 ${added} 個標籤關聯`;
+      }
+      alert(`Auto-tag 完成！\n已掃描 ${scanned} 張圖片，新增 ${added} 個標籤關聯。`);
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Error running auto-tag backfill:', err);
+      if (autoTagProgressText) {
+        autoTagProgressText.textContent = `失敗：${err.message}`;
+      }
+      alert(`Auto-tag 執行失敗：${err.message}`);
+      autoTagBtn.disabled = false;
+    }
+  });
+
   // Bulk delete action handler
   bulkDeleteBtn?.addEventListener('click', async () => {
     const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
@@ -1112,28 +1215,49 @@ const formattedImages = images.map((img: any) => ({
 
     bulkDeleteBtn.disabled = true;
     bulkDeleteBtn.textContent = '刪除中...';
+    let deletedCount = 0;
+    updateOperationProgress(
+      bulkDeleteProgress,
+      bulkDeleteProgressBar,
+      bulkDeleteProgressText,
+      0,
+      ids.length,
+      `已刪除 0 / ${ids.length}`
+    );
 
     try {
-      const response = await fetch('/api/images/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids })
+      deletedCount = await runSequentialBatches(ids, 50, async (batch) => {
+        const response = await fetch('/api/images/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: batch })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || '刪除失敗');
+        }
+        return Number(data.count || batch.length);
+      }, (completed) => {
+        deletedCount = completed;
+        updateOperationProgress(
+          bulkDeleteProgress,
+          bulkDeleteProgressBar,
+          bulkDeleteProgressText,
+          deletedCount,
+          ids.length,
+          `已刪除 ${deletedCount} / ${ids.length}`
+        );
       });
-      const data = await response.json();
 
-      if (response.ok && data.success) {
-        alert(`成功刪除 ${data.count} 筆照片！`);
-        window.location.reload();
-      } else {
-        alert(data.error || '刪除失敗');
-        bulkDeleteBtn.disabled = false;
-        bulkDeleteBtn.textContent = '刪除所選';
-      }
-    } catch (err) {
+      alert(`成功刪除 ${deletedCount} 筆照片！`);
+      window.location.reload();
+    } catch (err: any) {
       console.error('Error in bulk delete:', err);
-      alert('發生網路錯誤，請重試');
-      bulkDeleteBtn.disabled = false;
-      bulkDeleteBtn.textContent = '刪除所選';
+      if (bulkDeleteProgressText) {
+        bulkDeleteProgressText.textContent = `失敗：已刪除 ${deletedCount} / ${ids.length}。${err.message}`;
+      }
+      alert(`批次刪除中斷。\n已刪除 ${deletedCount} / ${ids.length} 筆。\n${err.message}`);
+      window.location.reload();
     }
   });
 
@@ -1160,9 +1284,27 @@ const formattedImages = images.map((img: any) => ({
     font-size: 0.95rem;
   }
 
+  .operation-progress {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+  }
+
+  .operation-progress[hidden] {
+    display: none;
+  }
+
+  .operation-progress progress {
+    width: 100%;
+    height: 0.75rem;
+    accent-color: var(--text-primary);
+  }
+
   .admin-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
     align-items: start;
   }
@@ -1178,6 +1320,7 @@ const formattedImages = images.map((img: any) => ({
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 1.5rem;
+    min-width: 0;
     box-shadow: var(--shadow-sm);
   }
 
