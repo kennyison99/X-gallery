@@ -78,7 +78,6 @@ h1, h2, h3, h4, h5, h6 {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 1.5rem;
-  overflow-x: hidden;
 }
 
 .btn {
@@ -144,6 +143,11 @@ h1, h2, h3, h4, h5, h6 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1.25rem;
   }
+}
+
+/* Ensure cards can shrink below content minimum width on mobile grid */
+.image-card {
+  min-width: 0;
 }
 
 /* Multi-photo badge */
