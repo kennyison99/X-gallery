@@ -105,6 +105,33 @@ async function uploadImageGroup(filePaths, username, postUrl, description) {
   return res;
 }
 
+/**
+ * Renders a CLI progress bar in the terminal (compatible with GitHub Actions console).
+ */
+function renderProgressBar(label, current, total, extraInfo = "") {
+  if (total <= 0) return;
+  const percentage = Math.round((current / total) * 100);
+  const barWidth = 20;
+  const filledWidth = Math.round((current / total) * barWidth);
+  const emptyWidth = barWidth - filledWidth;
+  
+  const bar = "█".repeat(filledWidth) + "░".repeat(emptyWidth);
+  
+  // Truncate extraInfo to fit in a single line (avoid wrapping)
+  let info = extraInfo ? ` | ${extraInfo}` : "";
+  if (info.length > 50) {
+    info = info.substring(0, 47) + "...";
+  }
+  
+  // Use carriage return to overwrite the line in terminal
+  process.stdout.write(`\r${label}: [${bar}] ${percentage}% (${current}/${total})${info}`);
+  
+  // If complete, add a newline
+  if (current === total) {
+    process.stdout.write("\n");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -162,8 +189,11 @@ async function main() {
   let totalImagesUploaded = 0;
 
   for (const account of enabledAccounts) {
+    totalAccountsProcessed++;
     const { username } = account;
-    console.log(`--- @${username} ---`);
+    console.log(`======================================================================`);
+    console.log(`[Account ${totalAccountsProcessed}/${enabledAccounts.length}] @${username}`);
+    console.log(`======================================================================`);
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `tw-${username}-`));
 
@@ -201,19 +231,28 @@ async function main() {
 
       // Convert non-webp images to webp (quality 80)
       const webpImages = [];
+      const totalToConvert = rawFiles.length;
+      if (totalToConvert > 0) {
+        console.log(`Converting images to WebP (Quality 80%):`);
+      }
+      
+      let convertIndex = 0;
       for (const imgPath of rawFiles) {
+        convertIndex++;
         const ext = path.extname(imgPath).toLowerCase();
         if (ext === ".webp") {
           webpImages.push(imgPath);
+          renderProgressBar("  Converting", convertIndex, totalToConvert, path.basename(imgPath));
         } else {
           try {
             const webpPath = imgPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
-            console.log(`  Converting to WebP (80%): ${path.basename(imgPath)} -> ${path.basename(webpPath)}`);
             const convertCmd = `python -c "from PIL import Image; Image.open(r'''${imgPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
-            execSync(convertCmd);
+            execSync(convertCmd, { stdio: "ignore" });
             fs.unlinkSync(imgPath);
             webpImages.push(webpPath);
+            renderProgressBar("  Converting", convertIndex, totalToConvert, `${path.basename(imgPath)} -> WebP`);
           } catch (convErr) {
+            process.stdout.write("\n"); // Clear carriage return before printing error
             console.error(`  ✗ WebP conversion failed for ${path.basename(imgPath)}: ${convErr.message}`);
             webpImages.push(imgPath);
           }
@@ -239,7 +278,15 @@ async function main() {
       const jsonFiles = fs.existsSync(tempDir) ? fs.readdirSync(tempDir).filter(f => f.endsWith(".json")) : [];
 
       // Upload each group
-      for (const [key, filesInGroup] of Object.entries(groups)) {
+      const groupEntries = Object.entries(groups);
+      const totalGroups = groupEntries.length;
+      if (totalGroups > 0) {
+        console.log(`Uploading image groups to Cloudflare:`);
+      }
+      
+      let uploadIndex = 0;
+      for (const [key, filesInGroup] of groupEntries) {
+        uploadIndex++;
         try {
           const isTweetId = /^\d+$/.test(key);
           const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
@@ -253,21 +300,20 @@ async function main() {
               description = metaData.content || metaData.text || metaData.tweet_text || metaData.description || "";
               description = description.trim();
             } catch (jsonErr) {
-              console.warn(`  WARNING: Failed to parse JSON metadata for group ${key}:`, jsonErr.message);
+              // Ignore parser errors to avoid messing up the UI progress bar
             }
           }
 
           await uploadImageGroup(filesInGroup, username, postUrl, description);
           totalImagesUploaded += filesInGroup.length;
-          console.log(`  ✓ Uploaded group ${key} (${filesInGroup.length} images)`);
+          renderProgressBar("  Uploading", uploadIndex, totalGroups, `Group ${key} (${filesInGroup.length} images)`);
         } catch (uploadErr) {
+          process.stdout.write("\n"); // Clear carriage return before printing error
           console.error(
             `  ✗ Upload failed for group ${key}: ${uploadErr.message}`,
           );
         }
       }
-
-      totalAccountsProcessed++;
     } catch (err) {
       console.error(`ERROR processing @${username}: ${err.message}`);
     } finally {
