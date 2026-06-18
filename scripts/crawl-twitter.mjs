@@ -166,7 +166,7 @@ async function main() {
 
     try {
       // Run gallery-dl to download images
-      const isCrawlAll = process.argv.includes("--all");
+      const isCrawlAll = process.argv.includes("--all") || account.crawl_all === 1 || account.crawl_all === "1" || account.crawl_all === true;
       const rangeParam = isCrawlAll ? "" : "--range 1-20";
 
       const cmd = [

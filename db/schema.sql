@@ -36,6 +36,7 @@ CREATE TABLE crawl_accounts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,        -- Twitter 帳號（不含 @）
   enabled INTEGER DEFAULT 1,            -- 是否啟用自動爬取
+  crawl_all INTEGER DEFAULT 0,          -- 是否抓取全部歷史圖片 (0: 僅最新20, 1: 全部)
   last_crawled_at TEXT,                  -- 上次爬取時間
   created_at TEXT DEFAULT (datetime('now'))
 );

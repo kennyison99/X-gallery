@@ -131,3 +131,50 @@ export const DELETE: APIRoute = async ({ request }) => {
     });
   }
 };
+
+// PUT — 更新爬取帳號設定
+export const PUT: APIRoute = async ({ request }) => {
+  if (!env || !env.DB) {
+    return new Response(JSON.stringify({ error: 'D1 DB binding not configured' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  try {
+    const body = await request.json();
+    const username = (body.username || '').trim().replace(/^@/, '');
+    const enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : null;
+    const crawlAll = body.crawl_all !== undefined ? (body.crawl_all ? 1 : 0) : null;
+
+    if (!username) {
+      return new Response(JSON.stringify({ error: '請輸入帳號名稱' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (enabled !== null && crawlAll !== null) {
+      await env.DB.prepare(
+        'UPDATE crawl_accounts SET enabled = ?, crawl_all = ? WHERE username = ?'
+      ).bind(enabled, crawlAll, username).run();
+    } else if (enabled !== null) {
+      await env.DB.prepare(
+        'UPDATE crawl_accounts SET enabled = ? WHERE username = ?'
+      ).bind(enabled, username).run();
+    } else if (crawlAll !== null) {
+      await env.DB.prepare(
+        'UPDATE crawl_accounts SET crawl_all = ? WHERE username = ?'
+      ).bind(crawlAll, username).run();
+    }
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+};
