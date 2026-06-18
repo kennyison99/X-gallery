@@ -47,6 +47,7 @@ jobs:
           TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
           SITE_URL: ${{ secrets.SITE_URL }}
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+          CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
         run: |
           if [ "${{ github.event.inputs.crawl_all }}" = "true" ]; then
             node scripts/crawl-twitter.mjs --all

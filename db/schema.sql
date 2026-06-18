@@ -38,5 +38,8 @@ CREATE TABLE crawl_accounts (
   enabled INTEGER DEFAULT 1,            -- 是否啟用自動爬取
   crawl_all INTEGER DEFAULT 0,          -- 是否抓取全部歷史圖片 (0: 僅最新20, 1: 全部)
   last_crawled_at TEXT,                  -- 上次爬取時間
+  last_crawl_type TEXT,                  -- 上次爬取來源: 'auto' | 'manual'
+  last_crawl_mode TEXT,                  -- 上次爬取模式: 'latest' | 'all'
+  last_crawl_count INTEGER DEFAULT 0,    -- 上次爬取新增圖片數量
   created_at TEXT DEFAULT (datetime('now'))
 );

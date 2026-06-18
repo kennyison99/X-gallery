@@ -16,6 +16,7 @@ const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(
   "",
 );
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? "";
+const CRAWL_RUN_TYPE = process.env.CRAWL_RUN_TYPE === "manual" ? "manual" : "auto";
 
 // Path to the gallery-dl archive database (prevents re-downloading)
 const ARCHIVE_PATH = path.resolve("scripts/.gallery-dl-archive.db");
@@ -109,6 +110,33 @@ async function uploadImageGroup(filePaths, username, postUrl, description, creat
   }
 
   return res;
+}
+
+/**
+ * Report the result of crawling one account back to the site API so the
+ * admin page can display the latest crawl record and crawl_all can be
+ * auto-reset after a full-history run.
+ */
+async function reportCrawlComplete(username, crawlMode, newImages) {
+  try {
+    const res = await fetch(`${SITE_URL}/api/crawl-complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: CRAWL_API_KEY,
+        username,
+        run_type: CRAWL_RUN_TYPE,
+        crawl_mode: crawlMode,
+        new_images: newImages,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(`  WARNING: crawl-complete report failed for @${username}: HTTP ${res.status} – ${text}`);
+    }
+  } catch (err) {
+    console.warn(`  WARNING: crawl-complete report error for @${username}: ${err.message}`);
+  }
 }
 
 /**
@@ -240,9 +268,13 @@ async function main() {
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `tw-${username}-`));
 
+    // Track per-account upload count and crawl mode for crawl-complete report
+    let accountImagesUploaded = 0;
+    const isCrawlAll = process.argv.includes("--all") || account.crawl_all === 1 || account.crawl_all === "1" || account.crawl_all === true;
+    const crawlMode = isCrawlAll ? "all" : "latest";
+
     try {
       // Run gallery-dl to download images
-      const isCrawlAll = process.argv.includes("--all") || account.crawl_all === 1 || account.crawl_all === "1" || account.crawl_all === true;
       const rangeParam = isCrawlAll ? "" : "--range 1-20";
 
       const cmd = [
@@ -365,6 +397,7 @@ async function main() {
 
             await uploadImageGroup(filesInGroup, username, postUrl, description, createdAt);
             totalImagesUploaded += filesInGroup.length;
+            accountImagesUploaded += filesInGroup.length;
             uploadIndex++;
             renderProgressLine("Uploading", uploadIndex, totalGroups);
           } catch (uploadErr) {
@@ -375,6 +408,12 @@ async function main() {
           }
         }));
       }
+
+      // Report this account's crawl result back to the site API.
+      // This records the last crawl metadata and (for full-history runs)
+      // auto-resets crawl_all to 0 so the next run is lightweight.
+      await reportCrawlComplete(username, crawlMode, accountImagesUploaded);
+      console.log(`  Reported crawl-complete: ${crawlMode} mode, +${accountImagesUploaded} new image(s).`);
     } catch (err) {
       console.error(`ERROR processing @${username}: ${err.message}`);
     } finally {

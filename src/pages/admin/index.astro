@@ -36,7 +36,19 @@ try {
 let crawlAccounts = [];
 try {
   const { results } = await env.DB.prepare('SELECT * FROM crawl_accounts ORDER BY created_at DESC').all();
-  crawlAccounts = results || [];
+  crawlAccounts = (results || []).map((a: any) => {
+    // Build "最近一次" display text from last crawl metadata
+    let lastCrawlText = '';
+    if (a.last_crawled_at) {
+      const d = new Date(a.last_crawled_at);
+      const dateStr = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+      const typeLabel = a.last_crawl_type === 'manual' ? '手動' : '自動';
+      const modeLabel = a.last_crawl_mode === 'all' ? '全歷史' : '最新';
+      const count = a.last_crawl_count ?? 0;
+      lastCrawlText = `於 ${dateStr} ${typeLabel}爬取${modeLabel} (+${count})`;
+    }
+    return { ...a, lastCrawlText };
+  });
 } catch (err) {
   console.error('Error fetching crawl accounts:', err);
 }
@@ -275,8 +287,8 @@ const formattedImages = images.map((img: any) => ({
                 <div class="crawl-account-info">
                   <span class="crawl-account-name">@{account.username}</span>
                   <a href={`https://x.com/${account.username}`} target="_blank" rel="noopener noreferrer" class="crawl-account-link" title="前往 Twitter">↗</a>
-                  {account.last_crawled_at && (
-                    <span class="crawl-last-time">上次爬取：{new Date(account.last_crawled_at).toLocaleString('zh-TW')}</span>
+                  {account.lastCrawlText && (
+                    <span class="crawl-last-time" title="最近一次爬取記錄">{account.lastCrawlText}</span>
                   )}
                 </div>
                 <div class="crawl-account-settings" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
@@ -1515,6 +1527,11 @@ const formattedImages = images.map((img: any) => ({
   .crawl-last-time {
     font-size: 0.75rem;
     color: var(--text-secondary);
-    opacity: 0.7;
+    opacity: 0.8;
+    padding: 0.1rem 0.45rem;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    white-space: nowrap;
   }
 </style>
