@@ -166,15 +166,18 @@ async function main() {
 
     try {
       // Run gallery-dl to download images
+      const isCrawlAll = process.argv.includes("--all");
+      const rangeParam = isCrawlAll ? "" : "--range 1-20";
+
       const cmd = [
         "gallery-dl",
         `--cookies "${cookiesFilePath}"`,
         `--directory "${tempDir}"`,
         `--filter "extension in ('jpg', 'jpeg', 'png', 'webp')"`,
-        "--range 1-20",
+        rangeParam,
         `--download-archive "${ARCHIVE_PATH}"`,
         `"https://x.com/${username}/media"`,
-      ].join(" ");
+      ].filter(Boolean).join(" ");
 
       console.log(`Running: ${cmd}`);
       try {
