@@ -74,13 +74,16 @@ function collectImageFiles(dir) {
 /**
  * Upload a group of image files (belonging to the same post) to the crawl-upload API.
  */
-async function uploadImageGroup(filePaths, username, postUrl) {
+async function uploadImageGroup(filePaths, username, postUrl, description) {
   const formData = new FormData();
   formData.append("author", username);
   formData.append("author_url", `https://x.com/${username}`);
   formData.append("api_key", CRAWL_API_KEY);
   if (postUrl) {
     formData.append("post_url", postUrl);
+  }
+  if (description) {
+    formData.append("description", description);
   }
 
   for (const filePath of filePaths) {
@@ -175,6 +178,9 @@ async function main() {
         `--directory "${tempDir}"`,
         `--filter "extension in ('jpg', 'jpeg', 'png', 'webp')"`,
         rangeParam,
+        "--write-metadata",
+        "--sleep 2.5",
+        "--sleep-request 1.5",
         `--download-archive "${ARCHIVE_PATH}"`,
         `"https://x.com/${username}/media"`,
       ].filter(Boolean).join(" ");
@@ -189,16 +195,38 @@ async function main() {
         );
       }
 
-      // Collect downloaded images
-      const images = collectImageFiles(tempDir);
-      console.log(`Downloaded ${images.length} image(s).`);
-      totalImagesDownloaded += images.length;
+      // Collect raw downloaded files
+      const rawFiles = collectImageFiles(tempDir);
+      console.log(`Downloaded ${rawFiles.length} raw image(s).`);
+
+      // Convert non-webp images to webp (quality 80)
+      const webpImages = [];
+      for (const imgPath of rawFiles) {
+        const ext = path.extname(imgPath).toLowerCase();
+        if (ext === ".webp") {
+          webpImages.push(imgPath);
+        } else {
+          try {
+            const webpPath = imgPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
+            console.log(`  Converting to WebP (80%): ${path.basename(imgPath)} -> ${path.basename(webpPath)}`);
+            const convertCmd = `python -c "from PIL import Image; Image.open(r'''${imgPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
+            execSync(convertCmd);
+            fs.unlinkSync(imgPath);
+            webpImages.push(webpPath);
+          } catch (convErr) {
+            console.error(`  ✗ WebP conversion failed for ${path.basename(imgPath)}: ${convErr.message}`);
+            webpImages.push(imgPath);
+          }
+        }
+      }
+
+      totalImagesDownloaded += webpImages.length;
 
       // Group downloaded images by tweet ID
       const groups = {};
-      for (const imgPath of images) {
+      for (const imgPath of webpImages) {
         const baseName = path.basename(imgPath);
-        // Extract tweet ID from filename like 2055667177102131596_1.jpg
+        // Extract tweet ID from filename like 2055667177102131596_1.webp
         const match = baseName.match(/^(\d+)_\d+/);
         const key = match ? match[1] : baseName;
         if (!groups[key]) {
@@ -207,12 +235,29 @@ async function main() {
         groups[key].push(imgPath);
       }
 
+      // Collect JSON metadata files
+      const jsonFiles = fs.existsSync(tempDir) ? fs.readdirSync(tempDir).filter(f => f.endsWith(".json")) : [];
+
       // Upload each group
       for (const [key, filesInGroup] of Object.entries(groups)) {
         try {
           const isTweetId = /^\d+$/.test(key);
           const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
-          await uploadImageGroup(filesInGroup, username, postUrl);
+
+          // Parse description from metadata JSON if available
+          let description = "";
+          const jsonFile = jsonFiles.find(f => f.includes(key));
+          if (jsonFile) {
+            try {
+              const metaData = JSON.parse(fs.readFileSync(path.join(tempDir, jsonFile), "utf-8"));
+              description = metaData.content || metaData.text || metaData.tweet_text || metaData.description || "";
+              description = description.trim();
+            } catch (jsonErr) {
+              console.warn(`  WARNING: Failed to parse JSON metadata for group ${key}:`, jsonErr.message);
+            }
+          }
+
+          await uploadImageGroup(filesInGroup, username, postUrl, description);
           totalImagesUploaded += filesInGroup.length;
           console.log(`  ✓ Uploaded group ${key} (${filesInGroup.length} images)`);
         } catch (uploadErr) {

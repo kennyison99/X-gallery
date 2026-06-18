@@ -33,6 +33,7 @@ export const POST: APIRoute = async ({ request }) => {
     const authorUrl = formData.get('author_url') as string | null;
     const postUrl = formData.get('post_url') as string | null;
     const title = formData.get('title') as string | null;
+    const description = formData.get('description') as string | null;
 
     const validFiles = files.filter(f => f && f.size > 0);
     if (validFiles.length === 0) {
@@ -95,7 +96,7 @@ export const POST: APIRoute = async ({ request }) => {
         author,
         authorUrl || `https://x.com/${author}`,
         postUrl || '',
-        ''
+        description || ''
       )
       .first();
 

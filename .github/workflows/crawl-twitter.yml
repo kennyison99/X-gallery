@@ -39,8 +39,8 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install gallery-dl
-        run: pip install gallery-dl
+      - name: Install gallery-dl and Pillow
+        run: pip install gallery-dl Pillow
 
       - name: Run Twitter crawl script
         env:
