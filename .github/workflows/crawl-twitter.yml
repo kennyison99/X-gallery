@@ -9,6 +9,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
+    environment: env
 
     steps:
       - name: Checkout repository
