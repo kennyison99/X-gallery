@@ -31,6 +31,8 @@ const { activeTag, tags } = Astro.props;
     padding: 1.5rem 0 0.5rem 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
     scrollbar-width: none; /* Firefox */
   }
 
