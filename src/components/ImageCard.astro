@@ -52,18 +52,6 @@ const displayDate = image.updated_at
 <div class="image-card" data-id={image.id} data-created-at={image.created_at} data-has-photo={hasPhoto ? "true" : "false"} data-has-video={hasVideo ? "true" : "false"}>
   <!-- Image gallery group wrapper with carousel slider -->
   <div class="card-media media-slider" data-total={totalImages}>
-    {totalImages > 1 && (
-      <>
-        <button type="button" class="slider-btn prev-btn" aria-label="上一張">‹</button>
-        <button type="button" class="slider-btn next-btn" aria-label="下一張">›</button>
-        <div class="slider-dots">
-          {keys.map((_, idx) => (
-            <span class={`slider-dot ${idx === 0 ? 'active' : ''}`} data-index={idx}></span>
-          ))}
-        </div>
-      </>
-    )}
-    
     <div class="slider-slides image-gallery-group">
       {keys.map((key, idx) => {
         const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
@@ -100,6 +88,18 @@ const displayDate = image.updated_at
         );
       })}
     </div>
+
+    {totalImages > 1 && (
+      <>
+        <button type="button" class="slider-btn prev-btn" aria-label="上一張">‹</button>
+        <button type="button" class="slider-btn next-btn" aria-label="下一張">›</button>
+        <div class="slider-dots">
+          {keys.map((_, idx) => (
+            <span class={`slider-dot ${idx === 0 ? 'active' : ''}`} data-index={idx}></span>
+          ))}
+        </div>
+      </>
+    )}
   </div>
   
   <div class="card-content">

@@ -162,10 +162,8 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
 
             slides.forEach((slide, idx) => {
               if (idx === currentIndex) {
-                slide.style.display = '';
                 slide.classList.add('active');
               } else {
-                slide.style.display = 'none';
                 slide.classList.remove('active');
               }
             });
