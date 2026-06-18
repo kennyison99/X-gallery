@@ -284,8 +284,8 @@ async function main() {
         `--filter "extension in ('jpg', 'jpeg', 'png', 'webp')"`,
         rangeParam,
         "--write-metadata",
-        "--sleep 2.5",
-        "--sleep-request 1.5",
+        "--sleep 1.5",
+        "--sleep-request 1.0",
         `--download-archive "${ARCHIVE_PATH}"`,
         `"https://x.com/${username}/media"`,
       ].filter(Boolean).join(" ");
