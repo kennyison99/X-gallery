@@ -251,8 +251,8 @@ const formattedImages = images.map((img: any) => {
         </div>
 
         <!-- Bulk Actions Bar -->
-        <div id="bulk-actions-bar" class="bulk-actions" style="display: none; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem; padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary);">
-          <span id="selected-count-display" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">已選擇 0 筆照片</span>
+        <div id="bulk-actions-bar" class="bulk-actions">
+          <span id="selected-count-display">已選擇 0 筆照片</span>
           <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
             刪除所選
           </button>
@@ -598,7 +598,11 @@ const formattedImages = images.map((img: any) => {
     }
 
     if (bulkActionsBar) {
-      bulkActionsBar.style.display = checkedCount > 0 ? 'flex' : 'none';
+      if (checkedCount > 0) {
+        bulkActionsBar.classList.add('visible');
+      } else {
+        bulkActionsBar.classList.remove('visible');
+      }
     }
 
     if (selectAllCheckbox) {
@@ -1732,6 +1736,37 @@ const formattedImages = images.map((img: any) => {
     background: var(--bg-card);
     color: var(--text-primary);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Bulk Actions Floating Bar Styles */
+  .bulk-actions {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translate(-50%, 100px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.8rem 1.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-card);
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-speed) ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .bulk-actions.visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    pointer-events: auto;
+  }
+  #selected-count-display {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-weight: 500;
   }
 
   /* Admin Grid View Styles */
