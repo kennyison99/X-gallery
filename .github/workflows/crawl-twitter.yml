@@ -43,6 +43,7 @@ jobs:
             xtractor-archive-v1-
 
       - name: Set up Python 3.12
+        if: ${{ github.event.inputs.fix_links != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -53,9 +54,11 @@ jobs:
           node-version: "22"
 
       - name: Install Pillow
+        if: ${{ github.event.inputs.fix_links != 'true' }}
         run: pip install Pillow
 
       - name: Set up FFmpeg
+        if: ${{ github.event.inputs.fix_links != 'true' }}
         uses: federicocarboni/setup-ffmpeg@v3
 
       - name: Run Twitter crawl script
