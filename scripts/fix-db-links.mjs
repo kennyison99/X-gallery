@@ -1,6 +1,4 @@
-import { spawn } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
 
 // Load config from environment variables
 const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(/\/$/, "");
@@ -34,89 +32,12 @@ if (!authToken) {
   process.exit(1);
 }
 
-// Find xtractor binary
-const BIN_DIR = path.join(process.cwd(), "bin");
-const XTRACTOR_EXE = process.platform === "win32" ? "xtractor.exe" : "xtractor";
-const XTRACTOR_PATH = path.join(BIN_DIR, XTRACTOR_EXE);
-
-function extractBalancedAt(text, start) {
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < text.length; i++) {
-    const char = text[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (char === "\\") {
-      escape = true;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (char === "{") {
-      depth++;
-    } else if (char === "}") {
-      depth--;
-      if (depth === 0) {
-        return text.slice(start, i + 1);
-      }
-    }
-  }
-  return "";
-}
-
-function parseCliResponse(text) {
-  let searchFrom = 0;
-  while (true) {
-    const start = text.indexOf("{", searchFrom);
-    if (start === -1) break;
-    const candidate = extractBalancedAt(text, start);
-    if (candidate) {
-      try {
-        // Wrap 15+ digit integers in quotes to prevent precision loss in JS JSON.parse
-        const sanitized = candidate.replace(/:\s*(\d{15,})/g, ': "$1"');
-        return JSON.parse(sanitized);
-      } catch {
-        // try next
-      }
-    }
-    searchFrom = start + 1;
-  }
-  return null;
-}
-
-async function runXtractor(url, token, extraArgs = []) {
-  return new Promise((resolve, reject) => {
-    const args = [url, "--auth-token", token, "--json", "--metadata", ...extraArgs];
-    const child = spawn(XTRACTOR_PATH, args, {
-      env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => { stdout += d.toString(); });
-    child.stderr.on("data", (d) => { stderr += d.toString(); });
-
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`xtractor exited with code ${code}. stderr: ${stderr.trim()}`));
-      } else {
-        const parsed = parseCliResponse(stdout) || parseCliResponse(`${stdout}\n${stderr}`);
-        resolve(parsed);
-      }
-    });
-    child.on("error", reject);
-  });
-}
-
 async function main() {
   console.log(`Starting DB post links repair via API endpoint...`);
   console.log(`SITE_URL: ${SITE_URL}\n`);
+
+  // Ensure the xtractor binary is present (downloads + SHA-256 verifies if missing).
+  await ensureXtractor();
 
   console.log("Fetching images requiring repair from site API...");
   const fetchUrl = `${SITE_URL}/api/fix-links?api_key=${encodeURIComponent(CRAWL_API_KEY)}`;
