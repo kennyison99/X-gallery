@@ -1,0 +1,276 @@
+---
+interface Props {
+  image: {
+    id: number;
+    title: string;
+    r2_keys: string; // Comma separated list of R2 keys
+    author: string;
+    author_url: string;
+    post_url: string;
+    description: string;
+    likes: number;
+    tags: string[];
+    created_at?: string;
+    updated_at?: string;
+  };
+}
+
+const { image } = Astro.props;
+
+// Split the keys
+const keys = image.r2_keys.split(',').map(k => k.trim()).filter(k => k.length > 0);
+const firstKey = keys[0] || '';
+const totalImages = keys.length;
+
+const firstImageUrl = `/api/r2/${encodeURIComponent(firstKey)}`;
+
+// Format date for display
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}/${day}`;
+}
+const displayDate = image.updated_at 
+  ? `✏️ ${formatDate(image.updated_at)}` 
+  : (image.created_at ? `${formatDate(image.created_at)}` : '');
+---
+
+<div class="image-card" data-id={image.id}>
+  <!-- Image gallery group wrapper for PhotoSwipe -->
+  <div class="card-media image-gallery-group">
+    {totalImages > 1 && (
+      <div class="media-count-badge">
+        <span>📸</span>
+        <span>{totalImages}</span>
+      </div>
+    )}
+    
+    <!-- First image (visible) -->
+    <a href={firstImageUrl} class="gallery-link" title={image.title || 'Twitter photo'}>
+      <img 
+        src={firstImageUrl} 
+        alt={image.title || 'Twitter photo'} 
+        loading="lazy" 
+        class="gallery-image"
+      />
+    </a>
+
+    <!-- Hidden images for PhotoSwipe navigation -->
+    {keys.slice(1).map((key) => {
+      const imgUrl = `/api/r2/${encodeURIComponent(key)}`;
+      return (
+        <a href={imgUrl} class="gallery-link hidden-pswp-link" title={image.title || 'Twitter photo'}></a>
+      );
+    })}
+  </div>
+  
+  <div class="card-content">
+    <div class="card-tags">
+      {image.tags.map((tag) => (
+        <a href={`/search?tag=${encodeURIComponent(tag)}`} class="card-tag">#{tag}</a>
+      ))}
+    </div>
+
+    {image.description && (
+      <p class="card-desc" title={image.description}>
+        {image.description}
+      </p>
+    )}
+    
+    <div class="card-footer">
+      <div class="author-info">
+        <span class="by-label">via</span>
+        {image.author_url ? (
+          <a href={image.author_url} target="_blank" rel="noopener noreferrer" class="author-link">
+            @{image.author}
+          </a>
+        ) : (
+          <span class="author-text">@{image.author}</span>
+        )}
+        {displayDate && <span class="card-date">{displayDate}</span>}
+      </div>
+
+      <div class="footer-actions" style="display: flex; align-items: center; gap: 0.5rem;">
+        {image.post_url && (
+          <a href={image.post_url} target="_blank" rel="noopener noreferrer" class="post-link-btn" title="查看原始推文">
+            <span>🔗</span>
+            <span>推文</span>
+          </a>
+        )}
+        
+        <button class="like-button" aria-label="Like this photo">
+          <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+          </svg>
+          <span class="like-count">{image.likes}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .image-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition-speed) cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow var(--transition-speed) ease,
+                border-color var(--transition-speed) ease;
+  }
+
+  .image-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--text-primary);
+  }
+
+  .card-media {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    background-color: var(--bg-secondary);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .gallery-link {
+    width: 100%;
+    display: block;
+  }
+
+  .gallery-image {
+    width: 100%;
+    height: auto;
+    max-height: 320px;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .image-card:hover .gallery-image {
+    transform: scale(1.02);
+  }
+
+  .card-content {
+    padding: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border-top: 1px solid var(--border-color);
+    flex-grow: 1;
+    justify-content: space-between;
+  }
+
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .card-tag {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: color var(--transition-speed) ease;
+  }
+
+  .card-tag:hover {
+    color: var(--text-primary);
+  }
+
+  .card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.2rem;
+  }
+
+  .author-info {
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  .by-label {
+    color: var(--text-secondary);
+  }
+
+  .author-link {
+    font-weight: 500;
+    color: var(--text-primary);
+    border-bottom: 1px solid transparent;
+  }
+
+  .author-link:hover {
+    border-color: var(--text-primary);
+  }
+
+  .author-text {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .like-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    transition: all var(--transition-speed) ease;
+  }
+
+  .like-button:hover {
+    color: var(--heart-color);
+    background-color: var(--accent-light);
+  }
+
+  .like-button.liked {
+    color: var(--heart-color);
+  }
+
+  .like-button.liked .heart-icon {
+    fill: var(--heart-color);
+    stroke: var(--heart-color);
+    animation: heart-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .heart-icon {
+    width: 0.95rem;
+    height: 0.95rem;
+    transition: fill var(--transition-speed) ease, stroke var(--transition-speed) ease;
+  }
+
+  @keyframes heart-pop {
+    0% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.4);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .card-date {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    margin-left: 0.3rem;
+    white-space: nowrap;
+  }
+</style>

@@ -1,0 +1,135 @@
+---
+import Header from '../components/Header.astro';
+import '../styles/global.css';
+import 'photoswipe/style.css';
+import '@fontsource/lxgw-wenkai-tc';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { 
+  title = "極簡 Twitter 照片牆", 
+  description = "展示精選 Twitter 博主的相簿，極簡設計，支援標籤分類與喜愛功能。" 
+} = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+    
+    <!-- SEO Meta tags -->
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    
+    <!-- Non-blocking theme setup script to avoid flashes -->
+    <script is:inline>
+      (function() {
+        const storedTheme = localStorage.getItem('theme');
+        if (storedTheme) {
+          document.documentElement.setAttribute('data-theme', storedTheme);
+        } else {
+          const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', systemTheme);
+          localStorage.setItem('theme', systemTheme);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <Header />
+    <main class="container">
+      <slot />
+    </main>
+    <footer class="footer">
+      <div class="container">
+        <p>© 2026 Twitter Gallery. Built with Astro & Cloudflare Pages.</p>
+      </div>
+    </footer>
+
+    <!-- PhotoSwipe 5 script bundled locally by Vite -->
+    <script>
+      import PhotoSwipeLightbox from 'photoswipe/lightbox';
+      import PhotoSwipe from 'photoswipe';
+
+      function initPhotoSwipe() {
+        // Preload image dimensions for all gallery links
+        document.querySelectorAll('a.gallery-link').forEach((link) => {
+          const href = link.getAttribute('href');
+          if (!href || link.getAttribute('data-pswp-width')) return;
+
+          const img = new Image();
+          img.onload = () => {
+            link.setAttribute('data-pswp-width', String(img.naturalWidth));
+            link.setAttribute('data-pswp-height', String(img.naturalHeight));
+          };
+          img.src = href;
+        });
+
+        // Initialize PhotoSwipe Lightbox
+        const lightbox = new PhotoSwipeLightbox({
+          gallery: '.image-gallery-group',
+          children: 'a.gallery-link',
+          pswpModule: PhotoSwipe,
+          // Fallback dimensions if images haven't preloaded yet
+          errorMsg: 'The image cannot be loaded',
+        });
+
+        // If dimensions aren't preloaded yet, load them on the fly
+        lightbox.addFilter('itemData', (itemData: any) => {
+          if (!itemData.w || !itemData.h) {
+            // Use sensible defaults; PhotoSwipe will resize once real dims load
+            itemData.w = itemData.w || 1600;
+            itemData.h = itemData.h || 1200;
+
+            // Async-load real dimensions and update the slide
+            const img = new Image();
+            img.onload = () => {
+              itemData.w = img.naturalWidth;
+              itemData.h = img.naturalHeight;
+              lightbox.pswp?.refreshSlideContent(itemData.index);
+            };
+            img.src = itemData.src;
+          }
+          return itemData;
+        });
+
+        lightbox.init();
+      }
+
+      // Run on initial load
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPhotoSwipe);
+      } else {
+        initPhotoSwipe();
+      }
+      // Support Astro page transitions
+      document.addEventListener('astro:after-swap', initPhotoSwipe);
+    </script>
+  </body>
+</html>
+
+<style>
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  main {
+    flex: 1;
+    padding-bottom: 3rem;
+  }
+  .footer {
+    padding: 2rem 0;
+    border-top: 1px solid var(--border-color);
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+  }
+</style>
