@@ -18,6 +18,12 @@
 			"database_id": "eb667ec9-22cf-423d-942a-e1aba8f89742"
 		}
 	],
+	"kv_namespaces": [
+		{
+			"binding": "SESSION",
+			"id": "b36c33a70d0648618f617d7eceacae17"
+		}
+	],
 	"r2_buckets": [
 		{
 			"binding": "BUCKET",
