@@ -23,8 +23,10 @@ pnpm-debug.log*
 # jetbrains setting folder
 .idea/
 
-# gallery-dl archive (used by crawl script)
-scripts/.gallery-dl-archive.db
+# xtractor binary cache + dedup archive (used by crawl script)
+scripts/.xtractor-bin/
+scripts/.xtractor-archive.json
+scripts/.xtractor-archive.json.tmp
 
 # local wrangler state
 .wrangler/

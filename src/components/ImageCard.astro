@@ -24,13 +24,21 @@ const totalImages = keys.length;
 
 const firstImageUrl = `/api/r2/${encodeURIComponent(firstKey)}`;
 
+// Detect video keys (by extension) so the card can render a <video> preview
+// with a play overlay instead of an <img>. Animated WebP (converted from
+// animated_gif) stays an <img> since browsers play it natively.
+const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
+const isVideoKey = (key: string) => VIDEO_EXTS.has((key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
+const firstIsVideo = isVideoKey(firstKey);
+
 // Format date for display
 function formatDate(dateStr?: string): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
+  const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${month}/${day}`;
+  return `${year}/${month}/${day}`;
 }
 const displayDate = image.updated_at 
   ? `✏️ ${formatDate(image.updated_at)}` 
@@ -47,21 +55,38 @@ const displayDate = image.updated_at
       </div>
     )}
     
-    <!-- First image (visible) -->
-    <a href={firstImageUrl} class="gallery-link" title={image.title || 'Twitter photo'}>
-      <img 
-        src={firstImageUrl} 
-        alt={image.title || 'Twitter photo'} 
-        loading="lazy" 
-        class="gallery-image"
-      />
+    {/* First media item (visible). Video renders with a play overlay; the
+        anchor is marked data-video so the lightbox opens a player. */}
+    <a href={firstImageUrl} class="gallery-link" data-video={firstIsVideo ? '1' : null} title={image.title || 'Twitter media'}>
+      {firstIsVideo ? (
+        <>
+          <video
+            src={firstImageUrl}
+            class="gallery-video"
+            preload="metadata"
+            muted
+            playsinline
+            aria-label={image.title || 'Twitter video'}
+          />
+          <span class="video-play-overlay">▶</span>
+        </>
+      ) : (
+        <img
+          src={firstImageUrl}
+          alt={image.title || 'Twitter photo'}
+          loading="lazy"
+          class="gallery-image"
+        />
+      )}
     </a>
 
-    <!-- Hidden images for PhotoSwipe navigation -->
+    {/* Hidden items for lightbox navigation. Video links carry data-video so
+        the lightbox knows to render a <video> for them. */}
     {keys.slice(1).map((key) => {
       const imgUrl = `/api/r2/${encodeURIComponent(key)}`;
+      const vid = isVideoKey(key) ? '1' : null;
       return (
-        <a href={imgUrl} class="gallery-link hidden-pswp-link" title={image.title || 'Twitter photo'}></a>
+        <a href={imgUrl} class="gallery-link hidden-pswp-link" data-video={vid} title={image.title || 'Twitter media'}></a>
       );
     })}
   </div>
@@ -158,6 +183,38 @@ const displayDate = image.updated_at
 
   .image-card:hover .gallery-image {
     transform: scale(1.02);
+  }
+
+  .gallery-video {
+    width: 100%;
+    height: auto;
+    max-height: 320px;
+    object-fit: cover;
+    display: block;
+    background-color: #000;
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .image-card:hover .gallery-video {
+    transform: scale(1.02);
+  }
+
+  .video-play-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2.4rem;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.45);
+    border-radius: 50%;
+    width: 3.2rem;
+    height: 3.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   }
 
   .card-content {

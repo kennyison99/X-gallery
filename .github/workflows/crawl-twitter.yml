@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       crawl_all:
-        description: 'Crawl all historical images (ignores 1-20 range)'
+        description: 'Crawl all historical images (ignores the latest-only limit)'
         required: false
         type: boolean
         default: false
@@ -21,13 +21,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache gallery-dl archive
+      - name: Cache xtractor binary
         uses: actions/cache@v4
         with:
-          path: scripts/.gallery-dl-archive.db
-          key: gallery-dl-archive-v2-${{ github.run_id }}
+          path: scripts/.xtractor-bin
+          key: xtractor-bin-v1.1-${{ github.run_id }}
           restore-keys: |
-            gallery-dl-archive-v2-
+            xtractor-bin-v1.1-
+
+      - name: Cache xtractor dedup archive
+        uses: actions/cache@v4
+        with:
+          path: scripts/.xtractor-archive.json
+          key: xtractor-archive-v1-${{ github.run_id }}
+          restore-keys: |
+            xtractor-archive-v1-
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -39,8 +47,17 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install gallery-dl and Pillow
-        run: pip install gallery-dl Pillow
+      - name: Install Pillow
+        run: pip install Pillow
+
+      - name: Ensure ffmpeg is available
+        # ubuntu-latest ships with ffmpeg; this is a safety net for converting
+        # animated_gif (mp4) to animated WebP.
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version | head -n 1
 
       - name: Run Twitter crawl script
         env:

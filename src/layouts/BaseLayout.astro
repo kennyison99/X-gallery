@@ -56,14 +56,20 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       </div>
     </footer>
 
+    <!-- Video lightbox modal (separate from PhotoSwipe, which is image-only) -->
+    <div id="video-lightbox" class="video-lightbox" hidden>
+      <button class="video-lightbox-close" aria-label="關閉">✕</button>
+      <video id="video-lightbox-player" class="video-lightbox-player" controls autoplay playsinline></video>
+    </div>
+
     <!-- PhotoSwipe 5 script bundled locally by Vite -->
     <script>
       import PhotoSwipeLightbox from 'photoswipe/lightbox';
       import PhotoSwipe from 'photoswipe';
 
       function initPhotoSwipe() {
-        // Preload image dimensions for all gallery links
-        document.querySelectorAll('a.gallery-link').forEach((link) => {
+        // Preload image dimensions for image (non-video) gallery links only.
+        document.querySelectorAll('a.gallery-link:not([data-video="1"])').forEach((link) => {
           const href = link.getAttribute('href');
           if (!href || link.getAttribute('data-pswp-width')) return;
 
@@ -75,10 +81,11 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
           img.src = href;
         });
 
-        // Initialize PhotoSwipe Lightbox
+        // Initialize PhotoSwipe Lightbox (image links only; video links are
+        // handled by the custom video lightbox below).
         const lightbox = new PhotoSwipeLightbox({
           gallery: '.image-gallery-group',
-          children: 'a.gallery-link',
+          children: 'a.gallery-link:not([data-video="1"])',
           pswpModule: PhotoSwipe,
           // Fallback dimensions if images haven't preloaded yet
           errorMsg: 'The image cannot be loaded',
@@ -106,14 +113,47 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         lightbox.init();
       }
 
+      // ---- Custom video lightbox (PhotoSwipe is image-only) ----
+      function initVideoLightbox() {
+        const lb = document.getElementById('video-lightbox');
+        const player = document.getElementById('video-lightbox-player') as HTMLVideoElement | null;
+        const closeBtn = document.querySelector('.video-lightbox-close');
+        if (!lb || !player) return;
+
+        function close() {
+          player.pause();
+          player.removeAttribute('src');
+          player.load();
+          lb.hidden = true;
+        }
+        function open(src: string) {
+          player.src = src;
+          lb.hidden = false;
+          player.play().catch(() => { /* autoplay may be blocked; controls still work */ });
+        }
+
+        closeBtn?.addEventListener('click', close);
+        lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !lb.hidden) close(); });
+
+        document.querySelectorAll('a.gallery-link[data-video="1"]').forEach((link) => {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const href = link.getAttribute('href');
+            if (href) open(href);
+          });
+        });
+      }
+
       // Run on initial load
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initPhotoSwipe);
+        document.addEventListener('DOMContentLoaded', () => { initPhotoSwipe(); initVideoLightbox(); });
       } else {
         initPhotoSwipe();
+        initVideoLightbox();
       }
       // Support Astro page transitions
-      document.addEventListener('astro:after-swap', initPhotoSwipe);
+      document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initVideoLightbox(); });
     </script>
   </body>
 </html>
@@ -138,4 +178,38 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
     color: var(--text-secondary);
     background-color: var(--bg-secondary);
   }
+  .video-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .video-lightbox[hidden] { display: none; }
+  .video-lightbox-player {
+    max-width: 90vw;
+    max-height: 85vh;
+    border-radius: 8px;
+    background: #000;
+  }
+  .video-lightbox-close {
+    position: absolute;
+    top: 1rem;
+    right: 1.2rem;
+    background: rgba(255, 255, 255, 0.12);
+    border: none;
+    color: #fff;
+    font-size: 1.4rem;
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .video-lightbox-close:hover { background: rgba(255, 255, 255, 0.22); }
 </style>
