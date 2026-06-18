@@ -145,15 +145,75 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         });
       }
 
+      function initSliders() {
+        document.querySelectorAll('.media-slider').forEach((slider) => {
+          if (slider.getAttribute('data-slider-initialized')) return;
+          slider.setAttribute('data-slider-initialized', 'true');
+
+          const slides = slider.querySelectorAll('.slider-slide') as NodeListOf<HTMLElement>;
+          const dots = slider.querySelectorAll('.slider-dot');
+          const prevBtn = slider.querySelector('.prev-btn');
+          const nextBtn = slider.querySelector('.next-btn');
+          if (slides.length <= 1) return;
+
+          let currentIndex = 0;
+
+          function showSlide(index: number) {
+            if (index < 0) index = slides.length - 1;
+            if (index >= slides.length) index = 0;
+            currentIndex = index;
+
+            slides.forEach((slide, idx) => {
+              if (idx === currentIndex) {
+                slide.style.display = '';
+                slide.classList.add('active');
+              } else {
+                slide.style.display = 'none';
+                slide.classList.remove('active');
+              }
+            });
+
+            dots.forEach((dot, idx) => {
+              if (idx === currentIndex) {
+                dot.classList.add('active');
+              } else {
+                dot.classList.remove('active');
+              }
+            });
+          }
+
+          prevBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showSlide(currentIndex - 1);
+          });
+
+          nextBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showSlide(currentIndex + 1);
+          });
+
+          dots.forEach((dot, idx) => {
+            dot.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              showSlide(idx);
+            });
+          });
+        });
+      }
+
       // Run on initial load
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initPhotoSwipe(); initVideoLightbox(); });
+        document.addEventListener('DOMContentLoaded', () => { initPhotoSwipe(); initVideoLightbox(); initSliders(); });
       } else {
         initPhotoSwipe();
         initVideoLightbox();
+        initSliders();
       }
       // Support Astro page transitions
-      document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initVideoLightbox(); });
+      document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initVideoLightbox(); initSliders(); });
     </script>
   </body>
 </html>

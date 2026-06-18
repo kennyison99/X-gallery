@@ -341,7 +341,9 @@ function parseCliResponse(text) {
     const candidate = extractBalancedAt(text, start);
     if (candidate) {
       try {
-        return JSON.parse(candidate);
+        // Wrap 15+ digit integers in quotes to prevent precision loss in JS JSON.parse
+        const sanitized = candidate.replace(/:\s*(\d{15,})/g, ': "$1"');
+        return JSON.parse(sanitized);
       } catch {
         /* not the real JSON object; try the next "{" */
       }

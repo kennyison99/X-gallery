@@ -50,49 +50,57 @@ const displayDate = image.updated_at
 ---
 
 <div class="image-card" data-id={image.id} data-created-at={image.created_at} data-has-photo={hasPhoto ? "true" : "false"} data-has-video={hasVideo ? "true" : "false"}>
-  <!-- Image gallery group wrapper for PhotoSwipe -->
-  <div class="card-media image-gallery-group">
+  <!-- Image gallery group wrapper with carousel slider -->
+  <div class="card-media media-slider" data-total={totalImages}>
     {totalImages > 1 && (
-      <div class="media-count-badge">
-        <span>📸</span>
-        <span>{totalImages}</span>
-      </div>
+      <>
+        <button type="button" class="slider-btn prev-btn" aria-label="上一張">‹</button>
+        <button type="button" class="slider-btn next-btn" aria-label="下一張">›</button>
+        <div class="slider-dots">
+          {keys.map((_, idx) => (
+            <span class={`slider-dot ${idx === 0 ? 'active' : ''}`} data-index={idx}></span>
+          ))}
+        </div>
+      </>
     )}
     
-    {/* First media item (visible). Video renders with a play overlay; the
-        anchor is marked data-video so the lightbox opens a player. */}
-    <a href={firstImageUrl} class="gallery-link" data-video={firstIsVideo ? '1' : null} title={image.title || 'Twitter media'}>
-      {firstIsVideo ? (
-        <>
-          <video
-            src={firstImageUrl}
-            class="gallery-video"
-            preload="metadata"
-            muted
-            playsinline
-            aria-label={image.title || 'Twitter video'}
-          />
-          <span class="video-play-overlay">▶</span>
-        </>
-      ) : (
-        <img
-          src={firstImageUrl}
-          alt={image.title || 'Twitter photo'}
-          loading="lazy"
-          class="gallery-image"
-        />
-      )}
-    </a>
-
-    {/* Hidden items for lightbox navigation. Video links carry data-video so
-        the lightbox knows to render a <video> for them. */}
-    {keys.slice(1).map((key) => {
-      const imgUrl = `/api/r2/${encodeURIComponent(key)}`;
-      const vid = isVideoKey(key) ? '1' : null;
-      return (
-        <a href={imgUrl} class="gallery-link hidden-pswp-link" data-video={vid} title={image.title || 'Twitter media'}></a>
-      );
-    })}
+    <div class="slider-slides image-gallery-group">
+      {keys.map((key, idx) => {
+        const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
+        const isVid = isVideoKey(key);
+        return (
+          <a 
+            href={mediaUrl} 
+            class={`gallery-link slider-slide ${idx === 0 ? 'active' : ''}`} 
+            data-index={idx}
+            data-video={isVid ? '1' : null} 
+            title={image.title || 'Twitter media'}
+            style={idx === 0 ? '' : 'display: none;'}
+          >
+            {isVid ? (
+              <div class="video-container">
+                <video
+                  src={mediaUrl}
+                  class="gallery-video"
+                  preload="metadata"
+                  muted
+                  playsinline
+                  aria-label={image.title || 'Twitter video'}
+                />
+                <span class="video-play-overlay">▶</span>
+              </div>
+            ) : (
+              <img
+                src={mediaUrl}
+                alt={image.title || 'Twitter photo'}
+                loading="lazy"
+                class="gallery-image"
+              />
+            )}
+          </a>
+        );
+      })}
+    </div>
   </div>
   
   <div class="card-content">
@@ -360,5 +368,97 @@ const displayDate = image.updated_at
       width: 100%;
       justify-content: space-between;
     }
+  }
+
+  /* Media slider styles */
+  .media-slider {
+    position: relative;
+    width: 100%;
+  }
+
+  .slider-slides {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .slider-slide {
+    width: 100%;
+    display: block;
+  }
+
+  .slider-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    cursor: pointer;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity var(--transition-speed) ease, background-color var(--transition-speed) ease;
+    user-select: none;
+  }
+
+  /* Show navigation buttons on hover */
+  .media-slider:hover .slider-btn {
+    opacity: 1;
+  }
+
+  .slider-btn:hover {
+    background: rgba(0, 0, 0, 0.7);
+  }
+
+  .prev-btn {
+    left: 10px;
+    padding-right: 2px;
+  }
+
+  .next-btn {
+    right: 10px;
+    padding-left: 2px;
+  }
+
+  .slider-dots {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    z-index: 5;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 4px 8px;
+    border-radius: 9999px;
+    backdrop-filter: blur(4px);
+  }
+
+  .slider-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    transition: all var(--transition-speed) ease;
+  }
+
+  .slider-dot.active {
+    background: #fff;
+    transform: scale(1.2);
+  }
+
+  .video-container {
+    position: relative;
+    width: 100%;
+    display: block;
   }
 </style>
