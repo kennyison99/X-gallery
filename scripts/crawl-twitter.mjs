@@ -77,7 +77,7 @@ function collectImageFiles(dir) {
 /**
  * Upload a group of image files (belonging to the same post) to the crawl-upload API.
  */
-async function uploadImageGroup(filePaths, username, postUrl, description) {
+async function uploadImageGroup(filePaths, username, postUrl, description, createdAt) {
   const formData = new FormData();
   formData.append("author", username);
   formData.append("author_url", `https://x.com/${username}`);
@@ -87,6 +87,9 @@ async function uploadImageGroup(filePaths, username, postUrl, description) {
   }
   if (description) {
     formData.append("description", description);
+  }
+  if (createdAt) {
+    formData.append("created_at", createdAt);
   }
 
   for (const filePath of filePaths) {
@@ -345,20 +348,22 @@ async function main() {
             const isTweetId = /^\d+$/.test(key);
             const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
 
-            // Parse description from metadata JSON if available
+            // Parse description and date from metadata JSON if available
             let description = "";
+            let createdAt = "";
             const jsonFile = jsonFiles.find(f => f.includes(key));
             if (jsonFile) {
               try {
                 const metaData = JSON.parse(fs.readFileSync(path.join(tempDir, jsonFile), "utf-8"));
                 description = metaData.content || metaData.text || metaData.tweet_text || metaData.description || "";
                 description = description.trim();
+                createdAt = metaData.date || metaData.created_at || "";
               } catch (jsonErr) {
                 // Ignore parser errors to avoid messing up the UI progress bar
               }
             }
 
-            await uploadImageGroup(filesInGroup, username, postUrl, description);
+            await uploadImageGroup(filesInGroup, username, postUrl, description, createdAt);
             totalImagesUploaded += filesInGroup.length;
             uploadIndex++;
             renderProgressLine("Uploading", uploadIndex, totalGroups);

@@ -34,6 +34,7 @@ export const POST: APIRoute = async ({ request }) => {
     const postUrl = formData.get('post_url') as string | null;
     const title = formData.get('title') as string | null;
     const description = formData.get('description') as string | null;
+    const createdAt = formData.get('created_at') as string | null;
 
     const validFiles = files.filter(f => f && f.size > 0);
     if (validFiles.length === 0) {
@@ -85,19 +86,23 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Insert into D1
     const insertQuery = `
-      INSERT INTO images (title, r2_keys, author, author_url, post_url, description)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO images (title, r2_keys, author, author_url, post_url, description${createdAt ? ', created_at' : ''})
+      VALUES (?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
       RETURNING id
     `;
+    const bindParams = [
+      title || `@${author} 推文`,
+      r2KeysString,
+      author,
+      authorUrl || `https://x.com/${author}`,
+      postUrl || '',
+      description || ''
+    ];
+    if (createdAt) {
+      bindParams.push(createdAt);
+    }
     const imageResult = await env.DB.prepare(insertQuery)
-      .bind(
-        title || `@${author} 推文`,
-        r2KeysString,
-        author,
-        authorUrl || `https://x.com/${author}`,
-        postUrl || '',
-        description || ''
-      )
+      .bind(...bindParams)
       .first();
 
     // Auto-tagging logic based on description and author
