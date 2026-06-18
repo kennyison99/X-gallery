@@ -267,4 +267,54 @@ async function runXtractor(url, authToken, extraArgs = []) {
   return parsed;
 }
 
-export { XTRACTOR_VERSION, XTRACTOR_PATH, ensureXtractor, runXtractor };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Fetch ALL media items for an author by paginating through their /media
+// timeline via --cursor. Returns a flat array of media items.
+// Used by fix-db-links.mjs to build a complete tweet-ID map so tweets beyond
+// the first page (older posts) can still be matched against rounded DB IDs.
+async function extractAllMedia(username, authToken, {
+  maxPages = 80,
+  pageLimit = 100,
+  pageDelayMs = 800,
+  retweets = true,
+} = {}) {
+  const url = `https://x.com/${username}/media`;
+  const baseArgs = [
+    "--type", "all",
+    "--retweets", retweets ? "include" : "skip",
+    "--limit", String(pageLimit),
+  ];
+  const items = [];
+  let cursor = "";
+  let pages = 0;
+
+  while (pages < maxPages) {
+    const args = [...baseArgs];
+    if (cursor) args.push("--cursor", cursor);
+
+    let resp;
+    try {
+      resp = await runXtractor(url, authToken, args);
+    } catch (err) {
+      const msg = err.message.toLowerCase();
+      if (items.length > 0 && (msg.includes("rate limit") || msg.includes("429"))) {
+        console.warn(`  Rate limit hit after ${items.length} items — keeping what we have.`);
+        break;
+      }
+      throw err;
+    }
+
+    const pageItems = resp.media ?? [];
+    items.push(...pageItems);
+    pages++;
+    const done = resp.completed === true || !resp.cursor || pageItems.length === 0;
+    console.log(`  Page ${pages}: +${pageItems.length} (total ${items.length})`);
+    if (done) break;
+    cursor = resp.cursor;
+    if (pageDelayMs > 0) await sleep(pageDelayMs);
+  }
+  return items;
+}
+
+export { XTRACTOR_VERSION, XTRACTOR_PATH, ensureXtractor, runXtractor, extractAllMedia };

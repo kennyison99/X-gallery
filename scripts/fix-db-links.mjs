@@ -1,4 +1,4 @@
-import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
+import { ensureXtractor, extractAllMedia } from "./xtractor-lib.mjs";
 
 // Load config from environment variables
 const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(/\/$/, "");
@@ -66,18 +66,24 @@ async function main() {
 
   const updates = [];
 
-  for (const author of authors) {
+  for (let authorIdx = 0; authorIdx < authors.length; authorIdx++) {
+    const author = authors[authorIdx];
     console.log(`\n------------------------------------------------------------`);
     console.log(`Fetching correct tweet IDs for @${author} via xtractor...`);
-    const url = `https://x.com/${author}/media`;
     try {
-      // Fetch latest 300 media items for the author
-      const resp = await runXtractor(url, authToken, ["--type", "all", "--limit", "300"]);
-      const media = resp.media || [];
+      // Paginate through the author's full media timeline so older tweets
+      // (beyond the first page) can still be matched against rounded DB IDs.
+      const media = await extractAllMedia(author, authToken);
       console.log(`Retrieved ${media.length} media items for @${author}.`);
 
-      // Extract unique correct tweet IDs (strings)
-      const correctTweetIds = Array.from(new Set(media.map(m => String(m.tweet_id)).filter(Boolean)));
+      // Extract unique correct tweet IDs (strings) and build a Number->ID
+      // lookup map for O(1) matching against rounded DB IDs.
+      const correctIdByNum = new Map();
+      for (const m of media) {
+        const tid = String(m.tweet_id);
+        if (!tid) continue;
+        correctIdByNum.set(Number(tid), tid);
+      }
       
       const authorImages = imagesByAuthor[author];
       let matchCount = 0;
@@ -88,8 +94,9 @@ async function main() {
         const roundedIdStr = match[1];
         const roundedIdNum = Number(roundedIdStr);
 
-        // Find a correct tweet ID that matches when converted to Number
-        const matchedCorrectId = correctTweetIds.find(cid => Number(cid) === roundedIdNum);
+        // Find the correct tweet ID whose Number representation matches the
+        // rounded DB ID (both lose precision the same way, so they compare equal).
+        const matchedCorrectId = correctIdByNum.get(roundedIdNum);
         if (matchedCorrectId) {
           if (matchedCorrectId !== roundedIdStr) {
             const newPostUrl = img.post_url.replace(roundedIdStr, matchedCorrectId);
@@ -98,12 +105,17 @@ async function main() {
             matchCount++;
           }
         } else {
-          console.log(`  [Skip] Image ID ${img.id}: Rounded ID ${roundedIdStr} could not be matched (tweet may be older than the limit or deleted).`);
+          console.log(`  [Skip] Image ID ${img.id}: Rounded ID ${roundedIdStr} could not be matched (tweet may be deleted or beyond the crawled timeline).`);
         }
       }
       console.log(`Matched @${author}: ${matchCount}/${authorImages.length} links.`);
     } catch (err) {
       console.error(`  Failed to process @${author}:`, err.message);
+    }
+
+    // Pause between authors to avoid rate limiting during pagination.
+    if (authorIdx < authors.length - 1) {
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 
