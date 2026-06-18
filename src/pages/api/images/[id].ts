@@ -1,5 +1,10 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import {
+  contentTypeForFilename,
+  wouldExceedStorage,
+  addStorageBytes,
+} from '../../../lib/storage';
 
 export const DELETE: APIRoute = async ({ params }) => {
   if (!env || !env.DB || !env.BUCKET) {
@@ -34,8 +39,22 @@ export const DELETE: APIRoute = async ({ params }) => {
 
     // Split keys and delete all images from R2
     const keys = image.r2_keys.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+
+    // Sum the size of each object before deleting so the storage counter
+    // can be decremented accurately.
+    let freedBytes = 0;
     for (const key of keys) {
+      try {
+        const head = await env.BUCKET.head(key);
+        if (head) freedBytes += head.size;
+      } catch {
+        /* ignore head errors */
+      }
       await env.BUCKET.delete(key);
+    }
+
+    if (freedBytes > 0) {
+      await addStorageBytes(-freedBytes);
     }
 
     // Delete from D1 (cascade deletes associations)
@@ -106,8 +125,11 @@ export const PUT: APIRoute = async ({ params, request }) => {
 
     // Find keys to delete (present in oldKeys but not in keptKeys)
     const keysToDelete = oldKeys.filter((key: string) => !keptKeys.includes(key));
+    let freedBytes = 0;
     for (const key of keysToDelete) {
       try {
+        const head = await env.BUCKET.head(key);
+        if (head) freedBytes += head.size;
         await env.BUCKET.delete(key);
       } catch (e) {
         console.error(`Failed to delete old key ${key} from R2:`, e);
@@ -116,15 +138,35 @@ export const PUT: APIRoute = async ({ params, request }) => {
 
     // 3. Upload new files if any
     const validFiles = files.filter(f => f && f.size > 0);
+    const incomingBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
+
+    // Storage guard: account for freed bytes first, then check the new upload
+    if (freedBytes > 0) {
+      await addStorageBytes(-freedBytes);
+    }
+    if (incomingBytes > 0 && await wouldExceedStorage(incomingBytes)) {
+      return new Response(JSON.stringify({
+        error: '儲存空間不足：R2 用量已接近 10GB 上限，請先刪除舊資料再上傳。',
+      }), {
+        status: 507,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     const newlyUploadedKeys: string[] = [];
     for (const file of validFiles) {
       const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
       const r2Key = `${Date.now()}-${cleanFileName}`;
       const fileArrayBuffer = await file.arrayBuffer();
       await env.BUCKET.put(r2Key, fileArrayBuffer, {
-        httpMetadata: { contentType: file.type || 'image/jpeg' }
+        httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
       });
       newlyUploadedKeys.push(r2Key);
+    }
+
+    // Increment the storage counter by the bytes actually written
+    if (incomingBytes > 0) {
+      await addStorageBytes(incomingBytes);
     }
 
     // Combine kept keys and new keys

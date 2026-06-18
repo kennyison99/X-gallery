@@ -1,6 +1,11 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { generateAutoTags } from '../../lib/auto-tags';
+import {
+  contentTypeForFilename,
+  wouldExceedStorage,
+  addStorageBytes,
+} from '../../lib/storage';
 
 /**
  * POST /api/crawl-upload
@@ -60,11 +65,22 @@ export const POST: APIRoute = async ({ request }) => {
     ).bind(author, `%${firstFileName}%`).first();
 
     if (existingCheck) {
-      return new Response(JSON.stringify({ 
-        success: false, 
-        skipped: true, 
-        message: `Image "${firstFileName}" already exists for @${author}` 
+      return new Response(JSON.stringify({
+        success: false,
+        skipped: true,
+        message: `Image "${firstFileName}" already exists for @${author}`
       }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Storage guard: reject if these files would push usage past the threshold
+    const incomingBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
+    if (await wouldExceedStorage(incomingBytes)) {
+      return new Response(JSON.stringify({
+        error: '儲存空間不足：R2 用量已接近 10GB 上限，請先刪除舊資料再上傳。',
+      }), {
+        status: 507,
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -78,10 +94,13 @@ export const POST: APIRoute = async ({ request }) => {
 
       const fileArrayBuffer = await file.arrayBuffer();
       await env.BUCKET.put(r2Key, fileArrayBuffer, {
-        httpMetadata: { contentType: file.type || 'image/jpeg' }
+        httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
       });
       r2Keys.push(r2Key);
     }
+
+    // Increment the storage counter by the bytes actually written
+    await addStorageBytes(incomingBytes);
 
     const r2KeysString = r2Keys.join(',');
 

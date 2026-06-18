@@ -1,5 +1,10 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import {
+  contentTypeForFilename,
+  wouldExceedStorage,
+  addStorageBytes,
+} from '../../lib/storage';
 
 export const GET: APIRoute = async ({ url }) => {
   if (!env || !env.DB) {
@@ -93,6 +98,17 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    // Storage guard: reject if these files would push usage past the threshold
+    const incomingBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
+    if (await wouldExceedStorage(incomingBytes)) {
+      return new Response(JSON.stringify({
+        error: '儲存空間不足：R2 用量已接近 10GB 上限，請先刪除舊資料再上傳。',
+      }), {
+        status: 507,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     // Upload all files to R2 and gather their keys
     const r2Keys: string[] = [];
     for (const file of validFiles) {
@@ -101,10 +117,13 @@ export const POST: APIRoute = async ({ request }) => {
 
       const fileArrayBuffer = await file.arrayBuffer();
       await env.BUCKET.put(r2Key, fileArrayBuffer, {
-        httpMetadata: { contentType: file.type || 'image/jpeg' }
+        httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
       });
       r2Keys.push(r2Key);
     }
+
+    // Increment the storage counter by the bytes actually written
+    await addStorageBytes(incomingBytes);
 
     const r2KeysString = r2Keys.join(',');
 

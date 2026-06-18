@@ -66,15 +66,32 @@ const formattedImages = images.map((img: any) => ({
       <p>上傳多張相片作為單一卡片貼文到 R2，並管理所有照片與標籤資料。</p>
     </div>
 
+    <!-- R2 storage capacity widget -->
+    <section class="admin-panel storage-panel" id="storage-panel">
+      <h2>R2 容量</h2>
+      <div class="storage-widget">
+        <div class="storage-bar-wrap">
+          <div class="storage-bar-fill" id="storage-bar-fill" style="width: 0%;"></div>
+        </div>
+        <div class="storage-text">
+          <span id="storage-used">計算中…</span>
+          <span class="storage-actions">
+            <button type="button" id="storage-reconcile-btn" class="btn" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">重新計算</button>
+          </span>
+        </div>
+        <p class="storage-warning" id="storage-warning" hidden></p>
+      </div>
+    </section>
+
     <div class="admin-grid">
       <!-- Upload Panel -->
       <section class="admin-panel upload-panel">
         <h2 id="form-title-text">發佈相片貼文</h2>
         <form id="upload-form" class="admin-form">
           <div class="form-group">
-            <label for="image-file">選擇照片 (支援多選) <span class="required" id="file-required-star">*</span></label>
+            <label for="image-file">選擇照片 / 影片 (支援多選) <span class="required" id="file-required-star">*</span></label>
             <div class="file-dropzone">
-              <input type="file" id="image-file" name="file" accept="image/*" multiple required />
+              <input type="file" id="image-file" name="file" accept="image/*,video/mp4,video/webm,video/quicktime" multiple required />
               <div class="dropzone-text">
                 <span class="upload-icon">📁</span>
                 <span class="upload-prompt">點擊選擇照片 (可選多張)</span>
@@ -200,6 +217,7 @@ const formattedImages = images.map((img: any) => ({
                   const keys = image.r2_keys.split(',');
                   const firstKey = keys[0] || '';
                   const totalCount = keys.length;
+                  const firstIsVideo = /\.(mp4|webm|mov|m4v)$/i.test(firstKey);
                   return (
                     <tr class="image-row" data-id={image.id}>
                       <td style="text-align: center; vertical-align: middle;">
@@ -207,11 +225,15 @@ const formattedImages = images.map((img: any) => ({
                       </td>
                       <td>
                         <div class="thumb-container" style="position: relative; width: 48px; height: 48px;">
-                          <img 
-                            src={`/api/r2/${encodeURIComponent(firstKey)}`} 
-                            alt={image.title} 
-                            class="admin-thumb" 
-                          />
+                          {firstIsVideo ? (
+                            <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="admin-thumb" preload="metadata" muted playsinline></video>
+                          ) : (
+                            <img
+                              src={`/api/r2/${encodeURIComponent(firstKey)}`}
+                              alt={image.title}
+                              class="admin-thumb"
+                            />
+                          )}
                           {totalCount > 1 && (
                             <span class="thumb-count-badge">+{totalCount - 1}</span>
                           )}
@@ -329,6 +351,66 @@ const formattedImages = images.map((img: any) => ({
 
 <script>
   import { runSequentialBatches } from '../../lib/batches.ts';
+
+  // ---- R2 storage capacity widget ----
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  const storageBarFill = document.getElementById('storage-bar-fill');
+  const storageUsed = document.getElementById('storage-used');
+  const storageWarning = document.getElementById('storage-warning');
+  const storageReconcileBtn = document.getElementById('storage-reconcile-btn') as HTMLButtonElement | null;
+
+  async function refreshStorage(reconcile = false) {
+    try {
+      const res = await fetch('/api/storage-stats', reconcile ? { method: 'POST' } : {});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '讀取失敗');
+      const total = Number(data.total_bytes || 0);
+      const limit = Number(data.limit_bytes || 10 * 1024 * 1024 * 1024);
+      const pct = Math.min(100, (total / limit) * 100);
+
+      if (storageBarFill) {
+        storageBarFill.style.width = `${pct}%`;
+        storageBarFill.classList.remove('warn', 'critical');
+        if (pct >= 90) storageBarFill.classList.add('critical');
+        else if (pct >= 80) storageBarFill.classList.add('warn');
+      }
+      if (storageUsed) {
+        storageUsed.textContent = `${formatBytes(total)} / ${formatBytes(limit)} (${pct.toFixed(1)}%)`;
+      }
+      if (storageWarning) {
+        if (pct >= 95) {
+          storageWarning.textContent = '⚠️ 已達 95% 上限，新上傳將被拒絕。請先刪除舊資料。';
+          storageWarning.hidden = false;
+        } else if (pct >= 90) {
+          storageWarning.textContent = '⚠️ 容量已超過 90%，請留意用量。';
+          storageWarning.hidden = false;
+        } else if (pct >= 80) {
+          storageWarning.textContent = '提醒：容量已超過 80%。';
+          storageWarning.hidden = false;
+        } else {
+          storageWarning.hidden = true;
+        }
+      }
+    } catch (err: any) {
+      if (storageUsed) storageUsed.textContent = `讀取失敗：${err.message}`;
+    }
+  }
+
+  refreshStorage();
+  storageReconcileBtn?.addEventListener('click', async () => {
+    if (!storageReconcileBtn) return;
+    storageReconcileBtn.disabled = true;
+    storageReconcileBtn.textContent = '計算中…';
+    await refreshStorage(true);
+    storageReconcileBtn.disabled = false;
+    storageReconcileBtn.textContent = '重新計算';
+  });
 
   // Bulk action UI bindings
   const selectAllCheckbox = document.getElementById('select-all-checkbox') as HTMLInputElement | null;
@@ -788,6 +870,7 @@ const formattedImages = images.map((img: any) => ({
           if (remainingRows.length === 0) {
             window.location.reload();
           }
+          refreshStorage();
         } else {
           alert(`刪除失敗：${data.error || '未知錯誤'}`);
           (btn as HTMLButtonElement).disabled = false;
@@ -1330,6 +1413,37 @@ const formattedImages = images.map((img: any) => ({
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 0.75rem;
   }
+
+  /* Storage widget */
+  .storage-widget { display: flex; flex-direction: column; gap: 0.5rem; }
+  .storage-bar-wrap {
+    width: 100%;
+    height: 14px;
+    background-color: var(--bg-secondary);
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+  }
+  .storage-bar-fill {
+    height: 100%;
+    background-color: #4caf50;
+    transition: width 0.4s ease, background-color 0.3s ease;
+  }
+  .storage-bar-fill.warn { background-color: #ffb300; }
+  .storage-bar-fill.critical { background-color: #e53935; }
+  .storage-text {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+  .storage-warning {
+    font-size: 0.8rem;
+    color: #e53935;
+    margin: 0;
+  }
+  .admin-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; }
 
   /* Form Styling */
   .admin-form {

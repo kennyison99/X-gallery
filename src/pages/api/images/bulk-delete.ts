@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { addStorageBytes } from '../../../lib/storage';
 
 /**
  * POST /api/images/bulk-delete
@@ -59,15 +60,22 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    // 2. Delete keys from R2 in parallel
+    // 2. Delete keys from R2 in parallel, summing sizes for the storage counter
+    let freedBytes = 0;
     const deletePromises = Array.from(r2KeysToDelete).map(async (key) => {
       try {
+        const head = await env.BUCKET.head(key);
+        if (head) freedBytes += head.size;
         await env.BUCKET.delete(key);
       } catch (err) {
         console.error(`Failed to delete key ${key} from R2:`, err);
       }
     });
     await Promise.all(deletePromises);
+
+    if (freedBytes > 0) {
+      await addStorageBytes(-freedBytes);
+    }
 
     // 3. Delete the image records from D1 chunk by chunk (cascade delete handles image_tags relations)
     for (const chunk of idChunks) {

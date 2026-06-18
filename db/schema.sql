@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS image_tags;
 DROP TABLE IF EXISTS images;
 DROP TABLE IF EXISTS tags;
 DROP TABLE IF EXISTS crawl_accounts;
+DROP TABLE IF EXISTS storage_stats;
 
 -- 圖片/推文卡片表格
 CREATE TABLE images (
@@ -43,3 +44,13 @@ CREATE TABLE crawl_accounts (
   last_crawl_count INTEGER DEFAULT 0,    -- 上次爬取新增圖片數量
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- R2 容量統計表（單列，id=1）
+-- 上傳時 +bytes，刪除時 -bytes，後台顯示 used / 10GB
+CREATE TABLE storage_stats (
+  id INTEGER PRIMARY KEY,
+  total_bytes INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+INSERT INTO storage_stats (id, total_bytes) VALUES (1, 0);
