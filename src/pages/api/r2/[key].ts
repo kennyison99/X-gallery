@@ -91,11 +91,12 @@ export const GET: APIRoute = async ({ params, request }) => {
     headers.set('Cache-Control', 'public, max-age=31536000');
     headers.set('Accept-Ranges', 'bytes');
     headers.set('Content-Disposition', 'inline');
+    headers.set('Content-Length', String(object.size));
 
-    // Default content type guessing if not already set by R2 metadata
-    if (!headers.has('content-type')) {
-      headers.set('content-type', mimeForKey(decodedKey));
-    }
+    // Ensure correct content type — always override with our extension-based
+    // mapping so video files get the proper MIME (R2 metadata may be stale
+    // or missing for older uploads).
+    headers.set('Content-Type', mimeForKey(decodedKey));
 
     return new Response(object.body, { headers });
   } catch (error: any) {
