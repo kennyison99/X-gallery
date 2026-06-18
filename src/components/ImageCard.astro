@@ -5,6 +5,7 @@ interface Props {
     title: string;
     r2_keys: string; // Comma separated list of R2 keys
     author: string;
+    author_display_name?: string;
     author_url: string;
     post_url: string;
     description: string;
@@ -106,13 +107,13 @@ const displayDate = image.updated_at
     
     <div class="card-footer">
       <div class="author-info">
-        <span class="by-label">via</span>
+        <span class="by-label">By</span>
         {image.author_url ? (
           <a href={image.author_url} target="_blank" rel="noopener noreferrer" class="author-link">
-            @{image.author}
+            {image.author_display_name ? `${image.author_display_name}@${image.author}` : `@${image.author}`}
           </a>
         ) : (
-          <span class="author-text">@{image.author}</span>
+          <span class="author-text">{image.author_display_name ? `${image.author_display_name}@${image.author}` : `@${image.author}`}</span>
         )}
         {displayDate && <span class="card-date">{displayDate}</span>}
       </div>

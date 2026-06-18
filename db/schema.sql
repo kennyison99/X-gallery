@@ -9,7 +9,8 @@ CREATE TABLE images (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT,
   r2_keys TEXT NOT NULL,         -- 逗號分隔的 R2 keys, e.g. "key1,key2"
-  author TEXT NOT NULL,          -- 博主 Twitter 帳號
+  author TEXT NOT NULL,          -- 博主 Twitter 帳號 (handle)
+  author_display_name TEXT,      -- 博主 Twitter 顯示名稱 (nick)
   author_url TEXT,               -- 博主 Twitter 連結
   post_url TEXT,                 -- 原推文連結
   description TEXT,              -- 感想 / 內文

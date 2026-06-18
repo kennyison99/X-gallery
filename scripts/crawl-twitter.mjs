@@ -123,10 +123,11 @@ function collectMediaFiles(dir) {
   return results;
 }
 
-async function uploadImageGroup(filePaths, username, postUrl, description, createdAt) {
+async function uploadImageGroup(filePaths, username, postUrl, description, createdAt, displayName = "") {
   const formData = new FormData();
   formData.append("author", username);
   formData.append("author_url", `https://x.com/${username}`);
+  if (displayName) formData.append("author_display_name", displayName);
   formData.append("api_key", CRAWL_API_KEY);
   if (postUrl) formData.append("post_url", postUrl);
   if (description) formData.append("description", description);
@@ -797,16 +798,24 @@ async function main() {
       }
 
       // Build a tweetId -> metadata lookup from the xtractor response.
+      // Pull the display name (nick) from the first media item's user/author
+      // object so the card can show "By: nick@handle".
       const metaByTweetId = new Map();
+      let accountNick = "";
       for (const m of mediaItems) {
         const tid = String(m.tweet_id);
+        if (!accountNick) {
+          accountNick = (m.user?.nick ?? m.author?.nick ?? "").trim();
+        }
         if (!metaByTweetId.has(tid)) {
           metaByTweetId.set(tid, {
             description: (m.content ?? "").trim(),
             createdAt: m.date ?? "",
+            nick: (m.user?.nick ?? m.author?.nick ?? "").trim(),
           });
         }
       }
+      if (!accountNick) accountNick = username;
 
       const groupEntries = Object.entries(groups);
       const totalGroups = groupEntries.length;
@@ -830,6 +839,7 @@ async function main() {
                 postUrl,
                 meta?.description ?? "",
                 meta?.createdAt ?? "",
+                meta?.nick || accountNick,
               );
               totalImagesUploaded += filesInGroup.length;
               accountImagesUploaded += filesInGroup.length;

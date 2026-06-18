@@ -36,6 +36,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     const files = formData.getAll('file') as File[];
     const author = formData.get('author') as string | null;
+    const authorDisplayName = formData.get('author_display_name') as string | null;
     const authorUrl = formData.get('author_url') as string | null;
     const postUrl = formData.get('post_url') as string | null;
     const title = formData.get('title') as string | null;
@@ -106,14 +107,15 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Insert into D1
     const insertQuery = `
-      INSERT INTO images (title, r2_keys, author, author_url, post_url, description${createdAt ? ', created_at' : ''})
-      VALUES (?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description${createdAt ? ', created_at' : ''})
+      VALUES (?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
       RETURNING id
     `;
     const bindParams = [
       title || `@${author} 推文`,
       r2KeysString,
       author,
+      authorDisplayName || '',
       authorUrl || `https://x.com/${author}`,
       postUrl || '',
       description || ''
