@@ -287,7 +287,7 @@ const formattedImages = images.map((img: any) => {
                         <input type="checkbox" class="image-select-checkbox" data-id={image.id} style="cursor: pointer;" />
                       </td>
                       <td>
-                        <div class="thumb-container" style="position: relative; width: 48px; height: 48px;">
+                        <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
                           {firstIsVideo ? (
                             <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="admin-thumb" preload="metadata" muted playsinline></video>
                           ) : (
@@ -1463,6 +1463,46 @@ const formattedImages = images.map((img: any) => {
     }
   });
 
+  // Listen for clicks on the elements to toggle checkboxes (Grid card or Table thumbnail)
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+
+    // Prevent toggling when clicking on interactive elements
+    if (
+      target.tagName === 'INPUT' || 
+      target.tagName === 'BUTTON' || 
+      target.closest('button') || 
+      target.closest('a')
+    ) {
+      return;
+    }
+
+    // Case 1: Grid card click
+    const gridCard = target.closest('.grid-image-card') as HTMLElement | null;
+    if (gridCard) {
+      const cb = gridCard.querySelector('.image-select-checkbox') as HTMLInputElement | null;
+      if (cb) {
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return;
+    }
+
+    // Case 2: Table thumbnail click
+    const thumbContainer = target.closest('.thumb-container') as HTMLElement | null;
+    if (thumbContainer) {
+      const row = thumbContainer.closest('.image-row') as HTMLElement | null;
+      if (row) {
+        const cb = row.querySelector('.image-select-checkbox') as HTMLInputElement | null;
+        if (cb) {
+          cb.checked = !cb.checked;
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      return;
+    }
+  });
+
   // Select all checkbox handler
   selectAllCheckbox?.addEventListener('change', () => {
     const isChecked = selectAllCheckbox.checked;
@@ -1720,6 +1760,7 @@ const formattedImages = images.map((img: any) => {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     transition: transform var(--transition-speed) ease, border-color var(--transition-speed) ease;
+    cursor: pointer;
   }
   .grid-image-card:hover {
     transform: translateY(-2px);
