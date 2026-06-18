@@ -48,10 +48,16 @@ export const GET: APIRoute = async ({ url }) => {
       images = results || [];
     }
 
-    // Format tags_list from string to array
+    // Fetch all distinct authors first to filter out author handles from image tags list
+    const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1').all();
+    const authorSet = new Set((authorsQuery.results || []).map((r: any) => r.author.toLowerCase()));
+
+    // Format tags_list from string to array and filter out author handles
     const formattedImages = images.map((img: any) => ({
       ...img,
-      tags: img.tags_list ? img.tags_list.split(',') : []
+      tags: img.tags_list 
+        ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase())) 
+        : []
     }));
 
     return new Response(JSON.stringify(formattedImages), {

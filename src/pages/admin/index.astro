@@ -6,16 +6,26 @@ if (!env || !env.DB) {
   return new Response('D1 DB binding not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
 }
 
-// 1. Fetch all existing tags for reusable selection
+// 1. Fetch all distinct authors first
+let authorSet = new Set<string>();
+try {
+  const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images').all();
+  const authorsList = (authorsQuery.results || []).map((r: any) => r.author);
+  authorSet = new Set(authorsList.map((a: string) => a.toLowerCase()));
+} catch (err) {
+  console.error('Error fetching authors for admin:', err);
+}
+
+// 2. Fetch all existing tags for reusable selection and filter out author handles
 let allTags = [];
 try {
   const tagsQuery = await env.DB.prepare('SELECT * FROM tags ORDER BY name ASC').all();
-  allTags = tagsQuery.results || [];
+  allTags = (tagsQuery.results || []).filter((tag: any) => !authorSet.has(tag.name.toLowerCase()));
 } catch (err) {
   console.error('Error fetching tags for admin:', err);
 }
 
-// 2. Fetch all images/posts for management list
+// 3. Fetch all images/posts for management list
 let images = [];
 try {
   const query = `
@@ -87,7 +97,7 @@ const formattedImages = images.map((img: any) => {
 
   return {
     ...img,
-    tags: img.tags_list ? img.tags_list.split(',') : [],
+    tags: img.tags_list ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase())) : [],
     remainingText,
     isCritical,
     hasPhoto,

@@ -1,10 +1,6 @@
 export function generateAutoTags(author: string | null, description: string | null): string[] {
   const autoTags = new Set<string>();
 
-  if (author) {
-    autoTags.add(author.trim().toLowerCase());
-  }
-
   if (!description) {
     return [...autoTags];
   }

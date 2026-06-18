@@ -9,12 +9,18 @@ if (!env || !env.DB) {
 }
 
 const activeTag = Astro.url.searchParams.get('tag');
+const activeAuthor = Astro.url.searchParams.get('author');
 
-// 1. Fetch tags for TagFilter component
+// Fetch all distinct authors for listing
+const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1 ORDER BY author ASC').all();
+const authorsList = authorsQuery.results.map((r: any) => r.author);
+const authorSet = new Set(authorsList.map((a: string) => a.toLowerCase()));
+
+// 1. Fetch tags for TagFilter component (and filter out author handles)
 const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
-const tagsList = tagsQuery.results.map((t: any) => t.name);
+const tagsList = tagsQuery.results.map((t: any) => t.name).filter((name: string) => !authorSet.has(name.toLowerCase()));
 
-// 2. Fetch images based on active tag filter
+// 2. Fetch images based on active tag/author filter
 let images = [];
 try {
   if (activeTag) {
@@ -30,6 +36,18 @@ try {
       ORDER BY i.created_at DESC
     `;
     const { results } = await env.DB.prepare(query).bind(activeTag).all();
+    images = results || [];
+  } else if (activeAuthor) {
+    const query = `
+      SELECT i.*, group_concat(t.name) as tags_list
+      FROM images i
+      LEFT JOIN image_tags it ON i.id = it.image_id
+      LEFT JOIN tags t ON it.tag_id = t.id
+      WHERE i.author = ? AND i.published = 1
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `;
+    const { results } = await env.DB.prepare(query).bind(activeAuthor).all();
     images = results || [];
   } else {
     const query = `
@@ -50,13 +68,42 @@ try {
 
 const formattedImages = images.map((img: any) => ({
   ...img,
-  tags: img.tags_list ? img.tags_list.split(',') : []
+  tags: img.tags_list 
+    ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase()))
+    : []
 }));
+
+const pageTitle = activeTag 
+  ? `分類 #${activeTag} - Twitter 照片牆` 
+  : (activeAuthor ? `博主 @${activeAuthor} - Twitter 照片牆` : "極簡 Twitter 照片牆");
 ---
 
-<BaseLayout title={activeTag ? `分類 #${activeTag} - Twitter 照片牆` : "極簡 Twitter 照片牆"}>
+<BaseLayout title={pageTitle}>
   <div style="margin-top: 1.5rem;"></div>
 
+  <!-- Authors Filter -->
+  <div class="filter-section-title">👤 依博主篩選</div>
+  <div class="author-filter-container">
+    <div class="author-list">
+      <a 
+        href="/" 
+        class={`tag-badge ${!activeAuthor ? 'active' : ''}`}
+      >
+        全部
+      </a>
+      {authorsList.map((author) => (
+        <a 
+          href={`/?author=${encodeURIComponent(author)}`} 
+          class={`tag-badge ${activeAuthor === author ? 'active' : ''}`}
+        >
+          @{author}
+        </a>
+      ))}
+    </div>
+  </div>
+
+  <!-- Tags Filter -->
+  <div class="filter-section-title" style="margin-top: 1rem;">🏷️ 依標籤篩選</div>
   <TagFilter activeTag={activeTag} tags={tagsList} />
 
   {formattedImages.length > 0 && (
@@ -251,6 +298,51 @@ const formattedImages = images.map((img: any) => ({
 </script>
 
 <style>
+  .filter-section-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.4rem;
+  }
+
+  .author-filter-container {
+    padding: 0.5rem 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    width: 100%;
+    max-width: 100%;
+    margin-bottom: 0.5rem;
+  }
+  .author-filter-container::-webkit-scrollbar {
+    height: 6px;
+  }
+  .author-filter-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .author-filter-container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+  }
+  .author-filter-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+  }
+  @media (max-width: 800px) {
+    .author-filter-container {
+      scrollbar-width: none;
+    }
+    .author-filter-container::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .author-list {
+    display: flex;
+    gap: 0.6rem;
+    white-space: nowrap;
+    padding-bottom: 0.5rem;
+  }
+
   .filter-bar {
     display: flex;
     justify-content: space-between;

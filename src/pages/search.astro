@@ -12,13 +12,14 @@ const q = Astro.url.searchParams.get('q') || '';
 const filterTag = Astro.url.searchParams.get('tag') || '';
 const filterAuthor = Astro.url.searchParams.get('author') || '';
 
-// 2. Fetch all tags for listing
-const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
-const allTags = tagsQuery.results.map((t: any) => t.name);
-
-// 3. Fetch all distinct authors for listing
+// 2. Fetch all distinct authors for listing
 const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_url FROM images WHERE published = 1 ORDER BY author ASC').all();
 const allAuthors = authorsQuery.results as { author: string; author_url: string }[];
+const authorSet = new Set(allAuthors.map(item => item.author.toLowerCase()));
+
+// 3. Fetch all tags for listing
+const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
+const allTags = tagsQuery.results.map((t: any) => t.name).filter((name: string) => !authorSet.has(name.toLowerCase()));
 
 // 4. Perform search query if any filter is active
 let images = [];
@@ -82,7 +83,9 @@ try {
 
 const formattedImages = images.map((img: any) => ({
   ...img,
-  tags: img.tags_list ? img.tags_list.split(',') : []
+  tags: img.tags_list 
+    ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase()))
+    : []
 }));
 ---
 
