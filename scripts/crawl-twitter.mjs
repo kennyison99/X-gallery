@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { exec, execSync } from "node:child_process";
+import { exec, execSync, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
@@ -109,29 +109,66 @@ async function uploadImageGroup(filePaths, username, postUrl, description) {
 }
 
 /**
- * Renders a CLI progress bar in the terminal (compatible with GitHub Actions console).
+ * Runs gallery-dl and parses stdout line-by-line to count downloads.
  */
-function renderProgressBar(label, current, total, extraInfo = "") {
+function runGalleryDlQuietly(cmdString, tempDir, onProgress) {
+  return new Promise((resolve, reject) => {
+    // Run via shell to support arguments quoting on Windows/Linux
+    const child = spawn(cmdString, { shell: true });
+    
+    let downloadedCount = 0;
+    let buffer = "";
+    
+    const normalizedTempDir = tempDir.replace(/\\/g, "/");
+
+    child.stdout.on("data", (data) => {
+      buffer += data.toString();
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      
+      for (const line of lines) {
+        const normalizedLine = line.replace(/\\/g, "/");
+        if (normalizedLine.includes(normalizedTempDir) && (normalizedLine.endsWith(".jpg") || normalizedLine.endsWith(".jpeg") || normalizedLine.endsWith(".png") || normalizedLine.endsWith(".webp"))) {
+          downloadedCount++;
+          onProgress(downloadedCount);
+        }
+      }
+    });
+
+    child.on("close", (code) => {
+      if (buffer) {
+        const normalizedLine = buffer.replace(/\\/g, "/");
+        if (normalizedLine.includes(normalizedTempDir) && (normalizedLine.endsWith(".jpg") || normalizedLine.endsWith(".jpeg") || normalizedLine.endsWith(".png") || normalizedLine.endsWith(".webp"))) {
+          downloadedCount++;
+          onProgress(downloadedCount);
+        }
+      }
+      resolve(downloadedCount);
+    });
+
+    child.on("error", (err) => {
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Renders a milestone progress update in the terminal to avoid log spamming in GitHub Actions.
+ * Only outputs on ~10% milestones, first item, and completion.
+ */
+function renderProgressLine(label, current, total) {
   if (total <= 0) return;
-  const percentage = Math.round((current / total) * 100);
-  const barWidth = 20;
-  const filledWidth = Math.round((current / total) * barWidth);
-  const emptyWidth = barWidth - filledWidth;
+  const step = Math.max(1, Math.floor(total / 10));
+  const isMilestone = current === 1 || current === total || (current % step === 0);
   
-  const bar = "█".repeat(filledWidth) + "░".repeat(emptyWidth);
-  
-  // Truncate extraInfo to fit in a single line (avoid wrapping)
-  let info = extraInfo ? ` | ${extraInfo}` : "";
-  if (info.length > 50) {
-    info = info.substring(0, 47) + "...";
-  }
-  
-  // Use carriage return to overwrite the line in terminal
-  process.stdout.write(`\r${label}: [${bar}] ${percentage}% (${current}/${total})${info}`);
-  
-  // If complete, add a newline
-  if (current === total) {
-    process.stdout.write("\n");
+  if (isMilestone) {
+    const percentage = Math.round((current / total) * 100);
+    const barWidth = 20;
+    const filledWidth = Math.round((current / total) * barWidth);
+    const emptyWidth = barWidth - filledWidth;
+    const bar = "█".repeat(filledWidth) + "░".repeat(emptyWidth);
+    
+    console.log(`  ${label}: [${bar}] ${percentage}% (${current}/${total})`);
   }
 }
 
@@ -218,9 +255,16 @@ async function main() {
         `"https://x.com/${username}/media"`,
       ].filter(Boolean).join(" ");
 
-      console.log(`Running: ${cmd}`);
+      console.log(`Running gallery-dl...`);
+      let downloadCount = 0;
       try {
-        execSync(cmd, { stdio: "inherit", timeout: 5 * 60 * 1000 });
+        await runGalleryDlQuietly(cmd, tempDir, (count) => {
+          downloadCount = count;
+          // Print download progress every 20 images to avoid log spamming
+          if (downloadCount % 20 === 0 || downloadCount === 1) {
+            console.log(`  Downloading: ${downloadCount} images downloaded so far...`);
+          }
+        });
       } catch (dlError) {
         // gallery-dl may exit non-zero even when some images were downloaded
         console.warn(
@@ -248,7 +292,7 @@ async function main() {
           if (ext === ".webp") {
             webpImages.push(imgPath);
             convertIndex++;
-            renderProgressBar("  Converting", convertIndex, totalToConvert, path.basename(imgPath));
+            renderProgressLine("Converting", convertIndex, totalToConvert);
           } else {
             try {
               const webpPath = imgPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
@@ -257,9 +301,8 @@ async function main() {
               fs.unlinkSync(imgPath);
               webpImages.push(webpPath);
               convertIndex++;
-              renderProgressBar("  Converting", convertIndex, totalToConvert, `${path.basename(imgPath)} -> WebP`);
+              renderProgressLine("Converting", convertIndex, totalToConvert);
             } catch (convErr) {
-              process.stdout.write("\n"); // Clear carriage return before printing error
               console.error(`  ✗ WebP conversion failed for ${path.basename(imgPath)}: ${convErr.message}`);
               webpImages.push(imgPath);
               convertIndex++;
@@ -318,9 +361,8 @@ async function main() {
             await uploadImageGroup(filesInGroup, username, postUrl, description);
             totalImagesUploaded += filesInGroup.length;
             uploadIndex++;
-            renderProgressBar("  Uploading", uploadIndex, totalGroups, `Group ${key} (${filesInGroup.length} images)`);
+            renderProgressLine("Uploading", uploadIndex, totalGroups);
           } catch (uploadErr) {
-            process.stdout.write("\n"); // Clear carriage return before printing error
             console.error(
               `  ✗ Upload failed for group ${key}: ${uploadErr.message}`,
             );
