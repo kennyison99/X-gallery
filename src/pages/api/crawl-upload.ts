@@ -6,7 +6,7 @@ import {
   wouldExceedStorage,
   addStorageBytes,
 } from '../../lib/storage';
-import { classifyPost } from '../../lib/classify';
+
 
 /**
  * POST /api/crawl-upload
@@ -106,12 +106,8 @@ export const POST: APIRoute = async ({ request }) => {
     // Increment the storage counter by the bytes actually written
     await addStorageBytes(incomingBytes);
 
-    // AI classification: check if images are portrait/cosplay/gravure.
-    // Videos auto-approve. If any image is non-portrait, post goes to pending
-    // (published=0) for admin review. On AI error, auto-approve to avoid
-    // silent deletion after 3 days.
-    const { published } = await classifyPost(fileBuffers);
-    const publishedValue = published ? 1 : 0;
+    // AI classification disabled: all uploads are published directly by default.
+    const publishedValue = 1;
 
     const r2KeysString = r2Keys.join(',');
 

@@ -228,22 +228,13 @@ const formattedImages = images.map((img: any) => {
         <!-- Bulk Actions Bar -->
         <div id="bulk-actions-bar" class="bulk-actions" style="display: none; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem; padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary);">
           <span id="selected-count-display" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">已選擇 0 筆照片</span>
-          <div style="display: flex; gap: 0.4rem;">
-            <button id="bulk-reclassify-btn" class="btn" style="font-size: 0.8rem; padding: 0.3rem 0.75rem; display: flex; align-items: center; gap: 0.25rem;">
-              🤖 AI 重新分類
-            </button>
-            <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
-              刪除所選
-            </button>
-          </div>
+          <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
+            刪除所選
+          </button>
         </div>
         <div id="bulk-delete-progress" class="operation-progress" hidden>
           <progress id="bulk-delete-progress-bar" value="0" max="1"></progress>
           <span id="bulk-delete-progress-text">準備刪除...</span>
-        </div>
-        <div id="bulk-reclassify-progress" class="operation-progress" hidden>
-          <progress id="bulk-reclassify-progress-bar" value="0" max="1"></progress>
-          <span id="bulk-reclassify-progress-text">準備重新分類...</span>
         </div>
 
         <div class="table-wrapper">
@@ -484,10 +475,6 @@ const formattedImages = images.map((img: any) => {
   const bulkDeleteProgressBar = document.getElementById('bulk-delete-progress-bar') as HTMLProgressElement | null;
   const bulkDeleteProgressText = document.getElementById('bulk-delete-progress-text');
 
-  const bulkReclassifyBtn = document.getElementById('bulk-reclassify-btn') as HTMLButtonElement | null;
-  const bulkReclassifyProgress = document.getElementById('bulk-reclassify-progress');
-  const bulkReclassifyProgressBar = document.getElementById('bulk-reclassify-progress-bar') as HTMLProgressElement | null;
-  const bulkReclassifyProgressText = document.getElementById('bulk-reclassify-progress-text');
 
   const tabPublished = document.getElementById('tab-published');
   const tabPending = document.getElementById('tab-pending');
@@ -1490,67 +1477,6 @@ const formattedImages = images.map((img: any) => {
     });
   });
 
-  // =========== Bulk Reclassify listener ===========
-  bulkReclassifyBtn?.addEventListener('click', async () => {
-    const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
-    const ids = Array.from(checkedCheckboxes).map(cb => parseInt(cb.getAttribute('data-id') || '', 10)).filter(id => !isNaN(id));
-
-    if (ids.length === 0) return;
-
-    const confirmed = confirm(`確定要對這 ${ids.length} 筆貼文重新進行 AI 分類嗎？\n如果是風景/遊戲等內容會自動移至「待審查」，如果是人像寫真則保持發佈。`);
-    if (!confirmed) return;
-
-    bulkReclassifyBtn.disabled = true;
-    const originalText = bulkReclassifyBtn.innerHTML;
-    bulkReclassifyBtn.textContent = '處理中...';
-    let completedCount = 0;
-    updateOperationProgress(
-      bulkReclassifyProgress,
-      bulkReclassifyProgressBar,
-      bulkReclassifyProgressText,
-      0,
-      ids.length,
-      `已處理 0 / ${ids.length}`
-    );
-
-    try {
-      completedCount = await runSequentialBatches(ids, 10, async (batch) => {
-        const response = await fetch('/api/admin/reclassify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: batch })
-        });
-        const data = await response.json();
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || '重新分類失敗');
-        }
-        return Number(data.count || batch.length);
-      }, (completed) => {
-        completedCount = completed;
-        updateOperationProgress(
-          bulkReclassifyProgress,
-          bulkReclassifyProgressBar,
-          bulkReclassifyProgressText,
-          completedCount,
-          ids.length,
-          `已處理 ${completedCount} / ${ids.length}`
-        );
-      });
-
-      alert(`批次 AI 重新分類完成！成功處理 ${completedCount} 筆貼文。`);
-      window.location.reload();
-    } catch (err: any) {
-      console.error('Error in bulk reclassify:', err);
-      if (bulkReclassifyProgressText) {
-        bulkReclassifyProgressText.textContent = `失敗：已處理 ${completedCount} / ${ids.length}。${err.message}`;
-      }
-      alert(`批次重新分類中斷。\n已處理 ${completedCount} / ${ids.length} 筆。\n${err.message}`);
-      window.location.reload();
-    } finally {
-      bulkReclassifyBtn.disabled = false;
-      bulkReclassifyBtn.innerHTML = originalText;
-    }
-  });
 
   // Initialize
   applyFilters();
