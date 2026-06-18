@@ -1,4 +1,5 @@
 ---
+import { execSync } from 'node:child_process';
 import Header from '../components/Header.astro';
 import '../styles/global.css';
 import 'photoswipe/style.css';
@@ -13,6 +14,22 @@ const {
   title = "極簡 Twitter 照片牆", 
   description = "展示精選 Twitter 博主的相簿，極簡設計，支援標籤分類與喜愛功能。" 
 } = Astro.props;
+
+let commitHash = 'unknown';
+try {
+  commitHash = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+} catch (e) {
+  // Fallback
+}
+
+const buildDate = new Date().toLocaleDateString('zh-TW', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  timeZone: 'Asia/Hong_Kong'
+}).replace(/\//g, '.');
+
+const versionString = `v${buildDate}-${commitHash}`;
 ---
 
 <!DOCTYPE html>
@@ -48,7 +65,10 @@ const {
     </main>
     <footer class="footer">
       <div class="container">
-        <p>© 2026 Twitter Gallery. Built with Astro & Cloudflare Pages.</p>
+        <p>
+          © 2026 Twitter Gallery. Built with Astro & Cloudflare Pages.
+          <span class="version-tag">{versionString}</span>
+        </p>
       </div>
     </footer>
 
@@ -131,5 +151,16 @@ const {
     font-size: 0.85rem;
     color: var(--text-secondary);
     background-color: var(--bg-secondary);
+  }
+  .version-tag {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    background-color: var(--border-color);
+    color: var(--text-secondary);
+    font-family: monospace;
+    font-size: 0.75rem;
+    opacity: 0.8;
   }
 </style>
