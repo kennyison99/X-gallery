@@ -199,16 +199,17 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
   }
 
   /* PhotoSwipe video container styles */
-  .pswp__video-wrapper {
+  :global(.pswp__video-wrapper) {
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .pswp__video-wrapper video {
-    max-width: 100%;
-    max-height: 100%;
+  :global(.pswp__video-wrapper video) {
+    display: block;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     outline: none;
   }
