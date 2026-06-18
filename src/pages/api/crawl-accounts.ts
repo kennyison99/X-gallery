@@ -37,7 +37,26 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const username = (body.username || '').trim().replace(/^@/, '');
+    let username = (body.username || '').trim().replace(/^@/, '');
+
+    // Automatically extract username if they pasted a full Twitter/X URL
+    if (username.includes('/') || username.includes('http')) {
+      try {
+        const cleanUrl = username.startsWith('http') ? username : `https://${username}`;
+        const url = new URL(cleanUrl);
+        const paths = url.pathname.split('/').filter(p => p);
+        if (paths.length > 0) {
+          // The first segment of the path is the username (e.g. /97san97/status/123 -> 97san97)
+          username = paths[0];
+        }
+      } catch (e) {
+        // Regex fallback
+        const match = username.match(/(?:twitter|x)\.com\/([a-zA-Z0-9_]+)/i);
+        if (match) {
+          username = match[1];
+        }
+      }
+    }
 
     if (!username) {
       return new Response(JSON.stringify({ error: '請輸入 Twitter 帳號名稱' }), {
@@ -72,7 +91,24 @@ export const DELETE: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const username = (body.username || '').trim().replace(/^@/, '');
+    let username = (body.username || '').trim().replace(/^@/, '');
+
+    // Automatically extract username if they pasted a full Twitter/X URL
+    if (username.includes('/') || username.includes('http')) {
+      try {
+        const cleanUrl = username.startsWith('http') ? username : `https://${username}`;
+        const url = new URL(cleanUrl);
+        const paths = url.pathname.split('/').filter(p => p);
+        if (paths.length > 0) {
+          username = paths[0];
+        }
+      } catch (e) {
+        const match = username.match(/(?:twitter|x)\.com\/([a-zA-Z0-9_]+)/i);
+        if (match) {
+          username = match[1];
+        }
+      }
+    }
 
     if (!username) {
       return new Response(JSON.stringify({ error: '請輸入要刪除的帳號名稱' }), {
