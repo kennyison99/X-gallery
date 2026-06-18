@@ -50,10 +50,8 @@ jobs:
       - name: Install Pillow
         run: pip install Pillow
 
-      - name: Verify ffmpeg is available
-        # ubuntu-latest already ships with ffmpeg pre-installed.
-        run: |
-          ffmpeg -version | head -n 1
+      - name: Set up FFmpeg
+        uses: federicocarboni/setup-ffmpeg@v3
 
       - name: Run Twitter crawl script
         env:
