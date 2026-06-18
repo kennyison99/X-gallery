@@ -212,7 +212,17 @@ const formattedImages = images.map((img: any) => {
 
       <!-- Manage List Panel -->
       <section class="admin-panel list-panel">
-        <h2>照片貼文列表 (<span id="total-count-display">{formattedImages.length}</span>)</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h2 style="margin: 0;">照片貼文列表 (<span id="total-count-display">{formattedImages.length}</span>)</h2>
+          <div class="view-toggle-group" style="display: inline-flex; gap: 0.25rem; background-color: var(--accent-light); padding: 0.2rem; border-radius: 6px; border: 1px solid var(--border-color);">
+            <button type="button" id="view-toggle-table" class="view-toggle-btn active">
+              📋 列表
+            </button>
+            <button type="button" id="view-toggle-grid" class="view-toggle-btn">
+              ⬜ 網格
+            </button>
+          </div>
+        </div>
 
         <!-- Tabs for Published vs Pending -->
         <div class="admin-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
@@ -252,7 +262,7 @@ const formattedImages = images.map((img: any) => {
           <span id="bulk-delete-progress-text">準備刪除...</span>
         </div>
 
-        <div class="table-wrapper">
+        <div class="table-wrapper view-mode-table">
           {formattedImages.length > 0 ? (
             <table class="admin-table">
               <thead>
@@ -347,6 +357,69 @@ const formattedImages = images.map((img: any) => {
                 })}
               </tbody>
             </table>
+          ) : (
+            <div class="empty-table-state">
+              <p>資料庫目前無照片，請從左側上傳。</p>
+            </div>
+          )}
+        </div>
+
+        <div class="grid-wrapper view-mode-grid" style="display: none;">
+          {formattedImages.length > 0 ? (
+            <div class="admin-grid-view">
+              {formattedImages.map((image) => {
+                const keys = image.r2_keys.split(',').map((k: string) => k.trim()).filter(Boolean);
+                const firstKey = keys[0] || '';
+                const totalCount = keys.length;
+                const firstIsVideo = /\.(mp4|webm|mov|m4v)$/i.test(firstKey);
+
+                return (
+                  <div class="grid-image-card" data-id={image.id} data-published={image.published} data-has-photo={image.hasPhoto ? "true" : "false"} data-has-video={image.hasVideo ? "true" : "false"}>
+                    <div class="grid-card-select-overlay">
+                      <input type="checkbox" class="image-select-checkbox grid-select-checkbox" data-id={image.id} style="cursor: pointer;" />
+                    </div>
+
+                    <div class="grid-card-media">
+                      {firstIsVideo ? (
+                        <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="grid-thumb" preload="metadata" muted playsinline></video>
+                      ) : (
+                        <img src={`/api/r2/${encodeURIComponent(firstKey)}`} alt={image.title} class="grid-thumb" loading="lazy" />
+                      )}
+                      {totalCount > 1 && (
+                        <span class="grid-thumb-count-badge">+{totalCount - 1}</span>
+                      )}
+
+                      <div class="grid-card-hover-overlay">
+                        <div class="grid-card-info">
+                          <div class="grid-card-title" title={image.title || '無標題'}>{image.title || '無標題'}</div>
+                          <div class="grid-card-author">@{image.author}</div>
+                        </div>
+                        <div class="grid-card-actions">
+                          {image.published === 0 && (
+                            <button class="btn btn-success approve-btn grid-action-btn" data-id={image.id} title="核准">✓</button>
+                          )}
+                          <button 
+                            class="btn edit-btn grid-action-btn" 
+                            data-id={image.id}
+                            data-title={image.title}
+                            data-description={image.description || ''}
+                            data-author={image.author}
+                            data-author-url={image.author_url || ''}
+                            data-post-url={image.post_url || ''}
+                            data-tags={image.tags.join(',')}
+                            data-keys={image.r2_keys}
+                            title="編輯"
+                          >
+                            ✏️
+                          </button>
+                          <button class="btn btn-danger delete-btn grid-action-btn" data-id={image.id} title="刪除">🗑️</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div class="empty-table-state">
               <p>資料庫目前無照片，請從左側上傳。</p>
@@ -1134,14 +1207,18 @@ const formattedImages = images.map((img: any) => {
   const nextPageBtn = document.getElementById('next-page-btn') as HTMLButtonElement | null;
   const totalCountDisplay = document.getElementById('total-count-display');
   const imageRows = document.querySelectorAll('.image-row');
+  const gridCards = document.querySelectorAll('.grid-image-card');
 
-  const ITEMS_PER_PAGE = 10;
+  let activeView = 'table'; // 'table' or 'grid'
   let currentPage = 1;
+  let filteredTableRows: HTMLElement[] = [];
+  let filteredGridCards: HTMLElement[] = [];
   let filteredRows: HTMLElement[] = [];
 
   // Parse rows data
   const rowsData = Array.from(imageRows).map((row) => {
     const el = row as HTMLElement;
+    const id = el.getAttribute('data-id');
     const title = (el.querySelector('.image-title')?.textContent || '').toLowerCase();
     const author = (el.querySelector('.image-author')?.textContent || '').toLowerCase().replace(/^@/, '').split('⏰')[0].trim();
     const description = (el.querySelector('.image-desc-preview')?.textContent || '').toLowerCase();
@@ -1153,7 +1230,25 @@ const formattedImages = images.map((img: any) => {
       tags.push((tagEl.textContent || '').replace(/^#/, '').trim());
     });
 
-    return { el, title, author, description, published, hasPhoto, hasVideo, tags };
+    return { el, id, title, author, description, published, hasPhoto, hasVideo, tags };
+  });
+
+  // Parse grid cards data
+  const cardsData = Array.from(gridCards).map((card) => {
+    const el = card as HTMLElement;
+    const id = el.getAttribute('data-id');
+    const rowMatch = rowsData.find(r => r.id === id);
+    return {
+      el,
+      id,
+      title: rowMatch?.title || '',
+      author: rowMatch?.author || '',
+      description: rowMatch?.description || '',
+      published: rowMatch?.published ?? false,
+      hasPhoto: rowMatch?.hasPhoto ?? false,
+      hasVideo: rowMatch?.hasVideo ?? false,
+      tags: rowMatch?.tags || []
+    };
   });
 
   // Populate filter selectors
@@ -1189,25 +1284,19 @@ const formattedImages = images.map((img: any) => {
     const tagVal = (tagFilter?.value || '');
     const mediaVal = (mediaFilter?.value || '');
 
-    filteredRows = [];
+    filteredTableRows = [];
+    filteredGridCards = [];
 
+    // Filter table rows
     rowsData.forEach(row => {
-      // Check tab
       const matchesTab = (activeTab === 'published' && row.published) || (activeTab === 'pending' && !row.published);
-
-      // Check search
       const matchesSearch = !searchVal || 
         row.title.includes(searchVal) || 
         row.author.includes(searchVal) || 
         row.description.includes(searchVal);
-
-      // Check author
       const matchesAuthor = !authorVal || row.author === authorVal;
-
-      // Check tag
       const matchesTag = !tagVal || row.tags.includes(tagVal);
 
-      // Check media type
       let matchesMedia = true;
       if (mediaVal === 'photo') {
         matchesMedia = row.hasPhoto;
@@ -1216,11 +1305,38 @@ const formattedImages = images.map((img: any) => {
       }
 
       if (matchesSearch && matchesAuthor && matchesTag && matchesTab && matchesMedia) {
-        filteredRows.push(row.el);
+        filteredTableRows.push(row.el);
       } else {
         row.el.style.display = 'none';
       }
     });
+
+    // Filter grid cards
+    cardsData.forEach(card => {
+      const matchesTab = (activeTab === 'published' && card.published) || (activeTab === 'pending' && !card.published);
+      const matchesSearch = !searchVal || 
+        card.title.includes(searchVal) || 
+        card.author.includes(searchVal) || 
+        card.description.includes(searchVal);
+      const matchesAuthor = !authorVal || card.author === authorVal;
+      const matchesTag = !tagVal || card.tags.includes(tagVal);
+
+      let matchesMedia = true;
+      if (mediaVal === 'photo') {
+        matchesMedia = card.hasPhoto;
+      } else if (mediaVal === 'video') {
+        matchesMedia = card.hasVideo;
+      }
+
+      if (matchesSearch && matchesAuthor && matchesTag && matchesTab && matchesMedia) {
+        filteredGridCards.push(card.el);
+      } else {
+        card.el.style.display = 'none';
+      }
+    });
+
+    // Set filteredRows based on activeView
+    filteredRows = activeView === 'table' ? filteredTableRows : filteredGridCards;
 
     // Reset pagination to first page after filtering
     currentPage = 1;
@@ -1228,24 +1344,35 @@ const formattedImages = images.map((img: any) => {
   }
 
   function updatePagination() {
+    filteredRows = activeView === 'table' ? filteredTableRows : filteredGridCards;
     const totalItems = filteredRows.length;
-    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
+    const itemsPerPage = activeView === 'grid' ? 25 : 10;
+    const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
 
     // Bounds check
     if (currentPage < 1) currentPage = 1;
     if (currentPage > totalPages) currentPage = totalPages;
 
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems);
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
 
     // Hide all first
     rowsData.forEach(row => {
       row.el.style.display = 'none';
     });
+    cardsData.forEach(card => {
+      card.el.style.display = 'none';
+    });
 
     // Show current page items
-    for (let i = startIndex; i < endIndex; i++) {
-      filteredRows[i].style.display = 'table-row';
+    if (activeView === 'table') {
+      for (let i = startIndex; i < endIndex; i++) {
+        filteredRows[i].style.display = 'table-row';
+      }
+    } else {
+      for (let i = startIndex; i < endIndex; i++) {
+        filteredRows[i].style.display = 'block';
+      }
     }
 
     // Update pagination controls
@@ -1279,12 +1406,49 @@ const formattedImages = images.map((img: any) => {
   });
 
   nextPageBtn?.addEventListener('click', () => {
-    const totalPages = Math.ceil(filteredRows.length / ITEMS_PER_PAGE);
+    const itemsPerPage = activeView === 'grid' ? 25 : 10;
+    const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
     if (currentPage < totalPages) {
       currentPage++;
       updatePagination();
     }
   });
+
+  // View toggle event listeners
+  const viewToggleTable = document.getElementById('view-toggle-table');
+  const viewToggleGrid = document.getElementById('view-toggle-grid');
+  const tableViewEl = document.querySelector('.view-mode-table') as HTMLElement | null;
+  const gridViewEl = document.querySelector('.view-mode-grid') as HTMLElement | null;
+
+  function switchView(view: 'table' | 'grid') {
+    if (activeView === view) return;
+    activeView = view;
+
+    // Uncheck everything to prevent hidden selections
+    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
+      (cb as HTMLInputElement).checked = false;
+    });
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    updateBulkActionsState();
+
+    if (view === 'table') {
+      viewToggleTable?.classList.add('active');
+      viewToggleGrid?.classList.remove('active');
+      if (tableViewEl) tableViewEl.style.display = 'block';
+      if (gridViewEl) gridViewEl.style.display = 'none';
+    } else {
+      viewToggleGrid?.classList.add('active');
+      viewToggleTable?.classList.remove('active');
+      if (gridViewEl) gridViewEl.style.display = 'block';
+      if (tableViewEl) tableViewEl.style.display = 'none';
+    }
+
+    currentPage = 1;
+    updatePagination();
+  }
+
+  viewToggleTable?.addEventListener('click', () => switchView('table'));
+  viewToggleGrid?.addEventListener('click', () => switchView('grid'));
 
   // Attach settings change handlers on page load
   document.querySelectorAll('.toggle-enabled-cb, .toggle-crawlall-cb').forEach(cb => {
@@ -1511,6 +1675,177 @@ const formattedImages = images.map((img: any) => {
 </script>
 
 <style>
+  /* View Toggle Styles */
+  .view-toggle-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.65rem;
+    font-family: inherit;
+  }
+  .view-toggle-btn.active {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Admin Grid View Styles */
+  .admin-grid-view {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+  }
+  @media (min-width: 600px) {
+    .admin-grid-view {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  @media (min-width: 900px) {
+    .admin-grid-view {
+      grid-template-columns: repeat(5, 1fr);
+    }
+  }
+
+  .grid-image-card {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    transition: transform var(--transition-speed) ease, border-color var(--transition-speed) ease;
+  }
+  .grid-image-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--text-primary);
+  }
+  
+  .grid-card-media {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  .grid-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .grid-card-select-overlay {
+    position: absolute;
+    top: 0.4rem;
+    left: 0.4rem;
+    z-index: 10;
+  }
+  .grid-select-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--text-primary);
+    border: 1px solid #fff;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .grid-thumb-count-badge {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-weight: 500;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .grid-card-hover-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0.6rem;
+    opacity: 0;
+    transition: opacity var(--transition-speed) ease;
+    z-index: 2;
+  }
+  .grid-image-card:hover .grid-card-hover-overlay {
+    opacity: 1;
+  }
+
+  .grid-card-info {
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .grid-card-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .grid-card-author {
+    font-size: 0.7rem;
+    color: #ccc;
+  }
+
+  .grid-card-actions {
+    display: flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+  }
+  .grid-action-btn {
+    padding: 0.25rem 0.4rem;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .grid-action-btn:hover {
+    background: #fff;
+    color: #000;
+  }
+  .grid-action-btn.btn-danger:hover {
+    background: var(--heart-color);
+    color: #fff;
+  }
+  .grid-action-btn.btn-success:hover {
+    background: #2e7d32;
+    color: #fff;
+  }
+
+  @media (max-width: 899px) {
+    .grid-card-hover-overlay {
+      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 70%, rgba(0,0,0,0) 100%);
+      opacity: 1;
+      justify-content: flex-end;
+    }
+    .grid-card-info {
+      margin-bottom: 0.3rem;
+    }
+  }
+
   .admin-container {
     padding: 2.5rem 0;
   }
