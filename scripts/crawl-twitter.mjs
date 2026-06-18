@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
 
 // ---------------------------------------------------------------------------
 // Configuration from environment variables
@@ -236,27 +239,33 @@ async function main() {
         console.log(`Converting images to WebP (Quality 80%):`);
       }
       
+      const CONVERT_CONCURRENCY = 4;
       let convertIndex = 0;
-      for (const imgPath of rawFiles) {
-        convertIndex++;
-        const ext = path.extname(imgPath).toLowerCase();
-        if (ext === ".webp") {
-          webpImages.push(imgPath);
-          renderProgressBar("  Converting", convertIndex, totalToConvert, path.basename(imgPath));
-        } else {
-          try {
-            const webpPath = imgPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
-            const convertCmd = `python -c "from PIL import Image; Image.open(r'''${imgPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
-            execSync(convertCmd, { stdio: "ignore" });
-            fs.unlinkSync(imgPath);
-            webpImages.push(webpPath);
-            renderProgressBar("  Converting", convertIndex, totalToConvert, `${path.basename(imgPath)} -> WebP`);
-          } catch (convErr) {
-            process.stdout.write("\n"); // Clear carriage return before printing error
-            console.error(`  ✗ WebP conversion failed for ${path.basename(imgPath)}: ${convErr.message}`);
+      for (let i = 0; i < rawFiles.length; i += CONVERT_CONCURRENCY) {
+        const chunk = rawFiles.slice(i, i + CONVERT_CONCURRENCY);
+        await Promise.all(chunk.map(async (imgPath) => {
+          const ext = path.extname(imgPath).toLowerCase();
+          if (ext === ".webp") {
             webpImages.push(imgPath);
+            convertIndex++;
+            renderProgressBar("  Converting", convertIndex, totalToConvert, path.basename(imgPath));
+          } else {
+            try {
+              const webpPath = imgPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
+              const convertCmd = `python -c "from PIL import Image; Image.open(r'''${imgPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
+              await execAsync(convertCmd);
+              fs.unlinkSync(imgPath);
+              webpImages.push(webpPath);
+              convertIndex++;
+              renderProgressBar("  Converting", convertIndex, totalToConvert, `${path.basename(imgPath)} -> WebP`);
+            } catch (convErr) {
+              process.stdout.write("\n"); // Clear carriage return before printing error
+              console.error(`  ✗ WebP conversion failed for ${path.basename(imgPath)}: ${convErr.message}`);
+              webpImages.push(imgPath);
+              convertIndex++;
+            }
           }
-        }
+        }));
       }
 
       totalImagesDownloaded += webpImages.length;
@@ -284,35 +293,40 @@ async function main() {
         console.log(`Uploading image groups to Cloudflare:`);
       }
       
+      const UPLOAD_CONCURRENCY = 5;
       let uploadIndex = 0;
-      for (const [key, filesInGroup] of groupEntries) {
-        uploadIndex++;
-        try {
-          const isTweetId = /^\d+$/.test(key);
-          const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
+      for (let i = 0; i < groupEntries.length; i += UPLOAD_CONCURRENCY) {
+        const chunk = groupEntries.slice(i, i + UPLOAD_CONCURRENCY);
+        await Promise.all(chunk.map(async ([key, filesInGroup]) => {
+          try {
+            const isTweetId = /^\d+$/.test(key);
+            const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
 
-          // Parse description from metadata JSON if available
-          let description = "";
-          const jsonFile = jsonFiles.find(f => f.includes(key));
-          if (jsonFile) {
-            try {
-              const metaData = JSON.parse(fs.readFileSync(path.join(tempDir, jsonFile), "utf-8"));
-              description = metaData.content || metaData.text || metaData.tweet_text || metaData.description || "";
-              description = description.trim();
-            } catch (jsonErr) {
-              // Ignore parser errors to avoid messing up the UI progress bar
+            // Parse description from metadata JSON if available
+            let description = "";
+            const jsonFile = jsonFiles.find(f => f.includes(key));
+            if (jsonFile) {
+              try {
+                const metaData = JSON.parse(fs.readFileSync(path.join(tempDir, jsonFile), "utf-8"));
+                description = metaData.content || metaData.text || metaData.tweet_text || metaData.description || "";
+                description = description.trim();
+              } catch (jsonErr) {
+                // Ignore parser errors to avoid messing up the UI progress bar
+              }
             }
-          }
 
-          await uploadImageGroup(filesInGroup, username, postUrl, description);
-          totalImagesUploaded += filesInGroup.length;
-          renderProgressBar("  Uploading", uploadIndex, totalGroups, `Group ${key} (${filesInGroup.length} images)`);
-        } catch (uploadErr) {
-          process.stdout.write("\n"); // Clear carriage return before printing error
-          console.error(
-            `  ✗ Upload failed for group ${key}: ${uploadErr.message}`,
-          );
-        }
+            await uploadImageGroup(filesInGroup, username, postUrl, description);
+            totalImagesUploaded += filesInGroup.length;
+            uploadIndex++;
+            renderProgressBar("  Uploading", uploadIndex, totalGroups, `Group ${key} (${filesInGroup.length} images)`);
+          } catch (uploadErr) {
+            process.stdout.write("\n"); // Clear carriage return before printing error
+            console.error(
+              `  ✗ Upload failed for group ${key}: ${uploadErr.message}`,
+            );
+            uploadIndex++;
+          }
+        }));
       }
     } catch (err) {
       console.error(`ERROR processing @${username}: ${err.message}`);
