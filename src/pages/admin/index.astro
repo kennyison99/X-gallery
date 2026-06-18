@@ -159,11 +159,20 @@ const formattedImages = images.map((img: any) => ({
           </select>
         </div>
 
+        <!-- Bulk Actions Bar -->
+        <div id="bulk-actions-bar" class="bulk-actions" style="display: none; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem; padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary);">
+          <span id="selected-count-display" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">已選擇 0 筆照片</span>
+          <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
+            刪除所選
+          </button>
+        </div>
+
         <div class="table-wrapper">
           {formattedImages.length > 0 ? (
             <table class="admin-table">
               <thead>
                 <tr>
+                  <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-checkbox" style="cursor: pointer;" /></th>
                   <th>預覽</th>
                   <th>貼文資訊</th>
                   <th>標籤</th>
@@ -177,6 +186,9 @@ const formattedImages = images.map((img: any) => ({
                   const totalCount = keys.length;
                   return (
                     <tr class="image-row" data-id={image.id}>
+                      <td style="text-align: center; vertical-align: middle;">
+                        <input type="checkbox" class="image-select-checkbox" data-id={image.id} style="cursor: pointer;" />
+                      </td>
                       <td>
                         <div class="thumb-container" style="position: relative; width: 48px; height: 48px;">
                           <img 
@@ -290,6 +302,31 @@ const formattedImages = images.map((img: any) => ({
 </BaseLayout>
 
 <script>
+  // Bulk action UI bindings
+  const selectAllCheckbox = document.getElementById('select-all-checkbox') as HTMLInputElement | null;
+  const bulkActionsBar = document.getElementById('bulk-actions-bar');
+  const selectedCountDisplay = document.getElementById('selected-count-display');
+  const bulkDeleteBtn = document.getElementById('bulk-delete-btn') as HTMLButtonElement | null;
+
+  function updateBulkActionsState() {
+    const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
+    const checkedCount = checkedCheckboxes.length;
+
+    if (selectedCountDisplay) {
+      selectedCountDisplay.textContent = `已選擇 ${checkedCount} 筆照片`;
+    }
+
+    if (bulkActionsBar) {
+      bulkActionsBar.style.display = checkedCount > 0 ? 'flex' : 'none';
+    }
+
+    if (selectAllCheckbox) {
+      const visibleCheckboxes = (typeof filteredRows !== 'undefined' && filteredRows) ? filteredRows.map(row => row.querySelector('.image-select-checkbox') as HTMLInputElement).filter(Boolean) : [];
+      const checkedVisibleCount = visibleCheckboxes.filter(cb => cb.checked).length;
+      selectAllCheckbox.checked = visibleCheckboxes.length > 0 && checkedVisibleCount === visibleCheckboxes.length;
+    }
+  }
+
   // UI interactions for file input
   const fileInput = document.getElementById('image-file') as HTMLInputElement | null;
   const fileNameDisplay = document.querySelector('.file-name-display');
@@ -927,6 +964,13 @@ const formattedImages = images.map((img: any) => ({
   }
 
   function applyFilters() {
+    // Uncheck checkboxes when filters change to prevent deleting non-visible items
+    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
+      (cb as HTMLInputElement).checked = false;
+    });
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    updateBulkActionsState();
+
     const searchVal = (searchInput?.value || '').trim().toLowerCase();
     const authorVal = (authorFilter?.value || '').toLowerCase();
     const tagVal = (tagFilter?.value || '');
@@ -1019,6 +1063,66 @@ const formattedImages = images.map((img: any) => ({
   // Attach settings change handlers on page load
   document.querySelectorAll('.toggle-enabled-cb, .toggle-crawlall-cb').forEach(cb => {
     cb.addEventListener('change', handleToggleCrawlSetting);
+  });
+
+  // Listen for individual row checkbox changes
+  document.addEventListener('change', (e) => {
+    const target = e.target as HTMLElement;
+    if (target && target.classList.contains('image-select-checkbox')) {
+      updateBulkActionsState();
+    }
+  });
+
+  // Select all checkbox handler
+  selectAllCheckbox?.addEventListener('change', () => {
+    const isChecked = selectAllCheckbox.checked;
+    
+    // Check/uncheck only currently filtered/visible rows
+    filteredRows.forEach(rowEl => {
+      const cb = rowEl.querySelector('.image-select-checkbox') as HTMLInputElement | null;
+      if (cb) {
+        cb.checked = isChecked;
+      }
+    });
+
+    updateBulkActionsState();
+  });
+
+  // Bulk delete action handler
+  bulkDeleteBtn?.addEventListener('click', async () => {
+    const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
+    const ids = Array.from(checkedCheckboxes).map(cb => parseInt(cb.getAttribute('data-id') || '', 10)).filter(id => !isNaN(id));
+
+    if (ids.length === 0) return;
+
+    const confirmed = confirm(`確定要刪除這 ${ids.length} 張照片嗎？\n這會自資料庫中移除，並同步刪除 R2 儲存的實體檔案，此操作無法復原！`);
+    if (!confirmed) return;
+
+    bulkDeleteBtn.disabled = true;
+    bulkDeleteBtn.textContent = '刪除中...';
+
+    try {
+      const response = await fetch('/api/images/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        alert(`成功刪除 ${data.count} 筆照片！`);
+        window.location.reload();
+      } else {
+        alert(data.error || '刪除失敗');
+        bulkDeleteBtn.disabled = false;
+        bulkDeleteBtn.textContent = '刪除所選';
+      }
+    } catch (err) {
+      console.error('Error in bulk delete:', err);
+      alert('發生網路錯誤，請重試');
+      bulkDeleteBtn.disabled = false;
+      bulkDeleteBtn.textContent = '刪除所選';
+    }
   });
 
   // Initialize
