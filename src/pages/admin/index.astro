@@ -146,7 +146,19 @@ const formattedImages = images.map((img: any) => ({
 
       <!-- Manage List Panel -->
       <section class="admin-panel list-panel">
-        <h2>照片貼文列表 ({formattedImages.length})</h2>
+        <h2>照片貼文列表 (<span id="total-count-display">{formattedImages.length}</span>)</h2>
+        
+        <!-- Search and Filter Bar -->
+        <div class="list-filters" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+          <input type="text" id="search-input" placeholder="搜尋標題、作者或內文..." style="flex: 2; min-width: 180px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'" />
+          <select id="author-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="">所有作者</option>
+          </select>
+          <select id="tag-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="">所有標籤</option>
+          </select>
+        </div>
+
         <div class="table-wrapper">
           {formattedImages.length > 0 ? (
             <table class="admin-table">
@@ -221,6 +233,15 @@ const formattedImages = images.map((img: any) => ({
               <p>資料庫目前無照片，請從左側上傳。</p>
             </div>
           )}
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-controls" id="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+          <span class="pagination-info" id="pagination-info">顯示第 1-10 筆，共 0 筆</span>
+          <div style="display: flex; gap: 0.4rem;">
+            <button type="button" id="prev-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">上一頁</button>
+            <button type="button" id="next-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">下一頁</button>
+          </div>
         </div>
       </section>
 
@@ -796,6 +817,147 @@ const formattedImages = images.map((img: any) => ({
   document.querySelectorAll('.remove-crawl-btn').forEach(btn => {
     btn.addEventListener('click', handleRemoveCrawl);
   });
+
+  // =========== Admin List Filtering and Pagination ===========
+  const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
+  const authorFilter = document.getElementById('author-filter') as HTMLSelectElement | null;
+  const tagFilter = document.getElementById('tag-filter') as HTMLSelectElement | null;
+  const paginationInfo = document.getElementById('pagination-info');
+  const prevPageBtn = document.getElementById('prev-page-btn') as HTMLButtonElement | null;
+  const nextPageBtn = document.getElementById('next-page-btn') as HTMLButtonElement | null;
+  const totalCountDisplay = document.getElementById('total-count-display');
+  const imageRows = document.querySelectorAll('.image-row');
+
+  const ITEMS_PER_PAGE = 10;
+  let currentPage = 1;
+  let filteredRows: HTMLElement[] = [];
+
+  // Parse rows data
+  const rowsData = Array.from(imageRows).map((row) => {
+    const el = row as HTMLElement;
+    const title = (el.querySelector('.image-title')?.textContent || '').toLowerCase();
+    const author = (el.querySelector('.image-author')?.textContent || '').toLowerCase().replace(/^@/, '');
+    const description = (el.querySelector('.image-desc-preview')?.textContent || '').toLowerCase();
+    const tags: string[] = [];
+    el.querySelectorAll('.table-tag').forEach(tagEl => {
+      tags.push((tagEl.textContent || '').replace(/^#/, '').trim());
+    });
+
+    return { el, title, author, description, tags };
+  });
+
+  // Populate filter selectors
+  if (authorFilter && tagFilter) {
+    const uniqueAuthors = Array.from(new Set(rowsData.map(r => r.author).filter(Boolean))).sort();
+    const uniqueTags = Array.from(new Set(rowsData.flatMap(r => r.tags).filter(Boolean))).sort();
+
+    uniqueAuthors.forEach(author => {
+      const opt = document.createElement('option');
+      opt.value = author;
+      opt.textContent = `@${author}`;
+      authorFilter.appendChild(opt);
+    });
+
+    uniqueTags.forEach(tag => {
+      const opt = document.createElement('option');
+      opt.value = tag;
+      opt.textContent = `#${tag}`;
+      tagFilter.appendChild(opt);
+    });
+  }
+
+  function applyFilters() {
+    const searchVal = (searchInput?.value || '').trim().toLowerCase();
+    const authorVal = (authorFilter?.value || '').toLowerCase();
+    const tagVal = (tagFilter?.value || '');
+
+    filteredRows = [];
+
+    rowsData.forEach(row => {
+      // Check search
+      const matchesSearch = !searchVal || 
+        row.title.includes(searchVal) || 
+        row.author.includes(searchVal) || 
+        row.description.includes(searchVal);
+
+      // Check author
+      const matchesAuthor = !authorVal || row.author === authorVal;
+
+      // Check tag
+      const matchesTag = !tagVal || row.tags.includes(tagVal);
+
+      if (matchesSearch && matchesAuthor && matchesTag) {
+        filteredRows.push(row.el);
+      } else {
+        row.el.style.display = 'none';
+      }
+    });
+
+    // Reset pagination to first page after filtering
+    currentPage = 1;
+    updatePagination();
+  }
+
+  function updatePagination() {
+    const totalItems = filteredRows.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
+
+    // Bounds check
+    if (currentPage < 1) currentPage = 1;
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems);
+
+    // Hide all first
+    rowsData.forEach(row => {
+      row.el.style.display = 'none';
+    });
+
+    // Show current page items
+    for (let i = startIndex; i < endIndex; i++) {
+      filteredRows[i].style.display = 'table-row';
+    }
+
+    // Update pagination controls
+    if (paginationInfo) {
+      if (totalItems > 0) {
+        paginationInfo.textContent = `顯示第 ${startIndex + 1}-${endIndex} 筆，共 ${totalItems} 筆`;
+      } else {
+        paginationInfo.textContent = '查無任何貼文';
+      }
+    }
+
+    if (totalCountDisplay) {
+      totalCountDisplay.textContent = totalItems.toString();
+    }
+
+    if (prevPageBtn) prevPageBtn.disabled = currentPage === 1;
+    if (nextPageBtn) nextPageBtn.disabled = currentPage === totalPages;
+  }
+
+  // Event Listeners
+  searchInput?.addEventListener('input', applyFilters);
+  authorFilter?.addEventListener('change', applyFilters);
+  tagFilter?.addEventListener('change', applyFilters);
+
+  prevPageBtn?.addEventListener('click', () => {
+    if (currentPage > 1) {
+      currentPage--;
+      updatePagination();
+    }
+  });
+
+  nextPageBtn?.addEventListener('click', () => {
+    const totalPages = Math.ceil(filteredRows.length / ITEMS_PER_PAGE);
+    if (currentPage < totalPages) {
+      currentPage++;
+      updatePagination();
+    }
+  });
+
+  // Initialize
+  applyFilters();
 </script>
 
 <style>
