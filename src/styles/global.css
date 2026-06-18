@@ -186,6 +186,8 @@ h1, h2, h3, h4, h5, h6 {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   background: var(--bg-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all var(--transition-speed) ease;
 }
 
