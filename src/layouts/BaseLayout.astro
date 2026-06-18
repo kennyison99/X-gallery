@@ -87,6 +87,10 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         lightbox.addFilter('itemData', (itemData: any) => {
           const element = itemData.element;
           if (element && element.getAttribute('data-video') === '1') {
+            // Video slides need explicit w/h for PhotoSwipe to render them.
+            // Use viewport-based defaults so the video container is properly sized.
+            itemData.w = Math.min(window.innerWidth, 1280);
+            itemData.h = Math.min(window.innerHeight, 720);
             itemData.html = `
               <div class="pswp__video-wrapper" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
                 <video 

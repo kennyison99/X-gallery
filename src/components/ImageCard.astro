@@ -480,5 +480,13 @@ const displayDate = image.updated_at
     min-height: 180px;
     aspect-ratio: 16 / 9;
     background-color: #000;
+    /* Prevent the video container from intercepting clicks meant for slider buttons */
+    pointer-events: none;
+  }
+
+  /* Card-level preview videos should not be interactive (no seeking, no controls).
+     This prevents them from stealing pointer events from the slider arrows. */
+  .gallery-video {
+    pointer-events: none;
   }
 </style>
