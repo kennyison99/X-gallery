@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 
-export const POST: APIRoute = async ({ params }) => {
+export const POST: APIRoute = async ({ params, request }) => {
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ error: 'D1 DB binding "DB" is not configured' }), { 
       status: 500,
