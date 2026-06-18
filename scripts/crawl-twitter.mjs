@@ -4,6 +4,7 @@ import os from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { XTRACTOR_VERSION, ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
+import { dedupeMediaItems, mediaIdFromUrl } from "./media-items.mjs";
 
 const execAsync = promisify(exec);
 
@@ -220,18 +221,6 @@ function saveArchive(archive) {
   fs.renameSync(tmp, ARCHIVE_PATH);
 }
 
-// Stable media content id from a pbs.twimg.com URL.
-// e.g. https://pbs.twimg.com/media/Eb1abc?format=jpg&name=large  ->  Eb1abc
-function mediaIdFromUrl(mediaUrl) {
-  try {
-    const u = new URL(mediaUrl);
-    const base = path.basename(u.pathname);
-    return base.replace(/\.[a-zA-Z0-9]+$/, "");
-  } catch {
-    return mediaUrl;
-  }
-}
-
 // File extension for a media URL, using ?format= when present
 // (pbs.twimg.com convention) and falling back to the path extension.
 function extFromUrl(mediaUrl) {
@@ -415,6 +404,7 @@ async function main() {
       mediaItems = mediaItems.filter(
         (m) => m && m.url && ACCEPTED_TYPES.has((m.type ?? "").toLowerCase()),
       );
+      mediaItems = dedupeMediaItems(mediaItems);
       const photoCount = mediaItems.filter((m) => {
         const t = (m.type ?? "").toLowerCase();
         return t === "photo" || t === "image" || t === "";
