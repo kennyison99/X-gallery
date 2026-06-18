@@ -273,4 +273,24 @@ const displayDate = image.updated_at
     margin-left: 0.3rem;
     white-space: nowrap;
   }
+
+  /* Responsive fixes for card footer on narrow screens / tablet & mobile */
+  @media (max-width: 800px) {
+    .card-footer {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+      margin-top: 0.4rem;
+    }
+
+    .author-info {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .footer-actions {
+      width: 100%;
+      justify-content: space-between;
+    }
+  }
 </style>
