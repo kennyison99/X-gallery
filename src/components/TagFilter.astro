@@ -32,13 +32,33 @@ const { activeTag, tags } = Astro.props;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
-    scrollbar-width: none; /* Firefox */
     width: 100%;
     max-width: 100%;
   }
 
+  /* Desktop: show a slim scrollbar so users can see/grab it */
   .tag-filter-container::-webkit-scrollbar {
-    display: none; /* Chrome/Safari */
+    height: 6px;
+  }
+  .tag-filter-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .tag-filter-container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+  }
+  .tag-filter-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+  }
+
+  /* Mobile: hide scrollbar (touch scrolling is obvious) */
+  @media (max-width: 800px) {
+    .tag-filter-container {
+      scrollbar-width: none; /* Firefox */
+    }
+    .tag-filter-container::-webkit-scrollbar {
+      display: none; /* Chrome/Safari */
+    }
   }
 
   .tag-list {
