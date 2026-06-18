@@ -431,8 +431,10 @@ const formattedImages = images.map((img: any) => {
         <div class="pagination-controls" id="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
           <span class="pagination-info" id="pagination-info">顯示第 1-10 筆，共 0 筆</span>
           <div style="display: flex; gap: 0.4rem;">
+            <button type="button" id="first-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">最前頁</button>
             <button type="button" id="prev-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">上一頁</button>
             <button type="button" id="next-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">下一頁</button>
+            <button type="button" id="last-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">最後頁</button>
           </div>
         </div>
       </section>
@@ -1207,8 +1209,10 @@ const formattedImages = images.map((img: any) => {
   const tagFilter = document.getElementById('tag-filter') as HTMLSelectElement | null;
   const mediaFilter = document.getElementById('media-filter') as HTMLSelectElement | null;
   const paginationInfo = document.getElementById('pagination-info');
+  const firstPageBtn = document.getElementById('first-page-btn') as HTMLButtonElement | null;
   const prevPageBtn = document.getElementById('prev-page-btn') as HTMLButtonElement | null;
   const nextPageBtn = document.getElementById('next-page-btn') as HTMLButtonElement | null;
+  const lastPageBtn = document.getElementById('last-page-btn') as HTMLButtonElement | null;
   const totalCountDisplay = document.getElementById('total-count-display');
   const imageRows = document.querySelectorAll('.image-row');
   const gridCards = document.querySelectorAll('.grid-image-card');
@@ -1392,8 +1396,10 @@ const formattedImages = images.map((img: any) => {
       totalCountDisplay.textContent = totalItems.toString();
     }
 
+    if (firstPageBtn) firstPageBtn.disabled = currentPage === 1;
     if (prevPageBtn) prevPageBtn.disabled = currentPage === 1;
     if (nextPageBtn) nextPageBtn.disabled = currentPage === totalPages;
+    if (lastPageBtn) lastPageBtn.disabled = currentPage === totalPages;
   }
 
   // Event Listeners
@@ -1401,6 +1407,13 @@ const formattedImages = images.map((img: any) => {
   authorFilter?.addEventListener('change', applyFilters);
   tagFilter?.addEventListener('change', applyFilters);
   mediaFilter?.addEventListener('change', applyFilters);
+
+  firstPageBtn?.addEventListener('click', () => {
+    if (currentPage > 1) {
+      currentPage = 1;
+      updatePagination();
+    }
+  });
 
   prevPageBtn?.addEventListener('click', () => {
     if (currentPage > 1) {
@@ -1414,6 +1427,15 @@ const formattedImages = images.map((img: any) => {
     const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
     if (currentPage < totalPages) {
       currentPage++;
+      updatePagination();
+    }
+  });
+
+  lastPageBtn?.addEventListener('click', () => {
+    const itemsPerPage = activeView === 'grid' ? 25 : 10;
+    const totalPages = Math.ceil(filteredRows.length / itemsPerPage) || 1;
+    if (currentPage < totalPages) {
+      currentPage = totalPages;
       updatePagination();
     }
   });
