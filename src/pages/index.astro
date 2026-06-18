@@ -114,10 +114,16 @@ const pageTitle = activeTag
         <button type="button" class="media-filter-btn" data-media-type="video">🎥 僅影片</button>
       </div>
       <div class="sort-filter-container">
-        <select id="sort-select" class="sort-select">
-          <option value="newest">🕒 最新優先</option>
-          <option value="oldest">⌛ 最舊優先</option>
-        </select>
+        <details class="custom-dropdown" id="sort-dropdown">
+          <summary class="dropdown-trigger">
+            <span class="dropdown-trigger-text">🕒 最新優先</span>
+            <span class="dropdown-arrow">▼</span>
+          </summary>
+          <div class="dropdown-menu">
+            <button type="button" class="dropdown-item active" data-value="newest">🕒 最新優先</button>
+            <button type="button" class="dropdown-item" data-value="oldest">⌛ 最舊優先</button>
+          </div>
+        </details>
       </div>
     </div>
   )}
@@ -266,27 +272,53 @@ const pageTitle = activeTag
 
   // Setup sorting (Newest / Oldest)
   function setupSort() {
-    const sortSelect = document.getElementById('sort-select') as HTMLSelectElement | null;
+    const dropdown = document.getElementById('sort-dropdown') as HTMLDetailsElement | null;
     const grid = document.querySelector('.image-grid');
-    if (!sortSelect || !grid) return;
+    if (!dropdown || !grid) return;
 
-    sortSelect.addEventListener('change', () => {
-      const sortValue = sortSelect.value; // 'newest' or 'oldest'
-      const cards = Array.from(grid.querySelectorAll('.image-card'));
+    const triggerText = dropdown.querySelector('.dropdown-trigger-text');
+    const items = dropdown.querySelectorAll('.dropdown-item');
 
-      cards.sort((a, b) => {
-        const dateA = new Date(a.getAttribute('data-created-at') || 0).getTime();
-        const dateB = new Date(b.getAttribute('data-created-at') || 0).getTime();
+    items.forEach((item) => {
+      item.addEventListener('click', () => {
+        const sortValue = item.getAttribute('data-value'); // 'newest' or 'oldest'
+        if (!sortValue) return;
 
-        if (sortValue === 'newest') {
-          return dateB - dateA; // Descending (newest first)
-        } else {
-          return dateA - dateB; // Ascending (oldest first)
+        // Update active class on items
+        items.forEach((i) => i.classList.remove('active'));
+        item.classList.add('active');
+
+        // Update trigger text
+        if (triggerText) {
+          triggerText.textContent = item.textContent || '';
         }
-      });
 
-      // Re-append cards in sorted order
-      cards.forEach((card) => grid.appendChild(card));
+        // Close dropdown
+        dropdown.removeAttribute('open');
+
+        // Sort cards
+        const cards = Array.from(grid.querySelectorAll('.image-card'));
+        cards.sort((a, b) => {
+          const dateA = new Date(a.getAttribute('data-created-at') || 0).getTime();
+          const dateB = new Date(b.getAttribute('data-created-at') || 0).getTime();
+
+          if (sortValue === 'newest') {
+            return dateB - dateA; // Descending (newest first)
+          } else {
+            return dateA - dateB; // Ascending (oldest first)
+          }
+        });
+
+        // Re-append cards in sorted order
+        cards.forEach((card) => grid.appendChild(card));
+      });
+    });
+
+    // Close details dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!dropdown.contains(e.target as Node)) {
+        dropdown.removeAttribute('open');
+      }
     });
   }
 
@@ -360,7 +392,17 @@ const pageTitle = activeTag
     flex-wrap: wrap;
   }
 
-  .sort-select {
+  .custom-dropdown {
+    position: relative;
+    display: inline-block;
+  }
+  .custom-dropdown[open] {
+    z-index: 10;
+  }
+  .dropdown-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
     padding: 0.25rem 0.75rem;
     border-radius: 9999px;
     font-size: 0.85rem;
@@ -368,14 +410,64 @@ const pageTitle = activeTag
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
     cursor: pointer;
+    list-style: none; /* Hide default summary marker */
+    user-select: none;
     transition: all var(--transition-speed) ease;
-    outline: none;
-    font-family: inherit;
   }
-  .sort-select:hover, .sort-select:focus {
+  .dropdown-trigger::-webkit-details-marker {
+    display: none; /* Hide Safari default marker */
+  }
+  .dropdown-trigger:hover {
     background-color: var(--accent-light);
     color: var(--text-primary);
     border-color: var(--text-primary);
+  }
+  .dropdown-arrow {
+    font-size: 0.65rem;
+    transition: transform 0.2s ease;
+    color: var(--text-secondary);
+  }
+  .custom-dropdown[open] .dropdown-arrow {
+    transform: rotate(180deg);
+  }
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    padding: 0.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 120px;
+    z-index: 100;
+  }
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    font-family: inherit;
+    transition: all var(--transition-speed) ease;
+  }
+  .dropdown-item:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+  .dropdown-item.active {
+    background-color: var(--text-primary);
+    color: var(--bg-primary);
   }
   .media-filter-btn {
     display: inline-flex;
