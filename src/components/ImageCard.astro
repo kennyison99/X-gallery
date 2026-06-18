@@ -195,18 +195,21 @@ const displayDate = image.updated_at
   .author-info {
     font-size: 0.9rem;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.2rem;
   }
 
   .by-label {
     color: var(--text-secondary);
+    flex-shrink: 0;
   }
 
   .author-link {
     font-weight: 500;
     color: var(--text-primary);
     border-bottom: 1px solid transparent;
+    overflow-wrap: anywhere;
   }
 
   .author-link:hover {
@@ -216,6 +219,7 @@ const displayDate = image.updated_at
   .author-text {
     font-weight: 500;
     color: var(--text-primary);
+    overflow-wrap: anywhere;
   }
 
   .like-button {
@@ -274,6 +278,7 @@ const displayDate = image.updated_at
     opacity: 0.7;
     margin-left: 0.3rem;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
   /* Responsive fixes for card footer on narrow screens / tablet & mobile */
@@ -287,7 +292,6 @@ const displayDate = image.updated_at
 
     .author-info {
       width: 100%;
-      justify-content: space-between;
     }
 
     .footer-actions {
