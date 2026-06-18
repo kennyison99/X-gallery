@@ -32,24 +32,34 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // 1. Fetch R2 keys of all selected images
-    const placeholders = imageIds.map(() => '?').join(',');
-    const query = `SELECT r2_keys FROM images WHERE id IN (${placeholders})`;
-    
-    // Bind all IDs dynamically
-    const stmt = env.DB.prepare(query).bind(...imageIds);
-    const { results } = await stmt.all();
+    // Helper to chunk arrays
+    const chunkArray = <T>(arr: T[], size: number): T[][] => {
+      const chunks: T[][] = [];
+      for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+    };
 
-    // 2. Extract and delete all unique R2 keys
+    // Split IDs into chunks of 50 to prevent SQLite/D1 variable limit errors
+    const idChunks = chunkArray(imageIds, 50);
     const r2KeysToDelete = new Set<string>();
-    for (const row of results as any[]) {
-      if (row.r2_keys) {
-        const keys = row.r2_keys.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
-        keys.forEach((k: string) => r2KeysToDelete.add(k));
+
+    // 1. Fetch R2 keys chunk by chunk
+    for (const chunk of idChunks) {
+      const placeholders = chunk.map(() => '?').join(',');
+      const query = `SELECT r2_keys FROM images WHERE id IN (${placeholders})`;
+      const { results } = await env.DB.prepare(query).bind(...chunk).all();
+      
+      for (const row of results as any[]) {
+        if (row.r2_keys) {
+          const keys = row.r2_keys.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+          keys.forEach((k: string) => r2KeysToDelete.add(k));
+        }
       }
     }
 
-    // Delete keys from R2 in parallel
+    // 2. Delete keys from R2 in parallel
     const deletePromises = Array.from(r2KeysToDelete).map(async (key) => {
       try {
         await env.BUCKET.delete(key);
@@ -59,9 +69,12 @@ export const POST: APIRoute = async ({ request }) => {
     });
     await Promise.all(deletePromises);
 
-    // 3. Delete the image records from D1 (cascade delete handles image_tags relations)
-    const deleteQuery = `DELETE FROM images WHERE id IN (${placeholders})`;
-    await env.DB.prepare(deleteQuery).bind(...imageIds).run();
+    // 3. Delete the image records from D1 chunk by chunk (cascade delete handles image_tags relations)
+    for (const chunk of idChunks) {
+      const placeholders = chunk.map(() => '?').join(',');
+      const deleteQuery = `DELETE FROM images WHERE id IN (${placeholders})`;
+      await env.DB.prepare(deleteQuery).bind(...chunk).run();
+    }
 
     return new Response(JSON.stringify({ success: true, count: imageIds.length }), {
       headers: { 'Content-Type': 'application/json' }
