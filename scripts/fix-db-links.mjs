@@ -1,15 +1,17 @@
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-// Setup paths matching crawl-twitter.mjs
-const DB_NAME = "gallery-db";
-const BIN_DIR = path.join(process.cwd(), "bin");
-const XTRACTOR_EXE = process.platform === "win32" ? "xtractor.exe" : "xtractor";
-const XTRACTOR_PATH = path.join(BIN_DIR, XTRACTOR_EXE);
-
-// Load auth token from cookies
+// Load config from environment variables
+const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(/\/$/, "");
+const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? "";
 const TWITTER_COOKIES = process.env.TWITTER_COOKIES ?? "";
+
+if (!CRAWL_API_KEY) {
+  console.error("ERROR: CRAWL_API_KEY environment variable is not configured.");
+  process.exit(1);
+}
+
 function parseCookies(cookieStr) {
   const cookies = {};
   if (!cookieStr) return cookies;
@@ -31,6 +33,11 @@ if (!authToken) {
   console.error("ERROR: auth_token not found in TWITTER_COOKIES. Make sure you set TWITTER_COOKIES env var.");
   process.exit(1);
 }
+
+// Find xtractor binary
+const BIN_DIR = path.join(process.cwd(), "bin");
+const XTRACTOR_EXE = process.platform === "win32" ? "xtractor.exe" : "xtractor";
+const XTRACTOR_PATH = path.join(BIN_DIR, XTRACTOR_EXE);
 
 function extractBalancedAt(text, start) {
   let depth = 0;
@@ -107,44 +114,26 @@ async function runXtractor(url, token, extraArgs = []) {
   });
 }
 
-function runD1Query(sql, isRemote = true) {
-  const remoteFlag = isRemote ? "--remote" : "--local";
-  // Escape backslashes and double quotes for PowerShell / Shell
-  const escapedSql = sql.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const cmd = `npx wrangler d1 execute ${DB_NAME} ${remoteFlag} --command="${escapedSql}" --json`;
-  const output = execSync(cmd).toString();
-  try {
-    const parsed = JSON.parse(output);
-    return parsed[0].results || [];
-  } catch (err) {
-    console.error("Failed to parse D1 output:", output);
-    throw err;
-  }
-}
-
-function executeD1(sql, isRemote = true) {
-  const remoteFlag = isRemote ? "--remote" : "--local";
-  const escapedSql = sql.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const cmd = `npx wrangler d1 execute ${DB_NAME} ${remoteFlag} --command="${escapedSql}"`;
-  execSync(cmd, { stdio: 'inherit' });
-}
-
 async function main() {
-  const isRemote = process.argv.includes("--local") ? false : true;
-  const envLabel = isRemote ? "REMOTE (production)" : "LOCAL";
-  console.log(`Starting DB post links repair on ${envLabel} database...\n`);
+  console.log(`Starting DB post links repair via API endpoint...`);
+  console.log(`SITE_URL: ${SITE_URL}\n`);
 
-  console.log("Fetching images with status URLs from D1...");
-  const sql = "SELECT id, author, post_url FROM images WHERE post_url LIKE '%/status/%'";
-  const images = runD1Query(sql, isRemote);
-  console.log(`Found ${images.length} posts with status links.`);
+  console.log("Fetching images requiring repair from site API...");
+  const fetchUrl = `${SITE_URL}/api/fix-links?api_key=${encodeURIComponent(CRAWL_API_KEY)}`;
+  const fetchRes = await fetch(fetchUrl);
+  if (!fetchRes.ok) {
+    const errText = await fetchRes.text();
+    throw new Error(`Failed to fetch images from API: HTTP ${fetchRes.status} - ${errText}`);
+  }
+  const images = await fetchRes.json();
+  console.log(`Found ${images.length} posts with status links in the database.`);
 
   if (images.length === 0) {
     console.log("No links to repair. Exiting.");
     return;
   }
 
-  // Group images by author to run xtractor once per author
+  // Group images by author
   const imagesByAuthor = {};
   for (const img of images) {
     if (!imagesByAuthor[img.author]) imagesByAuthor[img.author] = [];
@@ -154,11 +143,14 @@ async function main() {
   const authors = Object.keys(imagesByAuthor);
   console.log(`Processing ${authors.length} authors...`);
 
+  const updates = [];
+
   for (const author of authors) {
     console.log(`\n------------------------------------------------------------`);
     console.log(`Fetching correct tweet IDs for @${author} via xtractor...`);
     const url = `https://x.com/${author}/media`;
     try {
+      // Fetch latest 300 media items for the author
       const resp = await runXtractor(url, authToken, ["--type", "all", "--limit", "300"]);
       const media = resp.media || [];
       console.log(`Retrieved ${media.length} media items for @${author}.`);
@@ -170,7 +162,6 @@ async function main() {
       let matchCount = 0;
 
       for (const img of authorImages) {
-        // Parse rounded ID from post_url
         const match = img.post_url.match(/\/status\/(\d+)/);
         if (!match) continue;
         const roundedIdStr = match[1];
@@ -181,24 +172,38 @@ async function main() {
         if (matchedCorrectId) {
           if (matchedCorrectId !== roundedIdStr) {
             const newPostUrl = img.post_url.replace(roundedIdStr, matchedCorrectId);
-            console.log(`  [Fix] Image ID ${img.id}: ${roundedIdStr} -> ${matchedCorrectId}`);
-            
-            const updateSql = `UPDATE images SET post_url = '${newPostUrl}' WHERE id = ${img.id}`;
-            executeD1(updateSql, isRemote);
+            console.log(`  [Matched] Image ID ${img.id}: ${roundedIdStr} -> ${matchedCorrectId}`);
+            updates.push({ id: img.id, post_url: newPostUrl });
             matchCount++;
           }
         } else {
-          // If the tweet wasn't found in the latest 300 media items, we can optionally search for it or skip
           console.log(`  [Skip] Image ID ${img.id}: Rounded ID ${roundedIdStr} could not be matched (tweet may be older than the limit or deleted).`);
         }
       }
-      console.log(`Completed @${author}: Repaired ${matchCount}/${authorImages.length} links.`);
+      console.log(`Matched @${author}: ${matchCount}/${authorImages.length} links.`);
     } catch (err) {
       console.error(`  Failed to process @${author}:`, err.message);
     }
   }
 
-  console.log("\nAll done!");
+  if (updates.length > 0) {
+    console.log(`\nSending ${updates.length} updates to D1 database via API...`);
+    const saveRes = await fetch(`${SITE_URL}/api/fix-links`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: CRAWL_API_KEY, updates })
+    });
+    if (!saveRes.ok) {
+      const errText = await saveRes.text();
+      throw new Error(`Failed to save updates to D1: HTTP ${saveRes.status} - ${errText}`);
+    }
+    const saveResult = await saveRes.json();
+    console.log(`Successfully repaired ${saveResult.count} links in the production database!`);
+  } else {
+    console.log("\nNo matching links found to repair.");
+  }
+
+  console.log("All done!");
 }
 
 main().catch(console.error);

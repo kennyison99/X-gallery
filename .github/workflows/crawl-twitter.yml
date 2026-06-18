@@ -11,6 +11,11 @@ on:
         required: false
         type: boolean
         default: false
+      fix_links:
+        description: 'Run post links repair script to fix rounded tweet IDs'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   crawl:
@@ -54,6 +59,7 @@ jobs:
         uses: federicocarboni/setup-ffmpeg@v3
 
       - name: Run Twitter crawl script
+        if: ${{ github.event.inputs.fix_links != 'true' }}
         env:
           TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
           SITE_URL: ${{ secrets.SITE_URL }}
@@ -65,6 +71,15 @@ jobs:
           else
             node scripts/crawl-twitter.mjs
           fi
+
+      - name: Run links repair script
+        if: ${{ github.event.inputs.fix_links == 'true' }}
+        env:
+          TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        run: |
+          npm run fix-links
 
       - name: Run daily cleanup for pending review images
         env:
