@@ -49,7 +49,7 @@ const displayDate = image.updated_at
   : (image.created_at ? `${formatDate(image.created_at)}` : '');
 ---
 
-<div class="image-card" data-id={image.id} data-has-photo={hasPhoto ? "true" : "false"} data-has-video={hasVideo ? "true" : "false"}>
+<div class="image-card" data-id={image.id} data-created-at={image.created_at} data-has-photo={hasPhoto ? "true" : "false"} data-has-video={hasVideo ? "true" : "false"}>
   <!-- Image gallery group wrapper for PhotoSwipe -->
   <div class="card-media image-gallery-group">
     {totalImages > 1 && (
