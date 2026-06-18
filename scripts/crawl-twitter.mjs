@@ -72,17 +72,22 @@ function collectImageFiles(dir) {
 }
 
 /**
- * Upload a single image file to the crawl-upload API endpoint.
+ * Upload a group of image files (belonging to the same post) to the crawl-upload API.
  */
-async function uploadImage(filePath, username) {
-  const fileBuffer = fs.readFileSync(filePath);
-  const fileName = path.basename(filePath);
-
+async function uploadImageGroup(filePaths, username, postUrl) {
   const formData = new FormData();
-  formData.append("file", new Blob([fileBuffer]), fileName);
   formData.append("author", username);
   formData.append("author_url", `https://x.com/${username}`);
   formData.append("api_key", CRAWL_API_KEY);
+  if (postUrl) {
+    formData.append("post_url", postUrl);
+  }
+
+  for (const filePath of filePaths) {
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+    formData.append("file", new Blob([fileBuffer]), fileName);
+  }
 
   const res = await fetch(`${SITE_URL}/api/crawl-upload`, {
     method: "POST",
@@ -186,15 +191,30 @@ async function main() {
       console.log(`Downloaded ${images.length} image(s).`);
       totalImagesDownloaded += images.length;
 
-      // Upload each image
+      // Group downloaded images by tweet ID
+      const groups = {};
       for (const imgPath of images) {
+        const baseName = path.basename(imgPath);
+        // Extract tweet ID from filename like 2055667177102131596_1.jpg
+        const match = baseName.match(/^(\d+)_\d+/);
+        const key = match ? match[1] : baseName;
+        if (!groups[key]) {
+          groups[key] = [];
+        }
+        groups[key].push(imgPath);
+      }
+
+      // Upload each group
+      for (const [key, filesInGroup] of Object.entries(groups)) {
         try {
-          await uploadImage(imgPath, username);
-          totalImagesUploaded++;
-          console.log(`  ✓ Uploaded: ${path.basename(imgPath)}`);
+          const isTweetId = /^\d+$/.test(key);
+          const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
+          await uploadImageGroup(filesInGroup, username, postUrl);
+          totalImagesUploaded += filesInGroup.length;
+          console.log(`  ✓ Uploaded group ${key} (${filesInGroup.length} images)`);
         } catch (uploadErr) {
           console.error(
-            `  ✗ Upload failed (${path.basename(imgPath)}): ${uploadErr.message}`,
+            `  ✗ Upload failed for group ${key}: ${uploadErr.message}`,
           );
         }
       }
