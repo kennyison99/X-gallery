@@ -19,9 +19,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: scripts/.gallery-dl-archive.db
-          key: gallery-dl-archive-${{ github.run_id }}
+          key: gallery-dl-archive-v2-${{ github.run_id }}
           restore-keys: |
-            gallery-dl-archive-
+            gallery-dl-archive-v2-
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
