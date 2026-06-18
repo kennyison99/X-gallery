@@ -18,10 +18,28 @@ export const POST: APIRoute = async ({ params }) => {
   }
 
   try {
-    // Increment the likes count and return the new count
-    const result = await env.DB.prepare('UPDATE images SET likes = likes + 1 WHERE id = ? RETURNING likes')
-      .bind(parseInt(id, 10))
-      .first();
+    let action = 'like';
+    try {
+      const body = await request.json();
+      if (body && body.action) {
+        action = body.action;
+      }
+    } catch (e) {
+      // Fallback to like if body is empty or invalid
+    }
+
+    const imageId = parseInt(id, 10);
+    let result;
+
+    if (action === 'unlike') {
+      result = await env.DB.prepare('UPDATE images SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END WHERE id = ? RETURNING likes')
+        .bind(imageId)
+        .first();
+    } else {
+      result = await env.DB.prepare('UPDATE images SET likes = likes + 1 WHERE id = ? RETURNING likes')
+        .bind(imageId)
+        .first();
+    }
 
     if (!result) {
       return new Response(JSON.stringify({ error: 'Image not found' }), { 

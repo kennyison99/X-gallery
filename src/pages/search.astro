@@ -181,27 +181,47 @@ const formattedImages = images.map((img: any) => ({
       likeBtn.addEventListener('click', async () => {
         const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
         const idNum = parseInt(imgId, 10);
-        
-        if (likedImages.includes(idNum)) {
-          return; // Already liked
-        }
+        const isLiked = likedImages.includes(idNum);
+        const action = isLiked ? 'unlike' : 'like';
 
         try {
-          likeBtn.classList.add('liked');
+          if (action === 'like') {
+            likeBtn.classList.add('liked');
+          } else {
+            likeBtn.classList.remove('liked');
+          }
+
           const response = await fetch(`/api/likes/${imgId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action })
           });
           const data = await response.json();
           if (data.success) {
             likeCountSpan.textContent = data.likes;
-            likedImages.push(idNum);
+            if (action === 'like') {
+              likedImages.push(idNum);
+            } else {
+              const idx = likedImages.indexOf(idNum);
+              if (idx > -1) likedImages.splice(idx, 1);
+            }
             localStorage.setItem('liked-images', JSON.stringify(likedImages));
           } else {
-            likeBtn.classList.remove('liked');
+            // Revert state
+            if (action === 'like') {
+              likeBtn.classList.remove('liked');
+            } else {
+              likeBtn.classList.add('liked');
+            }
           }
         } catch (err) {
-          console.error('Failed to like image:', err);
-          likeBtn.classList.remove('liked');
+          console.error(`Failed to ${action} image:`, err);
+          // Revert state
+          if (action === 'like') {
+            likeBtn.classList.remove('liked');
+          } else {
+            likeBtn.classList.add('liked');
+          }
         }
       });
     });
@@ -213,7 +233,7 @@ const formattedImages = images.map((img: any) => ({
 
 <style>
   .search-page-container {
-    padding: 2.5rem 0;
+    padding: 2.5rem 1rem;
     display: flex;
     flex-direction: column;
     gap: 2rem;
