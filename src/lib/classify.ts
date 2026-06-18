@@ -24,8 +24,30 @@ export async function classifyImage(imageBuffer: ArrayBuffer): Promise<boolean> 
   if (!env?.AI) return true; // no AI binding → auto-approve
 
   try {
+    const imageBytes = [...new Uint8Array(imageBuffer)];
+
+    // Tier 1: Run DETR Object Detection to see if there's a person
+    let hasPerson = false;
+    try {
+      const detections: any = await env.AI.run('@cf/facebook/detr-resnet-50', {
+        image: imageBytes,
+      });
+      if (Array.isArray(detections)) {
+        hasPerson = detections.some((d: any) => d.label === 'person' && d.score >= 0.5);
+      }
+    } catch (detrErr) {
+      console.error('DETR detection error (falling back to VLM):', detrErr);
+      hasPerson = true; // Fallback to VLM if object detection fails
+    }
+
+    // If no person detected, set to pending directly (returns false)
+    if (!hasPerson) {
+      return false;
+    }
+
+    // Tier 2: Run Llama 3.2 Vision to verify if it's portrait/cosplay/gravure
     const result: any = await env.AI.run(MODEL, {
-      image: [...new Uint8Array(imageBuffer)],
+      image: imageBytes,
       prompt: CLASSIFY_PROMPT,
       max_tokens: 4,
       temperature: 0.1,
