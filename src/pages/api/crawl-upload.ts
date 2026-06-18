@@ -100,6 +100,72 @@ export const POST: APIRoute = async ({ request }) => {
       )
       .first();
 
+    // Auto-tagging logic based on description and author
+    if (imageResult?.id) {
+      const autoTags = new Set<string>();
+      
+      // 1. Always add the blogger's username as a tag
+      if (author) {
+        autoTags.add(author.trim().toLowerCase());
+      }
+
+      // 2. Scan tweet description for keywords to assign tags
+      if (description) {
+        const descLower = description.toLowerCase();
+        
+        // Black tights / 黑絲
+        if (descLower.includes('黑絲') || descLower.includes('黒タイツ') || descLower.includes('black tights') || descLower.includes('blacktights')) {
+          autoTags.add('黑絲');
+          autoTags.add('絲襪');
+        }
+        
+        // White tights / 白絲
+        if (descLower.includes('白絲') || descLower.includes('白タイツ') || descLower.includes('白ストッキング') || descLower.includes('white tights') || descLower.includes('white stockings') || descLower.includes('white pantyhose')) {
+          autoTags.add('白絲');
+          autoTags.add('絲襪');
+        }
+        
+        // Tights / 絲襪 (general)
+        if (descLower.includes('絲襪') || descLower.includes('タイツ') || descLower.includes('tights') || descLower.includes('pantyhose') || descLower.includes('ストッキング') || descLower.includes('網襪')) {
+          autoTags.add('絲襪');
+        }
+
+        // Barefoot / Bare legs / 裸足
+        if (descLower.includes('裸足') || descLower.includes('赤腳') || descLower.includes('光腿') || descLower.includes('生脚') || descLower.includes('素足') || descLower.includes('barefoot') || descLower.includes('bare feet') || descLower.includes('bare legs')) {
+          autoTags.add('裸足');
+        }
+        
+        // Cosplay / COS
+        if (descLower.includes('cosplay') || descLower.includes('cos') || descLower.includes('コスプレ') || descLower.includes('角色扮演')) {
+          autoTags.add('COS');
+        }
+        
+        // Gravure / 寫真
+        if (descLower.includes('寫真') || descLower.includes('グラビア') || descLower.includes('gravure') || descLower.includes('photobook') || descLower.includes('週刊') || descLower.includes('young jump') || descLower.includes('friday')) {
+          autoTags.add('寫真');
+        }
+        
+        // Casual / 日常
+        if (descLower.includes('日常') || descLower.includes('日常服') || descLower.includes('casual') || descLower.includes('私服') || descLower.includes('散步')) {
+          autoTags.add('日常');
+        }
+      }
+
+      // Save tags to D1 and link them to this image
+      for (const tagName of autoTags) {
+        // Ensure the tag exists in tags table
+        await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName).run();
+        // Get tag ID
+        const tagRow = await env.DB.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: number }>();
+        if (tagRow) {
+          // Link tag to this image in image_tags table
+          await env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)')
+            .bind(imageResult.id, tagRow.id)
+            .run();
+        }
+      }
+    }
+
     // Update last_crawled_at for this account
     await env.DB.prepare(
       "UPDATE crawl_accounts SET last_crawled_at = datetime('now') WHERE username = ?"
