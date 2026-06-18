@@ -17,7 +17,7 @@ const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC'
 const allTags = tagsQuery.results.map((t: any) => t.name);
 
 // 3. Fetch all distinct authors for listing
-const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_url FROM images ORDER BY author ASC').all();
+const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_url FROM images WHERE published = 1 ORDER BY author ASC').all();
 const allAuthors = authorsQuery.results as { author: string; author_url: string }[];
 
 // 4. Perform search query if any filter is active
@@ -34,10 +34,11 @@ try {
       LEFT JOIN tags t ON it.tag_id = t.id
       LEFT JOIN image_tags it2 ON i.id = it2.image_id
       LEFT JOIN tags t2 ON it2.tag_id = t2.id
-      WHERE i.title LIKE ? 
+      WHERE (i.title LIKE ? 
          OR i.description LIKE ? 
          OR i.author LIKE ? 
-         OR t.name LIKE ?
+         OR t.name LIKE ?)
+         AND i.published = 1
       GROUP BY i.id
       ORDER BY i.created_at DESC
     `;
@@ -55,7 +56,7 @@ try {
       JOIN tags t ON it.tag_id = t.id
       LEFT JOIN image_tags it2 ON i.id = it2.image_id
       LEFT JOIN tags t2 ON it2.tag_id = t2.id
-      WHERE t.name = ?
+      WHERE t.name = ? AND i.published = 1
       GROUP BY i.id
       ORDER BY i.created_at DESC
     `;
@@ -68,7 +69,7 @@ try {
       FROM images i
       LEFT JOIN image_tags it ON i.id = it.image_id
       LEFT JOIN tags t ON it.tag_id = t.id
-      WHERE i.author = ?
+      WHERE i.author = ? AND i.published = 1
       GROUP BY i.id
       ORDER BY i.created_at DESC
     `;

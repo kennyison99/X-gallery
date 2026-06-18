@@ -6,6 +6,7 @@ import {
   wouldExceedStorage,
   addStorageBytes,
 } from '../../lib/storage';
+import { classifyPost } from '../../lib/classify';
 
 /**
  * POST /api/crawl-upload
@@ -86,8 +87,9 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // Upload all files to R2
+    // Upload all files to R2 (keep buffers for AI classification)
     const r2Keys: string[] = [];
+    const fileBuffers: { name: string; buffer: ArrayBuffer }[] = [];
     for (const file of validFiles) {
       const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       // Use author prefix for organized storage
@@ -98,17 +100,25 @@ export const POST: APIRoute = async ({ request }) => {
         httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
       });
       r2Keys.push(r2Key);
+      fileBuffers.push({ name: file.name, buffer: fileArrayBuffer });
     }
 
     // Increment the storage counter by the bytes actually written
     await addStorageBytes(incomingBytes);
 
+    // AI classification: check if images are portrait/cosplay/gravure.
+    // Videos auto-approve. If any image is non-portrait, post goes to pending
+    // (published=0) for admin review. On AI error, auto-approve to avoid
+    // silent deletion after 3 days.
+    const { published } = await classifyPost(fileBuffers);
+    const publishedValue = published ? 1 : 0;
+
     const r2KeysString = r2Keys.join(',');
 
     // Insert into D1
     const insertQuery = `
-      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description${createdAt ? ', created_at' : ''})
-      VALUES (?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, published${createdAt ? ', created_at' : ''})
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
       RETURNING id
     `;
     const bindParams = [
@@ -118,7 +128,8 @@ export const POST: APIRoute = async ({ request }) => {
       authorDisplayName || '',
       authorUrl || `https://x.com/${author}`,
       postUrl || '',
-      description || ''
+      description || '',
+      publishedValue
     ];
     if (createdAt) {
       bindParams.push(createdAt);

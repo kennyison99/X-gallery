@@ -3,13 +3,19 @@
 	"compatibility_date": "2026-06-18",
 	"compatibility_flags": ["global_fetch_strictly_public"],
 	"name": "x-gallery",
-	"main": "@astrojs/cloudflare/entrypoints/server",
+	"main": "./src/worker-entry.ts",
 	"assets": {
 		"directory": "./dist",
 		"binding": "ASSETS"
 	},
 	"observability": {
 		"enabled": true
+	},
+	"triggers": {
+		"crons": ["0 5 * * *"]
+	},
+	"ai": {
+		"binding": "AI"
 	},
 	"d1_databases": [
 		{

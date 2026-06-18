@@ -180,9 +180,9 @@ export const PUT: APIRoute = async ({ params, request }) => {
       });
     }
 
-    // Update image metadata including final R2 keys and updated_at timestamp
+    // Update image metadata including final R2 keys, setting published = 1 (approved) on manual edit, and updated_at timestamp
     await env.DB.prepare(
-      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_url = ?, post_url = ?, description = ?, updated_at = datetime('now') WHERE id = ?"
+      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_url = ?, post_url = ?, description = ?, published = 1, updated_at = datetime('now') WHERE id = ?"
     )
       .bind(title || '推文寫真', finalKeysString, author, authorUrl || '', postUrl || '', description || '', imageId)
       .run();
