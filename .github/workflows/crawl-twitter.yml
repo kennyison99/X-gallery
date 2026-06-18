@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      dedup_media:
+        description: 'Scan and remove duplicate R2 objects within image records'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   crawl:
@@ -43,7 +48,7 @@ jobs:
             xtractor-archive-v1-
 
       - name: Set up Python 3.12
-        if: ${{ github.event.inputs.fix_links != 'true' }}
+        if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -54,15 +59,15 @@ jobs:
           node-version: "22"
 
       - name: Install Pillow
-        if: ${{ github.event.inputs.fix_links != 'true' }}
+        if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
         run: pip install Pillow
 
       - name: Set up FFmpeg
-        if: ${{ github.event.inputs.fix_links != 'true' }}
+        if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
         uses: federicocarboni/setup-ffmpeg@v3
 
       - name: Run Twitter crawl script
-        if: ${{ github.event.inputs.fix_links != 'true' }}
+        if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
         env:
           TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
           SITE_URL: ${{ secrets.SITE_URL }}
@@ -83,6 +88,14 @@ jobs:
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
         run: |
           npm run fix-links
+
+      - name: Run duplicate media scan and repair
+        if: ${{ github.event.inputs.dedup_media == 'true' }}
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        run: |
+          npm run dedup-media -- --apply
 
       - name: Run daily cleanup for pending review images
         env:
