@@ -62,8 +62,6 @@ const displayDate = image.updated_at
             class={`gallery-link slider-slide ${idx === 0 ? 'active' : ''}`} 
             data-index={idx}
             data-video={isVid ? '1' : null} 
-            data-pswp-width={isVid ? null : '1600'}
-            data-pswp-height={isVid ? null : '1200'}
             title={image.title || 'Twitter media'}
           >
             {isVid ? (

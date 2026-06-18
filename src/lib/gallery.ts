@@ -6,6 +6,10 @@ interface PhotoSwipeItem {
   html?: string;
   element?: {
     getAttribute(name: string): string | null;
+    querySelector?(selector: string): {
+      naturalWidth: number;
+      naturalHeight: number;
+    } | null;
   };
   [key: string]: unknown;
 }
@@ -28,7 +32,14 @@ export function preparePhotoSwipeItem<T extends PhotoSwipeItem>(
   item: T,
   viewport: ViewportSize,
 ): T {
-  if (item.element?.getAttribute('data-video') !== '1') return item;
+  if (item.element?.getAttribute('data-video') !== '1') {
+    const image = item.element?.querySelector?.('img');
+    if (image?.naturalWidth && image.naturalHeight) {
+      item.w = image.naturalWidth;
+      item.h = image.naturalHeight;
+    }
+    return item;
+  }
 
   const src = escapeHtmlAttribute(item.src ?? '');
   item.type = 'html';

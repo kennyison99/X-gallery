@@ -25,6 +25,22 @@ test('marks video items as HTML content for PhotoSwipe', () => {
   assert.match(item.html, /src="\/api\/r2\/example\.mp4"/);
 });
 
+test('uses an image natural dimensions for PhotoSwipe', () => {
+  const item = preparePhotoSwipeItem(
+    {
+      src: '/api/r2/portrait.webp',
+      element: {
+        getAttribute: () => null,
+        querySelector: () => ({ naturalWidth: 1196, naturalHeight: 2048 }),
+      },
+    },
+    { width: 1280, height: 720 },
+  );
+
+  assert.equal(item.w, 1196);
+  assert.equal(item.h, 2048);
+});
+
 test('wraps card slider indexes in both directions', () => {
   assert.equal(wrapSlideIndex(-1, 2), 1);
   assert.equal(wrapSlideIndex(2, 2), 0);
