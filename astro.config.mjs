@@ -10,5 +10,8 @@ export default defineConfig({
     platformProxy: {
       enabled: true
     }
-  })
+  }),
+  security: {
+    checkOrigin: false
+  }
 });
