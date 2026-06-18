@@ -23,6 +23,7 @@ test('marks video items as HTML content for PhotoSwipe', () => {
   assert.equal(item.h, 720);
   assert.match(item.html, /<video/);
   assert.match(item.html, /src="\/api\/r2\/example\.mp4"/);
+  assert.doesNotMatch(item.html, /autoplay/);
 });
 
 test('uses an image natural dimensions for PhotoSwipe', () => {

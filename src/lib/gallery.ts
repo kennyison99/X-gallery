@@ -47,7 +47,7 @@ export function preparePhotoSwipeItem<T extends PhotoSwipeItem>(
   item.h = Math.min(viewport.height, 720);
   item.html = `
     <div class="pswp__video-wrapper">
-      <video src="${src}" controls playsinline autoplay></video>
+      <video src="${src}" controls playsinline></video>
     </div>
   `;
 
