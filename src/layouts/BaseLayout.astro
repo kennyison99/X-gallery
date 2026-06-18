@@ -44,7 +44,7 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
     </script>
   </head>
   <body>
-    <Header />
+    <Header version={versionString} />
     <main class="container">
       <slot />
     </main>
@@ -52,7 +52,6 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       <div class="container">
         <p>
           © 2026 Twitter Gallery. Built with Astro & Cloudflare Pages.
-          <span class="version-tag">{versionString}</span>
         </p>
       </div>
     </footer>
@@ -138,16 +137,5 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
     font-size: 0.85rem;
     color: var(--text-secondary);
     background-color: var(--bg-secondary);
-  }
-  .version-tag {
-    display: inline-block;
-    margin-left: 0.5rem;
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    background-color: var(--border-color);
-    color: var(--text-secondary);
-    font-family: monospace;
-    font-size: 0.75rem;
-    opacity: 0.8;
   }
 </style>
