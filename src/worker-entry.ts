@@ -1,5 +1,6 @@
 import type { ExportedHandler } from '@cloudflare/workers-types';
 import astroHandler from '@astrojs/cloudflare/entrypoints/server';
+import { hasRecentScheduledRun, type WorkflowRunSummary } from './lib/github-crawl-schedule';
 
 interface Env {
   DB: D1Database;
@@ -19,27 +20,57 @@ const GH_WORKFLOW_ID = 'crawl-twitter.yml';
  * GitHub Actions schedule (which can be delayed or skipped during peak load).
  * Uses a Personal Access Token stored as GH_PAT secret.
  */
-async function dispatchCrawlWorkflow(env: Env): Promise<void> {
+const githubHeaders = (token: string): Record<string, string> => ({
+  'Accept': 'application/vnd.github+json',
+  'Authorization': `Bearer ${token}`,
+  'User-Agent': 'x-gallery-worker',
+  'X-GitHub-Api-Version': '2022-11-28',
+});
+
+async function hasPrimaryCrawlRun(env: Env, now: Date): Promise<boolean> {
+  if (!env.GH_PAT) return false;
+
+  const response = await fetch(
+    `https://api.github.com/repos/${GH_REPO}/actions/workflows/${GH_WORKFLOW_ID}/runs?event=schedule&per_page=10`,
+    { headers: githubHeaders(env.GH_PAT) },
+  );
+  if (!response.ok) {
+    throw new Error(`GitHub workflow runs lookup failed: ${response.status}`);
+  }
+
+  const data = await response.json<{ workflow_runs?: WorkflowRunSummary[] }>();
+  return hasRecentScheduledRun(data.workflow_runs ?? [], now);
+}
+
+async function dispatchCrawlWorkflow(env: Env, now: Date): Promise<void> {
   if (!env.GH_PAT) return; // skip if not configured
-  await fetch(
+
+  try {
+    if (await hasPrimaryCrawlRun(env, now)) return;
+  } catch (error) {
+    console.error('Unable to check the primary crawl run; dispatching backup.', error);
+  }
+
+  const response = await fetch(
     `https://api.github.com/repos/${GH_REPO}/actions/workflows/${GH_WORKFLOW_ID}/dispatches`,
     {
       method: 'POST',
       headers: {
-        'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${env.GH_PAT}`,
-        'X-GitHub-Api-Version': '2022-11-28',
+        ...githubHeaders(env.GH_PAT),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ ref: 'main' }),
     },
   );
+  if (!response.ok) {
+    throw new Error(`GitHub workflow dispatch failed: ${response.status}`);
+  }
 }
 
 /**
  * Custom Worker entrypoint that wraps the Astro handler and adds a `scheduled`
  * handler for cron triggers. The 05:00 UTC cron runs the daily cleanup; the
- * 03:13 UTC cron dispatches the crawl workflow on GitHub as a backup trigger.
+ * 04:20 UTC cron dispatches the crawl workflow on GitHub as a backup trigger.
  */
 export default {
   fetch: (astroHandler as any).fetch,
@@ -62,11 +93,9 @@ export default {
       return;
     }
 
-    // Backup trigger for the daily crawl (03:13 UTC, just before the GitHub
-    // Actions schedule at 03:17, so if GitHub's own schedule fires we get a
-    // no-op; if it doesn't, this ensures the crawl still runs).
-    if (event.cron === '13 3 * * *') {
-      ctx.waitUntil(dispatchCrawlWorkflow(env));
+    // At 12:20 HKT, dispatch only when the 12:07 GitHub schedule did not run.
+    if (event.cron === '20 4 * * *') {
+      ctx.waitUntil(dispatchCrawlWorkflow(env, new Date(event.scheduledTime)));
       return;
     }
   },

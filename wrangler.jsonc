@@ -12,7 +12,7 @@
 		"enabled": true
 	},
 	"triggers": {
-		"crons": ["0 5 * * *", "13 3 * * *"]
+		"crons": ["0 5 * * *", "20 4 * * *"]
 	},
 	"ai": {
 		"binding": "AI"
