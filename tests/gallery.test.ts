@@ -52,3 +52,19 @@ test('keeps dynamically inserted PhotoSwipe video styles global', () => {
   assert.match(baseLayoutSource, /:global\(\.pswp__video-wrapper\)/);
   assert.match(baseLayoutSource, /:global\(\.pswp__video-wrapper video\)/);
 });
+
+test('opens PhotoSwipe with a fade instead of scaling the card thumbnail', () => {
+  assert.match(baseLayoutSource, /showHideAnimationType:\s*['"]fade['"]/);
+});
+
+test('guards gallery links from native navigation before PhotoSwipe handles them', () => {
+  assert.match(baseLayoutSource, /addEventListener\(['"]click['"],\s*guardGalleryClick,\s*true\)/);
+  assert.match(baseLayoutSource, /function guardGalleryClick\([^)]+\)[\s\S]*?event\.preventDefault\(\)/);
+});
+
+test('waits for real dimensions before replaying an unloaded image click', () => {
+  assert.match(baseLayoutSource, /function loadImageDimensions\(/);
+  assert.match(baseLayoutSource, /link\.dataset\.pswpWidth\s*=\s*String\(width\)/);
+  assert.match(baseLayoutSource, /link\.dataset\.pswpHeight\s*=\s*String\(height\)/);
+  assert.match(baseLayoutSource, /link\.click\(\)/);
+});

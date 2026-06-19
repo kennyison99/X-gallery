@@ -62,12 +62,76 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       import PhotoSwipe from 'photoswipe';
       import { preparePhotoSwipeItem, wrapSlideIndex } from '../lib/gallery';
 
+      function loadImageDimensions(link: HTMLAnchorElement): Promise<void> {
+        return new Promise((resolve, reject) => {
+          const preloader = new Image();
+
+          preloader.onload = () => {
+            const { naturalWidth: width, naturalHeight: height } = preloader;
+            if (!width || !height) {
+              reject(new Error('Image has no natural dimensions'));
+              return;
+            }
+
+            link.dataset.pswpWidth = String(width);
+            link.dataset.pswpHeight = String(height);
+            resolve();
+          };
+          preloader.onerror = () => reject(new Error('Unable to load gallery image'));
+          preloader.src = link.href;
+        });
+      }
+
+      function guardGalleryClick(event: MouseEvent) {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+          return;
+        }
+
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+
+        const link = target.closest<HTMLAnchorElement>('a.gallery-link');
+        if (!link) return;
+
+        // PhotoSwipe deliberately allows native navigation while an instance is
+        // opening or closing. Ordinary gallery clicks should never leave the app.
+        event.preventDefault();
+
+        if (link.dataset.video === '1' || link.dataset.pswpWidth || link.dataset.pswpDimensionError === '1') {
+          return;
+        }
+
+        const image = link.querySelector<HTMLImageElement>('img');
+        if (image?.naturalWidth && image.naturalHeight) return;
+
+        event.stopImmediatePropagation();
+        if (link.dataset.pswpLoading === '1') return;
+        link.dataset.pswpLoading = '1';
+
+        void loadImageDimensions(link)
+          .catch(() => {
+            // Let PhotoSwipe render its normal load error instead of navigating.
+            link.dataset.pswpDimensionError = '1';
+          })
+          .finally(() => {
+            delete link.dataset.pswpLoading;
+            link.click();
+          });
+      }
+
+      function initGalleryClickGuard() {
+        if (document.documentElement.dataset.galleryClickGuard === '1') return;
+        document.documentElement.dataset.galleryClickGuard = '1';
+        document.addEventListener('click', guardGalleryClick, true);
+      }
+
       function initPhotoSwipe() {
         // Initialize PhotoSwipe Lightbox
         const lightbox = new PhotoSwipeLightbox({
           gallery: '.image-gallery-group',
           children: 'a.gallery-link', // Include all links, even videos!
           pswpModule: PhotoSwipe,
+          showHideAnimationType: 'fade',
           errorMsg: '無法載入內容',
         });
 
@@ -163,7 +227,8 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         });
       }
 
-      // Run on initial load
+      initGalleryClickGuard();
+
       // Run on initial load
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => { initPhotoSwipe(); initSliders(); });
