@@ -37,3 +37,6 @@ task.md
 
 # Superpowers visual brainstorming sessions
 .superpowers/
+
+# Isolated implementation worktrees
+.worktrees/
