@@ -30,9 +30,22 @@ export const GET: APIRoute = async ({ params, request }) => {
 
   const decodedKey = decodeURIComponent(key);
 
+  // Edge cache for full-object requests. Range requests (video streaming)
+  // bypass the cache since partial-content (206) caching is complex and video
+  // players send many small range requests.
+  const cache = caches.default;
+  const rangeHeader = request.headers.get('range');
+  const cacheKey = `https://r2-cache.internal/${decodedKey}`;
+
+  if (!rangeHeader) {
+    const cached = await cache.match(new Request(cacheKey));
+    if (cached) {
+      return cached;
+    }
+  }
+
   try {
     // Range request handling (needed for video seeking / streaming).
-    const rangeHeader = request.headers.get('range');
     if (rangeHeader) {
       const fullObject = await env.BUCKET.head(decodedKey);
       if (!fullObject) {
@@ -79,7 +92,7 @@ export const GET: APIRoute = async ({ params, request }) => {
       return new Response(ranged.body, { status: 206, headers });
     }
 
-    // Full object
+    // Full object — fetch from R2, cache at the edge, then respond.
     const object = await env.BUCKET.get(decodedKey);
     if (!object) {
       return new Response('Object not found in R2', { status: 404 });
@@ -92,13 +105,18 @@ export const GET: APIRoute = async ({ params, request }) => {
     headers.set('Accept-Ranges', 'bytes');
     headers.set('Content-Disposition', 'inline');
     headers.set('Content-Length', String(object.size));
-
-    // Ensure correct content type — always override with our extension-based
-    // mapping so video files get the proper MIME (R2 metadata may be stale
-    // or missing for older uploads).
     headers.set('Content-Type', mimeForKey(decodedKey));
 
-    return new Response(object.body, { headers });
+    // Read the full body into memory so we can both cache and respond.
+    // Images are typically small (<5MB); videos use range requests which
+    // bypass this path, so this is safe for the cached path.
+    const buffer = await object.arrayBuffer();
+
+    // Cache the response (fire-and-forget; cache.put runs in background).
+    const responseToCache = new Response(buffer, { status: 200, headers });
+    await cache.put(new Request(cacheKey), responseToCache);
+
+    return new Response(buffer, { headers });
   } catch (error: any) {
     return new Response(error.message || 'Error retrieving R2 object', { status: 500 });
   }
