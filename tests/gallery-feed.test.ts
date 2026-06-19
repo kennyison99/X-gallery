@@ -96,8 +96,8 @@ test('the homepage incrementally loads cards and resets server sorting', () => {
   assert.match(source, /gallery:updated/);
 });
 
-test('the layout initializes sliders appended by the gallery feed', () => {
+test('the layout re-initializes PhotoSwipe and sliders appended by the gallery feed', () => {
   const source = readFileSync(new URL('../src/layouts/BaseLayout.astro', import.meta.url), 'utf8');
 
-  assert.match(source, /addEventListener\(['"]gallery:updated['"],\s*initSliders\)/);
+  assert.match(source, /addEventListener\(['"]gallery:updated['"],\s*\(\)\s*=>\s*\{\s*initPhotoSwipe\(\);\s*initSliders\(\);\s*\}\)/);
 });

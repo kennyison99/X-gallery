@@ -125,7 +125,16 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         document.addEventListener('click', guardGalleryClick, true);
       }
 
+      let activeLightbox: PhotoSwipeLightbox | null = null;
+
       function initPhotoSwipe() {
+        // Destroy any existing lightbox so re-init picks up newly inserted
+        // gallery elements (infinite scroll appends cards after first load).
+        if (activeLightbox) {
+          activeLightbox.destroy();
+          activeLightbox = null;
+        }
+
         // Initialize PhotoSwipe Lightbox
         const lightbox = new PhotoSwipeLightbox({
           gallery: '.image-gallery-group',
@@ -170,6 +179,7 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         });
 
         lightbox.init();
+        activeLightbox = lightbox;
       }
 
       function initSliders() {
@@ -238,7 +248,7 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       }
       // Support Astro page transitions
       document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initSliders(); });
-      document.addEventListener('gallery:updated', initSliders);
+      document.addEventListener('gallery:updated', () => { initPhotoSwipe(); initSliders(); });
     </script>
   </body>
 </html>
