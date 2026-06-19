@@ -84,10 +84,10 @@ const { images: formattedImages } = Astro.props;
                       <td>
                         <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
                           {firstIsVideo ? (
-                            <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="admin-thumb" preload="metadata" muted playsinline></video>
+                            <video data-src={`/api/r2/${encodeURIComponent(firstKey)}`} class="admin-thumb" preload="metadata" muted playsinline></video>
                           ) : (
                             <img
-                              src={`/api/r2/${encodeURIComponent(firstKey)}`}
+                              data-src={`/api/r2/${encodeURIComponent(firstKey)}`}
                               alt={image.title}
                               class="admin-thumb"
                             />
@@ -177,9 +177,9 @@ const { images: formattedImages } = Astro.props;
 
                     <div class="grid-card-media">
                       {firstIsVideo ? (
-                        <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="grid-thumb" preload="metadata" muted playsinline></video>
+                        <video data-src={`/api/r2/${encodeURIComponent(firstKey)}`} class="grid-thumb" preload="metadata" muted playsinline></video>
                       ) : (
-                        <img src={`/api/r2/${encodeURIComponent(firstKey)}`} alt={image.title} class="grid-thumb" loading="lazy" />
+                        <img data-src={`/api/r2/${encodeURIComponent(firstKey)}`} alt={image.title} class="grid-thumb" />
                       )}
                       {totalCount > 1 && (
                         <span class="grid-thumb-count-badge">+{totalCount - 1}</span>
