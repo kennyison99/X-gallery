@@ -124,6 +124,8 @@ const formattedImages = images.map((img: any) => {
 
     <AdminOverview
       totalPosts={formattedImages.length}
+      totalPhotos={formattedImages.filter((image) => image.hasPhoto).length}
+      totalVideos={formattedImages.filter((image) => image.hasVideo).length}
       pendingPosts={formattedImages.filter((image) => image.published === 0).length}
       totalAccounts={crawlAccounts.length}
       enabledAccounts={crawlAccounts.filter((account) => account.enabled === 1).length}

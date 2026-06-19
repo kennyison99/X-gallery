@@ -1,12 +1,14 @@
 ---
 interface Props {
   totalPosts: number;
+  totalPhotos: number;
+  totalVideos: number;
   pendingPosts: number;
   totalAccounts: number;
   enabledAccounts: number;
 }
 
-const { totalPosts, pendingPosts, totalAccounts, enabledAccounts } = Astro.props;
+const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabledAccounts } = Astro.props;
 ---
 
 <section
@@ -21,6 +23,7 @@ const { totalPosts, pendingPosts, totalAccounts, enabledAccounts } = Astro.props
     <article class="overview-card">
       <span>全部貼文</span>
       <strong>{totalPosts}</strong>
+      <small>{totalPhotos} 張圖片 + {totalVideos} 部影片</small>
     </article>
     <article class="overview-card">
       <span>待審查</span>
