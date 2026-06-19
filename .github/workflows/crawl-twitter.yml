@@ -2,8 +2,8 @@ name: Crawl Twitter Images
 
 on:
   schedule:
-    # Run daily at UTC 04:00
-    - cron: "0 4 * * *"
+    # Run daily at UTC 03:17 (off-peak, avoids top-of-hour load)
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       crawl_all:
