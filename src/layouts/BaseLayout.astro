@@ -238,6 +238,7 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
       }
       // Support Astro page transitions
       document.addEventListener('astro:after-swap', () => { initPhotoSwipe(); initSliders(); });
+      document.addEventListener('gallery:updated', initSliders);
     </script>
   </body>
 </html>

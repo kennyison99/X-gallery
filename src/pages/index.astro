@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import TagFilter from '../components/TagFilter.astro';
 import ImageCard from '../components/ImageCard.astro';
+import { fetchGalleryBatch, parseGalleryBatchParams } from '../lib/gallery-feed';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding "DB" is not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
@@ -20,51 +21,12 @@ const authorSet = new Set(authorsList.map((a: string) => a.toLowerCase()));
 const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
 const tagsList = tagsQuery.results.map((t: any) => t.name).filter((name: string) => !authorSet.has(name.toLowerCase()));
 
-// 2. Fetch images based on active tag/author filter
-let images = [];
-try {
-  if (activeTag) {
-    const query = `
-      SELECT i.*, group_concat(t2.name) as tags_list 
-      FROM images i
-      JOIN image_tags it ON i.id = it.image_id
-      JOIN tags t ON it.tag_id = t.id
-      LEFT JOIN image_tags it2 ON i.id = it2.image_id
-      LEFT JOIN tags t2 ON it2.tag_id = t2.id
-      WHERE t.name = ? AND i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const { results } = await env.DB.prepare(query).bind(activeTag).all();
-    images = results || [];
-  } else if (activeAuthor) {
-    const query = `
-      SELECT i.*, group_concat(t.name) as tags_list
-      FROM images i
-      LEFT JOIN image_tags it ON i.id = it.image_id
-      LEFT JOIN tags t ON it.tag_id = t.id
-      WHERE i.author = ? AND i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const { results } = await env.DB.prepare(query).bind(activeAuthor).all();
-    images = results || [];
-  } else {
-    const query = `
-      SELECT i.*, group_concat(t.name) as tags_list
-      FROM images i
-      LEFT JOIN image_tags it ON i.id = it.image_id
-      LEFT JOIN tags t ON it.tag_id = t.id
-      WHERE i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const { results } = await env.DB.prepare(query).all();
-    images = results || [];
-  }
-} catch (err) {
-  console.error('Error fetching images:', err);
-}
+// Fetch a bounded first batch. URL-supplied offsets and limits never alter the initial page.
+const initialParams = new URLSearchParams();
+if (activeTag) initialParams.set('tag', activeTag);
+if (activeAuthor) initialParams.set('author', activeAuthor);
+const batchOptions = parseGalleryBatchParams(initialParams);
+const { items: images, hasMore } = await fetchGalleryBatch(env.DB, batchOptions);
 
 const formattedImages = images.map((img: any) => ({
   ...img,
@@ -130,11 +92,18 @@ const pageTitle = activeTag
 
   {formattedImages.length > 0 ? (
     <>
-      <div class="image-grid">
+      <div
+        class="image-grid"
+        data-offset={formattedImages.length}
+        data-has-more={hasMore ? 'true' : 'false'}
+      >
         {formattedImages.map((image) => (
           <ImageCard image={image} />
         ))}
       </div>
+      <div id="gallery-sentinel" aria-hidden="true"></div>
+      <div id="gallery-status" role="status" aria-live="polite" hidden></div>
+      <button id="gallery-retry" type="button" class="btn btn-primary" hidden>重試載入</button>
       <div id="empty-media-state" class="empty-state" style="display: none; margin-top: 2rem;">
         <p class="empty-emoji">🍃</p>
         <h3>這裡空空如也</h3>
@@ -152,6 +121,8 @@ const pageTitle = activeTag
 </BaseLayout>
 
 <script>
+  import { GALLERY_BATCH_LIMIT, INITIAL_GALLERY_LIMIT } from '../lib/gallery-feed';
+
   // Restore liked state from localStorage on load
   function restoreLikes() {
     const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
@@ -167,11 +138,14 @@ const pageTitle = activeTag
   // Setup click listeners for like buttons
   function setupLikes() {
     document.querySelectorAll('.image-card').forEach((card) => {
+      if ((card as HTMLElement).dataset.likeInitialized === 'true') return;
+
       const imgId = card.getAttribute('data-id');
       const likeBtn = card.querySelector('.like-button');
       const likeCountSpan = card.querySelector('.like-count');
 
       if (!likeBtn || !likeCountSpan || imgId === null) return;
+      (card as HTMLElement).dataset.likeInitialized = 'true';
 
       likeBtn.addEventListener('click', async () => {
         const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
@@ -222,99 +196,152 @@ const pageTitle = activeTag
     });
   }
 
+  function applyMediaFilter() {
+    const container = document.querySelector('.media-filter-container');
+    if (!container) return;
+
+    const filterType = container.querySelector<HTMLElement>('.media-filter-btn.active')?.dataset.mediaType ?? 'all';
+    const cards = document.querySelectorAll('.image-card') as NodeListOf<HTMLElement>;
+    const emptyState = document.getElementById('empty-media-state');
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const hasPhoto = card.dataset.hasPhoto === 'true';
+      const hasVideo = card.dataset.hasVideo === 'true';
+      const matches = filterType === 'all'
+        || (filterType === 'photo' && hasPhoto)
+        || (filterType === 'video' && hasVideo);
+
+      card.style.display = matches ? '' : 'none';
+      if (matches) visibleCount++;
+    });
+
+    if (emptyState) emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+  }
+
   // Setup media filtering (All / Photo / Video)
   function setupMediaFilter() {
     const container = document.querySelector('.media-filter-container');
     if (!container) return;
 
     const buttons = container.querySelectorAll('.media-filter-btn');
-    const cards = document.querySelectorAll('.image-card') as NodeListOf<HTMLElement>;
-    const emptyState = document.getElementById('empty-media-state');
-
     buttons.forEach((btn) => {
       btn.addEventListener('click', () => {
-        // Remove active class from all buttons
-        buttons.forEach((b) => b.classList.remove('active'));
-        // Add active class to clicked button
+        buttons.forEach((button) => button.classList.remove('active'));
         btn.classList.add('active');
-
-        const filterType = btn.getAttribute('data-media-type');
-        let visibleCount = 0;
-
-        cards.forEach((card) => {
-          const hasPhoto = card.getAttribute('data-has-photo') === 'true';
-          const hasVideo = card.getAttribute('data-has-video') === 'true';
-
-          let matches = false;
-          if (filterType === 'all') {
-            matches = true;
-          } else if (filterType === 'photo') {
-            matches = hasPhoto;
-          } else if (filterType === 'video') {
-            matches = hasVideo;
-          }
-
-          if (matches) {
-            card.style.display = '';
-            visibleCount++;
-          } else {
-            card.style.display = 'none';
-          }
-        });
-
-        // Toggle empty media state
-        if (emptyState) {
-          emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
-        }
+        applyMediaFilter();
       });
     });
   }
 
-  // Setup sorting (Newest / Oldest)
-  function setupSort() {
+  function setupGalleryFeed() {
     const dropdown = document.getElementById('sort-dropdown') as HTMLDetailsElement | null;
-    const grid = document.querySelector('.image-grid');
-    if (!dropdown || !grid) return;
+    const grid = document.querySelector<HTMLElement>('.image-grid');
+    const sentinel = document.getElementById('gallery-sentinel');
+    const status = document.getElementById('gallery-status');
+    const retry = document.getElementById('gallery-retry') as HTMLButtonElement | null;
+    if (!dropdown || !grid || !sentinel || !status || !retry) return;
 
     const triggerText = dropdown.querySelector('.dropdown-trigger-text');
     const items = dropdown.querySelectorAll('.dropdown-item');
+    const pageParams = new URLSearchParams(window.location.search);
+    const activeTag = pageParams.get('tag');
+    const activeAuthor = pageParams.get('author');
+    let offset = Number(grid.dataset.offset ?? 0);
+    let hasMore = grid.dataset.hasMore === 'true';
+    let loading = false;
+    let pendingReset = false;
+    let retryReset = false;
+    let sort: 'newest' | 'oldest' = 'newest';
+
+    async function fetchBatch({ reset }: { reset: boolean }) {
+      if (loading) {
+        if (reset) pendingReset = true;
+        return;
+      }
+      if (!reset && !hasMore) return;
+
+      loading = true;
+      retry.hidden = true;
+      status.hidden = false;
+      status.textContent = '載入中…';
+
+      try {
+        const params = new URLSearchParams({
+          offset: String(reset ? 0 : offset),
+          limit: String(reset ? INITIAL_GALLERY_LIMIT : GALLERY_BATCH_LIMIT),
+          sort,
+        });
+        if (activeTag) params.set('tag', activeTag);
+        if (activeAuthor) params.set('author', activeAuthor);
+
+        const response = await fetch(`/api/gallery?${params}`);
+        if (!response.ok) throw new Error(`Gallery request failed: ${response.status}`);
+
+        const fragmentDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const batch = fragmentDocument.querySelector<HTMLElement>('.gallery-batch');
+        if (!batch) throw new Error('Gallery batch is missing');
+
+        const cards = Array.from(batch.querySelectorAll<HTMLElement>('.image-card'));
+        if (reset) grid.replaceChildren(...cards);
+        else grid.append(...cards);
+
+        const count = Number(batch.dataset.count ?? cards.length);
+        offset = (reset ? 0 : offset) + count;
+        hasMore = batch.dataset.hasMore === 'true';
+        grid.dataset.offset = String(offset);
+        grid.dataset.hasMore = String(hasMore);
+        retryReset = false;
+        restoreLikes();
+        setupLikes();
+        applyMediaFilter();
+        document.dispatchEvent(new CustomEvent('gallery:updated'));
+
+        status.textContent = hasMore ? '' : '已載入全部內容';
+        status.hidden = hasMore;
+        if (hasMore) observer.observe(sentinel);
+        else observer.disconnect();
+      } catch (error) {
+        console.error('Failed to load gallery batch:', error);
+        retryReset = reset;
+        retry.hidden = false;
+        status.hidden = false;
+        status.textContent = '載入失敗';
+      } finally {
+        loading = false;
+        if (pendingReset) {
+          pendingReset = false;
+          void fetchBatch({ reset: true });
+        }
+      }
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void fetchBatch({ reset: false });
+        }
+      },
+      { rootMargin: '800px 0px' },
+    );
+
+    if (hasMore) observer.observe(sentinel);
+    retry.addEventListener('click', () => void fetchBatch({ reset: retryReset }));
 
     items.forEach((item) => {
       item.addEventListener('click', () => {
-        const sortValue = item.getAttribute('data-value'); // 'newest' or 'oldest'
-        if (!sortValue) return;
+        const sortValue = item.getAttribute('data-value');
+        if (sortValue !== 'newest' && sortValue !== 'oldest') return;
 
-        // Update active class on items
         items.forEach((i) => i.classList.remove('active'));
         item.classList.add('active');
-
-        // Update trigger text
-        if (triggerText) {
-          triggerText.textContent = item.textContent || '';
-        }
-
-        // Close dropdown
+        if (triggerText) triggerText.textContent = item.textContent || '';
         dropdown.removeAttribute('open');
-
-        // Sort cards
-        const cards = Array.from(grid.querySelectorAll('.image-card'));
-        cards.sort((a, b) => {
-          const dateA = new Date(a.getAttribute('data-created-at') || 0).getTime();
-          const dateB = new Date(b.getAttribute('data-created-at') || 0).getTime();
-
-          if (sortValue === 'newest') {
-            return dateB - dateA; // Descending (newest first)
-          } else {
-            return dateA - dateB; // Ascending (oldest first)
-          }
-        });
-
-        // Re-append cards in sorted order
-        cards.forEach((card) => grid.appendChild(card));
+        sort = sortValue;
+        void fetchBatch({ reset: true });
       });
     });
 
-    // Close details dropdown when clicking outside
     document.addEventListener('click', (e) => {
       if (!dropdown.contains(e.target as Node)) {
         dropdown.removeAttribute('open');
@@ -326,7 +353,7 @@ const pageTitle = activeTag
   restoreLikes();
   setupLikes();
   setupMediaFilter();
-  setupSort();
+  setupGalleryFeed();
 </script>
 
 <style>
@@ -512,5 +539,21 @@ const pageTitle = activeTag
     font-size: 0.9rem;
     max-width: 400px;
     margin: 0 auto;
+  }
+
+  #gallery-sentinel {
+    height: 1px;
+  }
+
+  #gallery-status,
+  #gallery-retry {
+    display: block;
+    margin: 1.5rem auto 0;
+    text-align: center;
+  }
+
+  #gallery-status[hidden],
+  #gallery-retry[hidden] {
+    display: none;
   }
 </style>

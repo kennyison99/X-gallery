@@ -1,0 +1,42 @@
+---
+import { env } from 'cloudflare:workers';
+import ImageCard from '../../components/ImageCard.astro';
+import { fetchGalleryBatch, parseGalleryBatchParams } from '../../lib/gallery-feed';
+
+if (!env?.DB) {
+  return new Response('D1 DB binding is not configured', { status: 500 });
+}
+
+let options;
+try {
+  options = parseGalleryBatchParams(Astro.url.searchParams);
+} catch (error) {
+  return new Response(error instanceof Error ? error.message : 'Invalid request', { status: 400 });
+}
+
+const [{ items: images, hasMore }, authorsQuery] = await Promise.all([
+  fetchGalleryBatch(env.DB, options),
+  env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1').all(),
+]);
+const authorSet = new Set(
+  (authorsQuery.results ?? []).map((row: any) => String(row.author).toLowerCase()),
+);
+const formattedImages = images.map((image) => ({
+  ...image,
+  tags: image.tags_list
+    ? image.tags_list
+        .split(',')
+        .filter((tag) => !authorSet.has(tag.trim().toLowerCase()))
+    : [],
+}));
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+---
+
+<div
+  class="gallery-batch"
+  data-count={formattedImages.length}
+  data-has-more={hasMore ? 'true' : 'false'}
+>
+  {formattedImages.map((image) => <ImageCard image={image} />)}
+</div>

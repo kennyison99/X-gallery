@@ -16,13 +16,11 @@ test('creates unique auto-tag assignments for an image batch', () => {
       { id: 8, author: 'Bob', description: null }
     ]),
     {
-      tagNames: ['alice', '黑絲', '絲襪', '寫真', 'bob'],
+      tagNames: ['黑絲', '絲襪', '寫真'],
       links: [
-        { imageId: 3, tagName: 'alice' },
         { imageId: 3, tagName: '黑絲' },
         { imageId: 3, tagName: '絲襪' },
-        { imageId: 3, tagName: '寫真' },
-        { imageId: 8, tagName: 'bob' }
+        { imageId: 3, tagName: '寫真' }
       ]
     }
   );
