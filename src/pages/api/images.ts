@@ -5,6 +5,7 @@ import {
   wouldExceedStorage,
   addStorageBytes,
 } from '../../lib/storage';
+import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 
 export const GET: APIRoute = async ({ url }) => {
   if (!env || !env.DB) {
@@ -84,7 +85,10 @@ export const POST: APIRoute = async ({ request }) => {
     const files = formData.getAll('file') as File[];
     const title = formData.get('title') as string | null;
     const description = formData.get('description') as string | null;
-    const author = formData.get('author') as string | null;
+    const authorInput = normalizeAuthorInput(
+      formData.get('author'),
+      formData.get('author_display_name'),
+    );
     const authorUrl = formData.get('author_url') as string | null;
     const postUrl = formData.get('post_url') as string | null;
     const tagsString = formData.get('tags') as string | null; // e.g. "白絲,黑絲"
@@ -97,7 +101,7 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    if (!author) {
+    if (!authorInput.handle) {
       return new Response(JSON.stringify({ error: 'Author/Twitter handle is required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
@@ -141,15 +145,16 @@ export const POST: APIRoute = async ({ request }) => {
 
     // 1. Insert image/post metadata
     const insertImageQuery = `
-      INSERT INTO images (title, r2_keys, author, author_url, post_url, description)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       RETURNING id
     `;
     const imageResult = await env.DB.prepare(insertImageQuery)
       .bind(
         title || `推文寫真`, 
         r2KeysString, 
-        author, 
+        authorInput.handle,
+        authorInput.displayName,
         authorUrl || '', 
         postUrl || '', 
         description || ''

@@ -1,0 +1,50 @@
+---
+interface Props {
+  totalPosts: number;
+  pendingPosts: number;
+  totalAccounts: number;
+  enabledAccounts: number;
+}
+
+const { totalPosts, pendingPosts, totalAccounts, enabledAccounts } = Astro.props;
+---
+
+<section
+  id="panel-overview"
+  class="dashboard-panel"
+  role="tabpanel"
+  aria-labelledby="tab-overview"
+  data-admin-panel="overview"
+  hidden
+>
+  <div class="overview-grid">
+    <article class="overview-card">
+      <span>全部貼文</span>
+      <strong>{totalPosts}</strong>
+    </article>
+    <article class="overview-card">
+      <span>待審查</span>
+      <strong>{pendingPosts}</strong>
+    </article>
+    <article class="overview-card">
+      <span>爬蟲帳號</span>
+      <strong>{totalAccounts}</strong>
+      <small>{enabledAccounts} 個啟用</small>
+    </article>
+    <article class="overview-card storage-panel" id="storage-panel">
+      <span>R2 容量</span>
+      <strong id="storage-used">讀取中...</strong>
+      <div class="storage-bar-wrap">
+        <div class="storage-bar-fill" id="storage-bar-fill" style="width: 0%;"></div>
+      </div>
+      <button type="button" id="storage-reconcile-btn" class="btn">重新計算</button>
+      <p class="storage-warning" id="storage-warning" hidden></p>
+    </article>
+  </div>
+  <div class="quick-actions" aria-label="快捷操作">
+    <a href="#upload" class="btn btn-primary">新增貼文</a>
+    <a href="#posts" class="btn" data-post-status="pending">查看待審查</a>
+    <a href="#crawler" class="btn">管理爬蟲帳號</a>
+    <a href="#auto-tag" class="btn">執行 Auto-tag</a>
+  </div>
+</section>

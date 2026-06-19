@@ -1,0 +1,28 @@
+---
+const tabs = [
+  ['overview', '總覽'],
+  ['posts', '貼文管理'],
+  ['upload', '新增貼文'],
+  ['crawler', '爬蟲帳號'],
+  ['auto-tag', 'Auto-tag'],
+] as const;
+---
+
+<nav class="dashboard-tabs" aria-label="管理後台分頁">
+  <div role="tablist" aria-orientation="horizontal">
+    {tabs.map(([id, label]) => (
+      <a
+        id={`tab-${id}`}
+        class="dashboard-tab"
+        href={`#${id}`}
+        role="tab"
+        aria-controls={`panel-${id}`}
+        aria-selected="false"
+        tabindex="-1"
+        data-admin-tab={id}
+      >
+        {label}
+      </a>
+    ))}
+  </div>
+</nav>

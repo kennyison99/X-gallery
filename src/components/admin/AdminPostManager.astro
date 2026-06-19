@@ -1,0 +1,237 @@
+---
+import { authorSearchText, formatAuthorName, normalizeAuthorHandle } from '../../lib/admin-dashboard';
+
+interface Props { images: any[] }
+const { images: formattedImages } = Astro.props;
+---
+
+<!-- Manage List Panel -->
+      <section id="panel-posts" class="admin-panel list-panel dashboard-panel" role="tabpanel" aria-labelledby="tab-posts" data-admin-panel="posts" hidden>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h2 style="margin: 0;">照片貼文列表 (<span id="total-count-display">{formattedImages.length}</span>)</h2>
+          <div class="view-toggle-group" style="display: inline-flex; gap: 0.25rem; background-color: var(--accent-light); padding: 0.2rem; border-radius: 6px; border: 1px solid var(--border-color);">
+            <button type="button" id="view-toggle-table" class="view-toggle-btn active">
+              📋 列表
+            </button>
+            <button type="button" id="view-toggle-grid" class="view-toggle-btn">
+              ⬜ 網格
+            </button>
+          </div>
+        </div>
+
+        <!-- Tabs for Published vs Pending -->
+        <div class="admin-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          <button type="button" id="tab-published" class="tab-btn active" style="padding: 0.5rem 1rem; border: none; background: none; color: var(--text-primary); border-bottom: 2px solid var(--text-primary); cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: all 0.2s ease;">
+            已發佈 ({formattedImages.filter(img => img.published === 1).length})
+          </button>
+          <button type="button" id="tab-pending" class="tab-btn" style="padding: 0.5rem 1rem; border: none; background: none; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.2s ease;">
+            待審查 ({formattedImages.filter(img => img.published === 0).length})
+          </button>
+        </div>
+
+        <!-- Search and Filter Bar -->
+        <div class="list-filters" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+          <input type="text" id="search-input" placeholder="搜尋標題、作者或內文..." style="flex: 2; min-width: 180px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'" />
+          <select id="author-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="">所有作者</option>
+          </select>
+          <select id="tag-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="">所有標籤</option>
+          </select>
+          <select id="media-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="">所有類型</option>
+            <option value="photo">僅相片</option>
+            <option value="video">僅影片</option>
+          </select>
+        </div>
+
+        <!-- Bulk Actions Bar -->
+        <div id="bulk-actions-bar" class="bulk-actions">
+          <span id="selected-count-display">已選擇 0 筆照片</span>
+          <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
+            刪除所選
+          </button>
+        </div>
+        <div id="bulk-delete-progress" class="operation-progress" hidden>
+          <progress id="bulk-delete-progress-bar" value="0" max="1"></progress>
+          <span id="bulk-delete-progress-text">準備刪除...</span>
+        </div>
+
+        <div class="table-wrapper view-mode-table">
+          {formattedImages.length > 0 ? (
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-checkbox" style="cursor: pointer;" /></th>
+                  <th>預覽</th>
+                  <th>貼文資訊</th>
+                  <th>標籤</th>
+                  <th style="text-align: right;">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {formattedImages.map((image) => {
+                  const keys = image.r2_keys.split(',');
+                  const firstKey = keys[0] || '';
+                  const totalCount = keys.length;
+                  const firstIsVideo = /\.(mp4|webm|mov|m4v)$/i.test(firstKey);
+
+                  return (
+                    <tr class="image-row" data-id={image.id} data-published={image.published} data-has-photo={image.hasPhoto ? "true" : "false"} data-has-video={image.hasVideo ? "true" : "false"} data-author={normalizeAuthorHandle(image.author)} data-author-display-name={image.author_display_name || ''} data-author-search={authorSearchText(image.author_display_name, image.author)}>
+                      <td style="text-align: center; vertical-align: middle;">
+                        <input type="checkbox" class="image-select-checkbox" data-id={image.id} style="cursor: pointer;" />
+                      </td>
+                      <td>
+                        <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
+                          {firstIsVideo ? (
+                            <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="admin-thumb" preload="metadata" muted playsinline></video>
+                          ) : (
+                            <img
+                              src={`/api/r2/${encodeURIComponent(firstKey)}`}
+                              alt={image.title}
+                              class="admin-thumb"
+                            />
+                          )}
+                          {totalCount > 1 && (
+                            <span class="thumb-count-badge">+{totalCount - 1}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div class="image-title">{image.title || '無標題'}</div>
+                        <div class="image-author">
+                          {formatAuthorName(image.author_display_name, image.author)}
+                          {image.published === 0 && (
+                            <span class={`pending-badge ${image.isCritical ? 'critical' : ''}`} style={`margin-left: 0.5rem; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: bold; background-color: ${image.isCritical ? 'rgba(229, 57, 53, 0.15)' : 'rgba(255, 179, 0, 0.15)'}; color: ${image.isCritical ? '#e53935' : '#ffb300'}; border: 1px solid ${image.isCritical ? '#e53935' : '#ffb300'};`}>
+                              ⏰ {image.remainingText}
+                            </span>
+                          )}
+                        </div>
+                        {image.description && <div class="image-desc-preview" title={image.description}>{image.description}</div>}
+                        <div class="image-date">{new Date(image.created_at).toLocaleDateString()}</div>
+                      </td>
+                      <td>
+                        <div class="table-tags">
+                          {image.tags.map((tag: string) => (
+                            <span class="table-tag">#{tag}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td style="text-align: right;">
+                        <div class="table-actions" style="display: flex; gap: 0.3rem; justify-content: flex-end; align-items: center;">
+                          {image.published === 0 && (
+                            <button
+                              class="btn btn-success approve-btn"
+                              style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                              data-id={image.id}
+                            >
+                              核准
+                            </button>
+                          )}
+                          <button
+                            class="btn edit-btn"
+                            style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                            data-id={image.id}
+                            data-title={image.title}
+                            data-description={image.description || ''}
+                            data-author={normalizeAuthorHandle(image.author)}
+                            data-author-display-name={image.author_display_name || ''}
+                            data-author-url={image.author_url || ''}
+                            data-post-url={image.post_url || ''}
+                            data-tags={image.tags.join(',')}
+                            data-keys={image.r2_keys}
+                          >
+                            編輯
+                          </button>
+                          <button class="btn btn-danger delete-btn" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;" data-id={image.id}>
+                            刪除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div class="empty-table-state">
+              <p>資料庫目前無照片，請前往新增貼文分頁上傳。</p>
+            </div>
+          )}
+        </div>
+
+        <div class="grid-wrapper view-mode-grid" style="display: none;">
+          {formattedImages.length > 0 ? (
+            <div class="admin-grid-view">
+              {formattedImages.map((image) => {
+                const keys = image.r2_keys.split(',').map((k: string) => k.trim()).filter(Boolean);
+                const firstKey = keys[0] || '';
+                const totalCount = keys.length;
+                const firstIsVideo = /\.(mp4|webm|mov|m4v)$/i.test(firstKey);
+
+                return (
+                  <div class="grid-image-card" data-id={image.id} data-published={image.published} data-has-photo={image.hasPhoto ? "true" : "false"} data-has-video={image.hasVideo ? "true" : "false"} data-author={normalizeAuthorHandle(image.author)} data-author-display-name={image.author_display_name || ''} data-author-search={authorSearchText(image.author_display_name, image.author)}>
+                    <div class="grid-card-select-overlay">
+                      <input type="checkbox" class="image-select-checkbox grid-select-checkbox" data-id={image.id} style="cursor: pointer;" />
+                    </div>
+
+                    <div class="grid-card-media">
+                      {firstIsVideo ? (
+                        <video src={`/api/r2/${encodeURIComponent(firstKey)}`} class="grid-thumb" preload="metadata" muted playsinline></video>
+                      ) : (
+                        <img src={`/api/r2/${encodeURIComponent(firstKey)}`} alt={image.title} class="grid-thumb" loading="lazy" />
+                      )}
+                      {totalCount > 1 && (
+                        <span class="grid-thumb-count-badge">+{totalCount - 1}</span>
+                      )}
+
+                      <div class="grid-card-hover-overlay">
+                        <div class="grid-card-info">
+                          <div class="grid-card-title" title={image.title || '無標題'}>{image.title || '無標題'}</div>
+                          <div class="grid-card-author">{formatAuthorName(image.author_display_name, image.author)}</div>
+                        </div>
+                        <div class="grid-card-actions">
+                          {image.published === 0 && (
+                            <button class="btn btn-success approve-btn grid-action-btn" data-id={image.id} title="核准">✓</button>
+                          )}
+                          <button
+                            class="btn edit-btn grid-action-btn"
+                            data-id={image.id}
+                            data-title={image.title}
+                            data-description={image.description || ''}
+                            data-author={normalizeAuthorHandle(image.author)}
+                            data-author-display-name={image.author_display_name || ''}
+                            data-author-url={image.author_url || ''}
+                            data-post-url={image.post_url || ''}
+                            data-tags={image.tags.join(',')}
+                            data-keys={image.r2_keys}
+                            title="編輯"
+                          >
+                            ✏️
+                          </button>
+                          <button class="btn btn-danger delete-btn grid-action-btn" data-id={image.id} title="刪除">🗑️</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div class="empty-table-state">
+              <p>資料庫目前無照片，請前往新增貼文分頁上傳。</p>
+            </div>
+          )}
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-controls" id="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+          <span class="pagination-info" id="pagination-info">顯示第 1-10 筆，共 0 筆</span>
+          <div style="display: flex; gap: 0.4rem;">
+            <button type="button" id="first-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">最前頁</button>
+            <button type="button" id="prev-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">上一頁</button>
+            <button type="button" id="next-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">下一頁</button>
+            <button type="button" id="last-page-btn" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">最後頁</button>
+          </div>
+        </div>
+      </section>

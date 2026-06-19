@@ -1,0 +1,45 @@
+---
+interface Props { accounts: any[] }
+const { accounts: crawlAccounts } = Astro.props;
+---
+
+<!-- Crawl Accounts Panel -->
+      <section id="panel-crawler" class="admin-panel crawl-panel dashboard-panel" role="tabpanel" aria-labelledby="tab-crawler" data-admin-panel="crawler" hidden>
+        <h2>自動爬取帳號管理</h2>
+        <p class="crawl-desc">新增 Twitter/X 帳號後，GitHub Actions 將每日自動爬取該帳號的最新圖片並上傳。</p>
+
+        <div class="crawl-add-form">
+          <input type="text" id="crawl-username" placeholder="輸入 Twitter 帳號（例如 foglantau）" />
+          <button type="button" id="add-crawl-btn" class="btn btn-primary" style="white-space: nowrap;">新增帳號</button>
+        </div>
+        <div id="crawl-message" class="form-message" style="margin-top: 0.5rem;"></div>
+
+        <div class="crawl-accounts-list" id="crawl-accounts-list">
+          {crawlAccounts.length > 0 ? (
+            crawlAccounts.map((account: any) => (
+              <div class="crawl-account-item" data-username={account.username}>
+                <div class="crawl-account-info">
+                  <span class="crawl-account-name">@{account.username}</span>
+                  <a href={`https://x.com/${account.username}`} target="_blank" rel="noopener noreferrer" class="crawl-account-link" title="前往 Twitter">↗</a>
+                  {account.lastCrawlText && (
+                    <span class="crawl-last-time" title="最近一次爬取記錄">{account.lastCrawlText}</span>
+                  )}
+                </div>
+                <div class="crawl-account-settings" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                  <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);">
+                    <input type="checkbox" class="toggle-enabled-cb" data-username={account.username} checked={account.enabled === 1} />
+                    <span>啟用自動爬取</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);">
+                    <input type="checkbox" class="toggle-crawlall-cb" data-username={account.username} checked={account.crawl_all === 1} />
+                    <span>爬取全部歷史圖片</span>
+                  </label>
+                  <button class="btn btn-danger remove-crawl-btn" data-username={account.username} style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">移除</button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p class="empty-text" id="crawl-empty-text">尚未新增任何爬取帳號。</p>
+          )}
+        </div>
+      </section>

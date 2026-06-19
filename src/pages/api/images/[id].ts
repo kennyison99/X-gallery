@@ -5,6 +5,7 @@ import {
   wouldExceedStorage,
   addStorageBytes,
 } from '../../../lib/storage';
+import { normalizeAuthorInput } from '../../../lib/admin-dashboard';
 
 export const DELETE: APIRoute = async ({ params }) => {
   if (!env || !env.DB || !env.BUCKET) {
@@ -96,13 +97,16 @@ export const PUT: APIRoute = async ({ params, request }) => {
     const files = formData.getAll('file') as File[];
     const title = formData.get('title') as string | null;
     const description = formData.get('description') as string | null;
-    const author = formData.get('author') as string | null;
+    const authorInput = normalizeAuthorInput(
+      formData.get('author'),
+      formData.get('author_display_name'),
+    );
     const authorUrl = formData.get('author_url') as string | null;
     const postUrl = formData.get('post_url') as string | null;
     const tagsString = formData.get('tags') as string | null; // Comma separated list of tags
     const existingKeysString = formData.get('existing_keys') as string | null; // Comma separated list of keys to KEEP
 
-    if (!author) {
+    if (!authorInput.handle) {
       return new Response(JSON.stringify({ error: 'Author is required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
@@ -182,9 +186,9 @@ export const PUT: APIRoute = async ({ params, request }) => {
 
     // Update image metadata including final R2 keys, setting published = 1 (approved) on manual edit, and updated_at timestamp
     await env.DB.prepare(
-      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_url = ?, post_url = ?, description = ?, published = 1, updated_at = datetime('now') WHERE id = ?"
+      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, updated_at = datetime('now') WHERE id = ?"
     )
-      .bind(title || '推文寫真', finalKeysString, author, authorUrl || '', postUrl || '', description || '', imageId)
+      .bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', imageId)
       .run();
 
     // 2. Clean current tags associations

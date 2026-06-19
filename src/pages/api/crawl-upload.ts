@@ -6,6 +6,7 @@ import {
   wouldExceedStorage,
   addStorageBytes,
 } from '../../lib/storage';
+import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 
 
 /**
@@ -36,8 +37,10 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     const files = formData.getAll('file') as File[];
-    const author = formData.get('author') as string | null;
-    const authorDisplayName = formData.get('author_display_name') as string | null;
+    const authorInput = normalizeAuthorInput(
+      formData.get('author'),
+      formData.get('author_display_name'),
+    );
     const authorUrl = formData.get('author_url') as string | null;
     const postUrl = formData.get('post_url') as string | null;
     const title = formData.get('title') as string | null;
@@ -52,7 +55,7 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    if (!author) {
+    if (!authorInput.handle) {
       return new Response(JSON.stringify({ error: 'Author is required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
@@ -64,13 +67,13 @@ export const POST: APIRoute = async ({ request }) => {
     const firstFileName = validFiles[0].name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const existingCheck = await env.DB.prepare(
       'SELECT id FROM images WHERE author = ? AND r2_keys LIKE ?'
-    ).bind(author, `%${firstFileName}%`).first();
+    ).bind(authorInput.handle, `%${firstFileName}%`).first();
 
     if (existingCheck) {
       return new Response(JSON.stringify({
         success: false,
         skipped: true,
-        message: `Image "${firstFileName}" already exists for @${author}`
+        message: `Image "${firstFileName}" already exists for @${authorInput.handle}`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -93,7 +96,7 @@ export const POST: APIRoute = async ({ request }) => {
     for (const file of validFiles) {
       const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       // Use author prefix for organized storage
-      const r2Key = `${author}_${cleanFileName}`;
+      const r2Key = `${authorInput.handle}_${cleanFileName}`;
 
       const fileArrayBuffer = await file.arrayBuffer();
       await env.BUCKET.put(r2Key, fileArrayBuffer, {
@@ -118,11 +121,11 @@ export const POST: APIRoute = async ({ request }) => {
       RETURNING id
     `;
     const bindParams = [
-      title || `@${author} 推文`,
+      title || `@${authorInput.handle} 推文`,
       r2KeysString,
-      author,
-      authorDisplayName || '',
-      authorUrl || `https://x.com/${author}`,
+      authorInput.handle,
+      authorInput.displayName,
+      authorUrl || `https://x.com/${authorInput.handle}`,
       postUrl || '',
       description || '',
       publishedValue
@@ -136,7 +139,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Auto-tagging logic based on description and author
     if (imageResult?.id) {
-      const autoTags = generateAutoTags(author, description);
+      const autoTags = generateAutoTags(authorInput.handle, description);
 
       // Save tags to D1 and link them to this image
       for (const tagName of autoTags) {
@@ -156,7 +159,7 @@ export const POST: APIRoute = async ({ request }) => {
     // Update last_crawled_at for this account
     await env.DB.prepare(
       "UPDATE crawl_accounts SET last_crawled_at = datetime('now') WHERE username = ?"
-    ).bind(author).run();
+    ).bind(authorInput.handle).run();
 
     return new Response(JSON.stringify({ 
       success: true, 

@@ -1,0 +1,98 @@
+---
+interface Props { allTags: Array<{ name: string }> }
+const { allTags } = Astro.props;
+---
+
+<!-- Upload Panel -->
+      <section id="panel-upload" class="admin-panel upload-panel dashboard-panel" role="tabpanel" aria-labelledby="tab-upload" data-admin-panel="upload" hidden>
+        <h2 id="form-title-text">發佈相片貼文</h2>
+        <form id="upload-form" class="admin-form">
+          <div class="form-group">
+            <label for="image-file">選擇照片 / 影片 (支援多選) <span class="required" id="file-required-star">*</span></label>
+            <div class="file-dropzone">
+              <input type="file" id="image-file" name="file" accept="image/*,video/mp4,video/webm,video/quicktime" multiple required />
+              <div class="dropzone-text">
+                <span class="upload-icon">📁</span>
+                <span class="upload-prompt">點擊選擇照片 (可選多張)</span>
+                <span class="file-name-display">尚未選擇任何檔案</span>
+              </div>
+            </div>
+
+            <!-- Image Previews -->
+            <div id="image-preview-container" style="display: none; margin-top: 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.6rem; background-color: var(--bg-secondary);">
+              <div id="existing-images-preview" class="preview-section" style="display: none; margin-bottom: 0.5rem;">
+                <span class="preview-label" style="font-size: 0.8rem; font-weight: 500; display: block; margin-bottom: 0.25rem; color: var(--text-secondary);">目前相片：</span>
+                <div class="preview-grid" id="existing-images-grid" style="display: flex; gap: 0.4rem; flex-wrap: wrap;"></div>
+              </div>
+              <div id="new-images-preview" class="preview-section" style="display: none;">
+                <span class="preview-label" style="font-size: 0.8rem; font-weight: 500; display: block; margin-bottom: 0.25rem; color: var(--text-secondary);">即將上傳之新相片：</span>
+                <div class="preview-grid" id="new-images-grid" style="display: flex; gap: 0.4rem; flex-wrap: wrap;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="image-title">貼文標題</label>
+            <input type="text" id="image-title" name="title" placeholder="例如：推文寫真集 #1" />
+          </div>
+
+          <div class="form-group">
+            <label for="image-description">感想 / 內文</label>
+            <textarea id="image-description" name="description" rows="3" placeholder="寫點關於這組照片的感想或推文內容..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="image-author">作者 (Twitter 帳號) <span class="required">*</span></label>
+            <input type="text" id="image-author" name="author" value="foglantau" placeholder="例如：foglantau" required />
+          </div>
+
+          <div class="form-group">
+            <label for="image-author-display-name">作者顯示名稱</label>
+            <input type="text" id="image-author-display-name" name="author_display_name" placeholder="例如：笨蛋愛麗絲" />
+          </div>
+
+          <div class="form-group">
+            <label for="image-author-url">作者 Twitter 連結</label>
+            <input type="url" id="image-author-url" name="author_url" value="https://x.com/foglantau" placeholder="https://x.com/username" />
+          </div>
+
+          <div class="form-group">
+            <label for="image-post-url">原推文連結 (post_url)</label>
+            <input type="url" id="image-post-url" name="post_url" placeholder="https://x.com/username/status/123456789" />
+          </div>
+
+          <!-- Reusable Tags Selection -->
+          <div class="form-group">
+            <label>選擇已有標籤</label>
+            <div class="existing-tags-wrapper">
+              {allTags.length > 0 ? (
+                allTags.map((tag: any) => (
+                  <label class="tag-checkbox-label">
+                    <input type="checkbox" name="existing_tags" value={tag.name} />
+                    <span>#{tag.name}</span>
+                  </label>
+                ))
+              ) : (
+                <p class="empty-text">尚無已有標籤</p>
+              )}
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="new-tags">新增其他標籤 (以逗號或空格分隔)</label>
+            <input type="text" id="new-tags" name="new_tags" placeholder="例如：絲襪, 日常" />
+            <p class="form-help">新標籤會自動去重並加入資料庫供下次使用。</p>
+          </div>
+
+          <div class="form-actions" style="display: flex; gap: 0.5rem; width: 100%;">
+            <button type="submit" class="btn btn-primary btn-submit" style="flex: 1;">
+              <span class="btn-text">確認上傳</span>
+              <span class="loader-spinner" style="display: none;"></span>
+            </button>
+            <button type="button" id="cancel-edit-btn" class="btn" style="display: none; flex: 1;">
+              取消編輯
+            </button>
+          </div>
+          <div id="upload-message" class="form-message"></div>
+        </form>
+      </section>
