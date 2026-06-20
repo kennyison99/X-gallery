@@ -30,7 +30,7 @@ function escapeHtmlAttribute(value: string): string {
 
 export function preparePhotoSwipeItem<T extends PhotoSwipeItem>(
   item: T,
-  viewport: ViewportSize,
+  viewport?: ViewportSize,
 ): T {
   if (item.element?.getAttribute('data-video') !== '1') {
     const image = item.element?.querySelector?.('img');
@@ -39,8 +39,8 @@ export function preparePhotoSwipeItem<T extends PhotoSwipeItem>(
       item.h = image.naturalHeight;
     } else {
       // Fallback placeholder size for thumbnails so PhotoSwipe opens in large dimensions initially
-      item.w = viewport.width;
-      item.h = viewport.height;
+      item.w = viewport?.width ?? 1200;
+      item.h = viewport?.height ?? 900;
     }
     return item;
   }

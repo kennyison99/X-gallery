@@ -153,20 +153,45 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
         });
 
         // Dynamically retrieve original image size when it loads to bypass the 300px thumbnail size limit
-        lightbox.on('gettingData', (e) => {
-          const itemData = e.itemData;
-          if (itemData.element && itemData.element.getAttribute('data-video') !== '1') {
-            const img = new Image();
-            img.onload = () => {
-              itemData.w = img.naturalWidth;
-              itemData.h = img.naturalHeight;
-              
-              const pswp = lightbox.pswp;
-              if (pswp) {
-                pswp.refreshSlideContent(e.index);
+        lightbox.on('contentLoad', (e) => {
+          try {
+            const { content } = e;
+            if (!content || content.type !== 'image') return;
+
+            const img = content.element;
+            if (!img) return;
+
+            const onImageLoaded = () => {
+              try {
+                if (img.naturalWidth && img.naturalHeight) {
+                  content.width = img.naturalWidth;
+                  content.height = img.naturalHeight;
+
+                  const pswp = lightbox.pswp;
+                  if (pswp && pswp.options && pswp.options.dataSource) {
+                    const item = pswp.options.dataSource[content.index];
+                    if (item) {
+                      item.w = img.naturalWidth;
+                      item.h = img.naturalHeight;
+                    }
+                    pswp.refreshSlideContent(content.index);
+                  }
+                }
+              } catch (err) {
+                console.error('Error updating loaded image dimensions:', err);
               }
             };
-            img.src = itemData.src;
+
+            if (img.complete) {
+              onImageLoaded();
+            } else {
+              img.addEventListener('load', onImageLoaded);
+              img.addEventListener('error', (err) => {
+                console.error('PhotoSwipe image load error:', err);
+              });
+            }
+          } catch (err) {
+            console.error('Error in contentLoad hook:', err);
           }
         });
 
