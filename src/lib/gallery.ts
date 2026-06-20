@@ -34,9 +34,13 @@ export function preparePhotoSwipeItem<T extends PhotoSwipeItem>(
 ): T {
   if (item.element?.getAttribute('data-video') !== '1') {
     const image = item.element?.querySelector?.('img');
-    if (image?.naturalWidth && image.naturalHeight) {
+    if (image?.naturalWidth && image.naturalHeight && image.naturalWidth > 350) {
       item.w = image.naturalWidth;
       item.h = image.naturalHeight;
+    } else {
+      // Fallback placeholder size for thumbnails so PhotoSwipe opens in large dimensions initially
+      item.w = viewport.width;
+      item.h = viewport.height;
     }
     return item;
   }
