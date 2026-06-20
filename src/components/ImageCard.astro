@@ -23,7 +23,13 @@ const keys = image.r2_keys.split(',').map(k => k.trim()).filter(k => k.length > 
 const firstKey = keys[0] || '';
 const totalImages = keys.length;
 
-const firstImageUrl = `/api/r2/${encodeURIComponent(firstKey)}`;
+const origin = Astro.url.origin;
+const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('[::1]');
+const getPreviewUrl = (key: string) => {
+  const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
+  if (isLocal) return mediaUrl;
+  return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
+};
 
 // Detect video keys (by extension) so the card can render a <video> preview
 // with a play overlay instead of an <img>. Animated WebP (converted from
@@ -78,7 +84,7 @@ const displayDate = image.updated_at
               </div>
             ) : (
               <img
-                src={mediaUrl}
+                src={getPreviewUrl(key)}
                 alt={image.title || 'Twitter photo'}
                 loading="lazy"
                 class="gallery-image"

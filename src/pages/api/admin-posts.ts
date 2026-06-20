@@ -44,6 +44,14 @@ export const GET: APIRoute = async ({ url }) => {
     });
   }
 
+  const origin = url.origin;
+  const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('[::1]');
+  const getPreviewUrl = (key: string) => {
+    const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
+    if (isLocal) return mediaUrl;
+    return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
+  };
+
   const params = parseParams(url);
   const direction = params.sort === 'oldest' ? 'ASC' : 'DESC';
 
@@ -143,6 +151,7 @@ export const GET: APIRoute = async ({ url }) => {
     const authorSearch = authorSearchText(image.author_display_name, image.author);
     const authorDisplay = formatAuthorName(image.author_display_name, image.author);
     const r2Url = `/api/r2/${encodeURIComponent(firstKey)}`;
+    const previewUrl = getPreviewUrl(firstKey);
     const titleAttr = escapeAttr(image.title || '無標題');
     const descAttr = escapeAttr(image.description || '');
 
@@ -155,7 +164,7 @@ export const GET: APIRoute = async ({ url }) => {
     <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
       ${firstIsVideo
         ? `<video data-src="${r2Url}" class="admin-thumb" preload="metadata" muted playsinline></video>`
-        : `<img data-src="${r2Url}" alt="${titleAttr}" class="admin-thumb" />`}
+        : `<img data-src="${previewUrl}" alt="${titleAttr}" class="admin-thumb" />`}
       ${totalCount > 1 ? `<span class="thumb-count-badge">+${totalCount - 1}</span>` : ''}
     </div>
   </td>
@@ -190,7 +199,7 @@ export const GET: APIRoute = async ({ url }) => {
   <div class="grid-card-media">
     ${firstIsVideo
       ? `<video data-src="${r2Url}" class="grid-thumb" preload="metadata" muted playsinline></video>`
-      : `<img data-src="${r2Url}" alt="${titleAttr}" class="grid-thumb" />`}
+      : `<img data-src="${previewUrl}" alt="${titleAttr}" class="grid-thumb" />`}
     ${totalCount > 1 ? `<span class="grid-thumb-count-badge">+${totalCount - 1}</span>` : ''}
     <div class="grid-card-hover-overlay">
       <div class="grid-card-info">
