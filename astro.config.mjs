@@ -11,14 +11,24 @@ try {
   // Fallback
 }
 
-const buildDate = new Date().toLocaleDateString('zh-TW', {
+const parts = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
   timeZone: 'Asia/Hong_Kong'
-}).replace(/\//g, '.');
+}).formatToParts(new Date());
 
-const versionString = `v${buildDate}-${commitHash}`;
+const getVal = (type) => parts.find(p => p.type === type)?.value ?? '';
+const YYYY = getVal('year');
+const MM = getVal('month');
+const DD = getVal('day');
+const HH = getVal('hour');
+const mm = getVal('minute');
+
+const versionString = `v${YYYY}.${MM}.${DD}(${HH}${mm})-${commitHash}`;
 
 // https://astro.build/config
 export default defineConfig({
