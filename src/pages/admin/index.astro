@@ -25,28 +25,42 @@ try {
 
 // 2. Fetch all existing tags for reusable selection and filter out author handles
 let allTags = [];
+let authorsForFilter: { handle: string; label: string }[] = [];
 try {
   const tagsQuery = await env.DB.prepare('SELECT * FROM tags ORDER BY name ASC').all();
   allTags = (tagsQuery.results || []).filter((tag: any) => !authorSet.has(tag.name.toLowerCase()));
+
+  // Fetch distinct authors with display names for the filter dropdown
+  const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_display_name FROM images ORDER BY author ASC').all();
+  authorsForFilter = (authorsQuery.results || []).map((r: any) => ({
+    handle: r.author,
+    label: r.author_display_name ? `${r.author_display_name}@${r.author}` : `@${r.author}`,
+  }));
 } catch (err) {
-  console.error('Error fetching tags for admin:', err);
+  console.error('Error fetching tags/authors for admin:', err);
 }
 
-// 3. Fetch all images/posts for management list
-let images = [];
+// 3. Fetch counts for overview and tab labels (no full row fetch — pagination is server-side)
+let totalPosts = 0;
+let publishedCount = 0;
+let pendingCount = 0;
+let totalPhotos = 0;
+let totalVideos = 0;
 try {
-  const query = `
-    SELECT i.*, group_concat(t.name) as tags_list
-    FROM images i
-    LEFT JOIN image_tags it ON i.id = it.image_id
-    LEFT JOIN tags t ON it.tag_id = t.id
-    GROUP BY i.id
-    ORDER BY i.created_at DESC
-  `;
-  const { results } = await env.DB.prepare(query).all();
-  images = results || [];
+  const countRow = await env.DB.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending FROM images').first<any>();
+  totalPosts = countRow?.total ?? 0;
+  publishedCount = countRow?.published ?? 0;
+  pendingCount = countRow?.pending ?? 0;
+
+  // Approximate photo/video counts via r2_keys LIKE (good enough for overview display)
+  const mediaRow = await env.DB.prepare(`SELECT
+    COUNT(CASE WHEN r2_keys NOT LIKE '%.mp4%' AND r2_keys NOT LIKE '%.webm%' AND r2_keys NOT LIKE '%.mov%' AND r2_keys NOT LIKE '%.m4v%' THEN 1 END) as photos,
+    COUNT(CASE WHEN r2_keys LIKE '%.mp4%' OR r2_keys LIKE '%.webm%' OR r2_keys LIKE '%.mov%' OR r2_keys LIKE '%.m4v%' THEN 1 END) as videos
+    FROM images`).first<any>();
+  totalPhotos = mediaRow?.photos ?? 0;
+  totalVideos = mediaRow?.videos ?? 0;
 } catch (err) {
-  console.error('Error fetching images for admin:', err);
+  console.error('Error fetching image counts for admin:', err);
 }
 
 // 3. Fetch crawl accounts
@@ -70,47 +84,6 @@ try {
   console.error('Error fetching crawl accounts:', err);
 }
 
-const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
-const isVideoKey = (key: string) => VIDEO_EXTS.has((key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
-
-const formattedImages = images.map((img: any) => {
-  // Calculate remaining time for pending images (3 days from created_at)
-  let remainingText = '';
-  let isCritical = false;
-  if (img.published === 0) {
-    const createdTime = new Date(img.created_at).getTime();
-    const expireTime = createdTime + (3 * 24 * 60 * 60 * 1000);
-    const remainingMs = expireTime - Date.now();
-    if (remainingMs <= 0) {
-      remainingText = '即將刪除';
-      isCritical = true;
-    } else {
-      const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
-      if (remainingHours < 24) {
-        remainingText = `剩餘 ${remainingHours} 小時`;
-        isCritical = true;
-      } else {
-        const remainingDays = Math.floor(remainingHours / 24);
-        const extraHours = remainingHours % 24;
-        remainingText = `剩餘 ${remainingDays} 天 ${extraHours} 小時`;
-      }
-    }
-  }
-
-  // Calculate media types
-  const keys = img.r2_keys ? img.r2_keys.split(',').map((k: string) => k.trim()).filter(Boolean) : [];
-  const hasPhoto = keys.some((k: string) => !isVideoKey(k));
-  const hasVideo = keys.some((k: string) => isVideoKey(k));
-
-  return {
-    ...img,
-    tags: img.tags_list ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase())) : [],
-    remainingText,
-    isCritical,
-    hasPhoto,
-    hasVideo
-  };
-});
 ---
 
 <BaseLayout title="CMS 後台管理 - Twitter 照片牆">
@@ -123,10 +96,10 @@ const formattedImages = images.map((img: any) => {
     <AdminDashboardTabs />
 
     <AdminOverview
-      totalPosts={formattedImages.length}
-      totalPhotos={formattedImages.filter((image) => image.hasPhoto).length}
-      totalVideos={formattedImages.filter((image) => image.hasVideo).length}
-      pendingPosts={formattedImages.filter((image) => image.published === 0).length}
+      totalPosts={totalPosts}
+      totalPhotos={totalPhotos}
+      totalVideos={totalVideos}
+      pendingPosts={pendingCount}
       totalAccounts={crawlAccounts.length}
       enabledAccounts={crawlAccounts.filter((account) => account.enabled === 1).length}
     />
@@ -134,7 +107,12 @@ const formattedImages = images.map((img: any) => {
     <div class="admin-grid">
       <AdminUploadPanel allTags={allTags} />
 
-      <AdminPostManager images={formattedImages} />
+      <AdminPostManager
+        publishedCount={publishedCount}
+        pendingCount={pendingCount}
+        authors={authorsForFilter}
+        tags={allTags.map((t: any) => t.name)}
+      />
 
       <AdminAutoTagPanel />
 
@@ -144,7 +122,7 @@ const formattedImages = images.map((img: any) => {
 </BaseLayout>
 
 <script>
-  import { formatAuthorName, resolveAdminTab } from '../../lib/admin-dashboard';
+  import { resolveAdminTab } from '../../lib/admin-dashboard';
 
   // Lazily load post manager thumbnails only when the posts tab is first
   // activated, so hidden panels don't trigger R2 fetches on page load.
@@ -575,26 +553,8 @@ const formattedImages = images.map((img: any) => {
     cancelBtn.addEventListener('click', resetForm);
   }
 
-  // Hook up Edit buttons
-  document.querySelectorAll('.edit-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-id');
-      const title = btn.getAttribute('data-title') || '';
-      const description = btn.getAttribute('data-description') || '';
-      const author = btn.getAttribute('data-author') || '';
-      const authorDisplayName = btn.getAttribute('data-author-display-name') || '';
-      const authorUrl = btn.getAttribute('data-author-url') || '';
-      const postUrl = btn.getAttribute('data-post-url') || '';
-      const tags = btn.getAttribute('data-tags') || '';
-      const keys = btn.getAttribute('data-keys') || '';
-      
-      if (id) {
-        enterEditMode(id, { title, description, author, authorDisplayName, authorUrl, postUrl, tags, keys });
-        window.location.hash = 'upload';
-        requestAnimationFrame(() => uploadForm?.scrollIntoView({ behavior: 'smooth' }));
-      }
-    });
-  });
+  // Edit/Delete/Approve buttons are bound dynamically in rebindRowHandlers()
+  // after each AJAX page load (see loadPosts below).
 
   // Handle Form Upload / Modify
   const uploadForm = document.getElementById('upload-form') as HTMLFormElement | null;
@@ -697,50 +657,6 @@ const formattedImages = images.map((img: any) => {
       }
     });
   }
-
-  // Handle Deletion
-  document.querySelectorAll('.delete-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const imgId = btn.getAttribute('data-id');
-      if (!imgId) return;
-
-      if (!confirm('你確定要刪除這張照片貼文嗎？此操作將會從資料庫與 Cloudflare R2 中永久刪除該貼文的所有照片！')) {
-        return;
-      }
-
-      (btn as HTMLButtonElement).disabled = true;
-      btn.textContent = '刪除中...';
-
-      try {
-        const response = await fetch(`/api/images/${imgId}`, {
-          method: 'DELETE'
-        });
-
-        const data = await response.json();
-
-        if (response.ok && data.success) {
-          const row = document.querySelector(`.image-row[data-id="${imgId}"]`);
-          if (row) {
-            row.remove();
-          }
-          const remainingRows = document.querySelectorAll('.image-row');
-          if (remainingRows.length === 0) {
-            window.location.reload();
-          }
-          refreshStorage();
-        } else {
-          alert(`刪除失敗：${data.error || '未知錯誤'}`);
-          (btn as HTMLButtonElement).disabled = false;
-          btn.textContent = '刪除';
-        }
-      } catch (err) {
-        console.error(err);
-        alert('刪除失敗，伺服器發生錯誤。');
-        (btn as HTMLButtonElement).disabled = false;
-        btn.textContent = '刪除';
-      }
-    });
-  });
 
   // =========== Crawl Accounts Management ===========
   const crawlUsernameInput = document.getElementById('crawl-username') as HTMLInputElement | null;
@@ -906,7 +822,7 @@ const formattedImages = images.map((img: any) => {
     btn.addEventListener('click', handleRemoveCrawl);
   });
 
-  // =========== Admin List Filtering and Pagination ===========
+  // =========== Admin List — Server-Side Pagination via AJAX ===========
   const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
   const authorFilter = document.getElementById('author-filter') as HTMLSelectElement | null;
   const tagFilter = document.getElementById('tag-filter') as HTMLSelectElement | null;
@@ -917,252 +833,209 @@ const formattedImages = images.map((img: any) => {
   const nextPageBtn = document.getElementById('next-page-btn') as HTMLButtonElement | null;
   const lastPageBtn = document.getElementById('last-page-btn') as HTMLButtonElement | null;
   const totalCountDisplay = document.getElementById('total-count-display');
-  const imageRows = document.querySelectorAll('.image-row');
-  const gridCards = document.querySelectorAll('.grid-image-card');
-
-  let activeView = 'table'; // 'table' or 'grid'
-  let currentPage = 1;
-  let filteredTableRows: HTMLElement[] = [];
-  let filteredGridCards: HTMLElement[] = [];
-  let filteredRows: HTMLElement[] = [];
-
-  // Parse rows data
-  const rowsData = Array.from(imageRows).map((row) => {
-    const el = row as HTMLElement;
-    const id = el.getAttribute('data-id');
-    const title = (el.querySelector('.image-title')?.textContent || '').toLowerCase();
-    const author = (el.dataset.author || '').toLowerCase();
-    const authorDisplayName = el.dataset.authorDisplayName || '';
-    const authorSearch = (el.dataset.authorSearch || author).toLowerCase();
-    const description = (el.querySelector('.image-desc-preview')?.textContent || '').toLowerCase();
-    const published = el.getAttribute('data-published') === '1';
-    const hasPhoto = el.getAttribute('data-has-photo') === 'true';
-    const hasVideo = el.getAttribute('data-has-video') === 'true';
-    const tags: string[] = [];
-    el.querySelectorAll('.table-tag').forEach(tagEl => {
-      tags.push((tagEl.textContent || '').replace(/^#/, '').trim());
-    });
-
-    return { el, id, title, author, authorDisplayName, authorSearch, description, published, hasPhoto, hasVideo, tags };
-  });
-
-  // Parse grid cards data
-  const cardsData = Array.from(gridCards).map((card) => {
-    const el = card as HTMLElement;
-    const id = el.getAttribute('data-id');
-    const rowMatch = rowsData.find(r => r.id === id);
-    return {
-      el,
-      id,
-      title: rowMatch?.title || '',
-      author: rowMatch?.author || '',
-      authorSearch: rowMatch?.authorSearch || '',
-      description: rowMatch?.description || '',
-      published: rowMatch?.published ?? false,
-      hasPhoto: rowMatch?.hasPhoto ?? false,
-      hasVideo: rowMatch?.hasVideo ?? false,
-      tags: rowMatch?.tags || []
-    };
-  });
-
-  // Populate filter selectors
-  if (authorFilter && tagFilter) {
-    const uniqueAuthors = new Map<string, string>();
-    rowsData.forEach((row) => {
-      if (row.author) uniqueAuthors.set(row.author, formatAuthorName(row.authorDisplayName, row.author));
-    });
-    const uniqueTags = Array.from(new Set(rowsData.flatMap(r => r.tags).filter(Boolean))).sort();
-
-    [...uniqueAuthors.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([author, label]) => {
-      const opt = document.createElement('option');
-      opt.value = author;
-      opt.textContent = label;
-      authorFilter.appendChild(opt);
-    });
-
-    uniqueTags.forEach(tag => {
-      const opt = document.createElement('option');
-      opt.value = tag;
-      opt.textContent = `#${tag}`;
-      tagFilter.appendChild(opt);
-    });
-  }
-
-  function applyFilters() {
-    // Uncheck checkboxes when filters change to prevent deleting non-visible items
-    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
-      (cb as HTMLInputElement).checked = false;
-    });
-    if (selectAllCheckbox) selectAllCheckbox.checked = false;
-    updateBulkActionsState();
-
-    const searchVal = (searchInput?.value || '').trim().toLowerCase();
-    const authorVal = (authorFilter?.value || '').toLowerCase();
-    const tagVal = (tagFilter?.value || '');
-    const mediaVal = (mediaFilter?.value || '');
-
-    filteredTableRows = [];
-    filteredGridCards = [];
-
-    // Filter table rows
-    rowsData.forEach(row => {
-      const matchesTab = (activeTab === 'published' && row.published) || (activeTab === 'pending' && !row.published);
-      const matchesSearch = !searchVal ||
-        row.title.includes(searchVal) ||
-        row.authorSearch.includes(searchVal) ||
-        row.description.includes(searchVal);
-      const matchesAuthor = !authorVal || row.author === authorVal;
-      const matchesTag = !tagVal || row.tags.includes(tagVal);
-
-      let matchesMedia = true;
-      if (mediaVal === 'photo') {
-        matchesMedia = row.hasPhoto;
-      } else if (mediaVal === 'video') {
-        matchesMedia = row.hasVideo;
-      }
-
-      if (matchesSearch && matchesAuthor && matchesTag && matchesTab && matchesMedia) {
-        filteredTableRows.push(row.el);
-      } else {
-        row.el.style.display = 'none';
-      }
-    });
-
-    // Filter grid cards
-    cardsData.forEach(card => {
-      const matchesTab = (activeTab === 'published' && card.published) || (activeTab === 'pending' && !card.published);
-      const matchesSearch = !searchVal ||
-        card.title.includes(searchVal) ||
-        card.authorSearch.includes(searchVal) ||
-        card.description.includes(searchVal);
-      const matchesAuthor = !authorVal || card.author === authorVal;
-      const matchesTag = !tagVal || card.tags.includes(tagVal);
-
-      let matchesMedia = true;
-      if (mediaVal === 'photo') {
-        matchesMedia = card.hasPhoto;
-      } else if (mediaVal === 'video') {
-        matchesMedia = card.hasVideo;
-      }
-
-      if (matchesSearch && matchesAuthor && matchesTag && matchesTab && matchesMedia) {
-        filteredGridCards.push(card.el);
-      } else {
-        card.el.style.display = 'none';
-      }
-    });
-
-    // Set filteredRows based on activeView
-    filteredRows = activeView === 'table' ? filteredTableRows : filteredGridCards;
-
-    // Reset pagination to first page after filtering
-    currentPage = 1;
-    updatePagination();
-  }
-
-  function updatePagination() {
-    filteredRows = activeView === 'table' ? filteredTableRows : filteredGridCards;
-    const totalItems = filteredRows.length;
-    const itemsPerPage = activeView === 'grid' ? 25 : 10;
-    const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
-
-    // Bounds check
-    if (currentPage < 1) currentPage = 1;
-    if (currentPage > totalPages) currentPage = totalPages;
-
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
-
-    // Hide all first
-    rowsData.forEach(row => {
-      row.el.style.display = 'none';
-    });
-    cardsData.forEach(card => {
-      card.el.style.display = 'none';
-    });
-
-    // Show current page items
-    if (activeView === 'table') {
-      for (let i = startIndex; i < endIndex; i++) {
-        filteredRows[i].style.display = 'table-row';
-      }
-    } else {
-      for (let i = startIndex; i < endIndex; i++) {
-        filteredRows[i].style.display = 'block';
-      }
-    }
-
-    // Update pagination controls
-    if (paginationInfo) {
-      if (totalItems > 0) {
-        paginationInfo.textContent = `顯示第 ${startIndex + 1}-${endIndex} 筆，共 ${totalItems} 筆`;
-      } else {
-        paginationInfo.textContent = '查無任何貼文';
-      }
-    }
-
-    if (totalCountDisplay) {
-      totalCountDisplay.textContent = totalItems.toString();
-    }
-
-    if (firstPageBtn) firstPageBtn.disabled = currentPage === 1;
-    if (prevPageBtn) prevPageBtn.disabled = currentPage === 1;
-    if (nextPageBtn) nextPageBtn.disabled = currentPage === totalPages;
-    if (lastPageBtn) lastPageBtn.disabled = currentPage === totalPages;
-  }
-
-  // Event Listeners
-  searchInput?.addEventListener('input', applyFilters);
-  authorFilter?.addEventListener('change', applyFilters);
-  tagFilter?.addEventListener('change', applyFilters);
-  mediaFilter?.addEventListener('change', applyFilters);
-
-  firstPageBtn?.addEventListener('click', () => {
-    if (currentPage > 1) {
-      currentPage = 1;
-      updatePagination();
-    }
-  });
-
-  prevPageBtn?.addEventListener('click', () => {
-    if (currentPage > 1) {
-      currentPage--;
-      updatePagination();
-    }
-  });
-
-  nextPageBtn?.addEventListener('click', () => {
-    const itemsPerPage = activeView === 'grid' ? 25 : 10;
-    const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
-    if (currentPage < totalPages) {
-      currentPage++;
-      updatePagination();
-    }
-  });
-
-  lastPageBtn?.addEventListener('click', () => {
-    const itemsPerPage = activeView === 'grid' ? 25 : 10;
-    const totalPages = Math.ceil(filteredRows.length / itemsPerPage) || 1;
-    if (currentPage < totalPages) {
-      currentPage = totalPages;
-      updatePagination();
-    }
-  });
-
-  // View toggle event listeners
-  const viewToggleTable = document.getElementById('view-toggle-table');
-  const viewToggleGrid = document.getElementById('view-toggle-grid');
+  const tableBody = document.getElementById('admin-table-body');
+  const gridBody = document.getElementById('admin-grid-view');
+  const emptyState = document.getElementById('admin-empty-state');
+  const gridEmptyState = document.getElementById('admin-grid-empty-state');
   const tableViewEl = document.querySelector('.view-mode-table') as HTMLElement | null;
   const gridViewEl = document.querySelector('.view-mode-grid') as HTMLElement | null;
+
+  let activeView: 'table' | 'grid' = 'table';
+  let currentPage = 1;
+  let totalItems = 0;
+  let postsLoading = false;
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  function itemsPerPage() {
+    return activeView === 'grid' ? 25 : 10;
+  }
+
+  function currentFilters() {
+    return {
+      published: activeTab === 'pending' ? '0' : '1',
+      search: (searchInput?.value || '').trim(),
+      author: authorFilter?.value || '',
+      tag: tagFilter?.value || '',
+      media: mediaFilter?.value || '',
+      sort: 'newest' as const,
+    };
+  }
+
+  async function loadPosts(page: number = 1) {
+    if (postsLoading) return;
+    postsLoading = true;
+    currentPage = page;
+
+    const perPage = itemsPerPage();
+    const offset = (page - 1) * perPage;
+    const filters = currentFilters();
+
+    const params = new URLSearchParams({
+      offset: String(offset),
+      limit: String(perPage),
+      published: filters.published,
+      sort: filters.sort,
+    });
+    if (filters.search) params.set('search', filters.search);
+    if (filters.author) params.set('author', filters.author);
+    if (filters.tag) params.set('tag', filters.tag);
+    if (filters.media) params.set('media', filters.media);
+
+    if (paginationInfo) paginationInfo.textContent = '載入中...';
+
+    try {
+      const res = await fetch(`/api/admin-posts?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      totalItems = data.total;
+
+      // Inject HTML
+      if (tableBody) tableBody.innerHTML = data.table_rows || '';
+      if (gridBody) gridBody.innerHTML = data.grid_cards || '';
+
+      // Show/hide empty states
+      const isEmpty = data.total === 0;
+      if (emptyState) emptyState.style.display = isEmpty ? 'block' : 'none';
+      if (gridEmptyState) gridEmptyState.style.display = isEmpty ? 'block' : 'none';
+
+      // Hydrate data-src -> src for visible thumbnails
+      hydratePostMedia();
+
+      // Rebind row-level event handlers
+      rebindRowHandlers();
+
+      // Update pagination UI
+      const totalPages = Math.ceil(totalItems / perPage) || 1;
+      if (paginationInfo) {
+        if (totalItems > 0) {
+          paginationInfo.textContent = `顯示第 ${data.showing_start}-${data.showing_end} 筆，共 ${totalItems} 筆`;
+        } else {
+          paginationInfo.textContent = '查無任何貼文';
+        }
+      }
+      if (totalCountDisplay) totalCountDisplay.textContent = totalItems.toString();
+      if (firstPageBtn) firstPageBtn.disabled = currentPage === 1;
+      if (prevPageBtn) prevPageBtn.disabled = currentPage === 1;
+      if (nextPageBtn) nextPageBtn.disabled = currentPage >= totalPages;
+      if (lastPageBtn) lastPageBtn.disabled = currentPage >= totalPages;
+    } catch (err) {
+      console.error('Failed to load admin posts:', err);
+      if (paginationInfo) paginationInfo.textContent = '載入失敗';
+    } finally {
+      postsLoading = false;
+    }
+  }
+
+  function rebindRowHandlers() {
+    // Edit buttons
+    document.querySelectorAll('.edit-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        const title = btn.getAttribute('data-title') || '';
+        const description = btn.getAttribute('data-description') || '';
+        const author = btn.getAttribute('data-author') || '';
+        const authorDisplayName = btn.getAttribute('data-author-display-name') || '';
+        const authorUrl = btn.getAttribute('data-author-url') || '';
+        const postUrl = btn.getAttribute('data-post-url') || '';
+        const tags = btn.getAttribute('data-tags') || '';
+        const keys = btn.getAttribute('data-keys') || '';
+        if (id) {
+          enterEditMode(id, { title, description, author, authorDisplayName, authorUrl, postUrl, tags, keys });
+          window.location.hash = 'upload';
+          requestAnimationFrame(() => uploadForm?.scrollIntoView({ behavior: 'smooth' }));
+        }
+      });
+    });
+
+    // Delete buttons
+    document.querySelectorAll('.delete-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const imgId = btn.getAttribute('data-id');
+        if (!imgId) return;
+        if (!confirm('你確定要刪除這張照片貼文嗎？此操作將會從資料庫與 Cloudflare R2 中永久刪除該貼文的所有照片！')) return;
+        (btn as HTMLButtonElement).disabled = true;
+        btn.textContent = '刪除中...';
+        try {
+          const response = await fetch(`/api/images/${imgId}`, { method: 'DELETE' });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            loadPosts(currentPage);
+            refreshStorage();
+          } else {
+            alert(`刪除失敗：${data.error || '未知錯誤'}`);
+            (btn as HTMLButtonElement).disabled = false;
+            btn.textContent = '刪除';
+          }
+        } catch (err) {
+          console.error(err);
+          alert('刪除失敗，伺服器發生錯誤。');
+          (btn as HTMLButtonElement).disabled = false;
+          btn.textContent = '刪除';
+        }
+      });
+    });
+
+    // Approve buttons
+    document.querySelectorAll('.approve-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const imgId = btn.getAttribute('data-id');
+        if (!imgId) return;
+        (btn as HTMLButtonElement).disabled = true;
+        btn.textContent = '核准中...';
+        try {
+          const response = await fetch('/api/admin/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: imgId })
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            loadPosts(currentPage);
+          } else {
+            alert(`核准失敗：${data.error || '未知錯誤'}`);
+            (btn as HTMLButtonElement).disabled = false;
+            btn.textContent = '核准';
+          }
+        } catch (err) {
+          console.error(err);
+          alert('核准失敗，伺服器發生錯誤。');
+          (btn as HTMLButtonElement).disabled = false;
+          btn.textContent = '核准';
+        }
+      });
+    });
+  }
+
+  // Filter event listeners (debounce search, immediate for selects)
+  searchInput?.addEventListener('input', () => {
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => loadPosts(1), 300);
+  });
+  authorFilter?.addEventListener('change', () => loadPosts(1));
+  tagFilter?.addEventListener('change', () => loadPosts(1));
+  mediaFilter?.addEventListener('change', () => loadPosts(1));
+
+  // Pagination buttons
+  firstPageBtn?.addEventListener('click', () => { if (currentPage > 1) loadPosts(1); });
+  prevPageBtn?.addEventListener('click', () => { if (currentPage > 1) loadPosts(currentPage - 1); });
+  nextPageBtn?.addEventListener('click', () => {
+    const totalPages = Math.ceil(totalItems / itemsPerPage()) || 1;
+    if (currentPage < totalPages) loadPosts(currentPage + 1);
+  });
+  lastPageBtn?.addEventListener('click', () => {
+    const totalPages = Math.ceil(totalItems / itemsPerPage()) || 1;
+    if (currentPage < totalPages) loadPosts(totalPages);
+  });
+
+  // View toggle
+  const viewToggleTable = document.getElementById('view-toggle-table');
+  const viewToggleGrid = document.getElementById('view-toggle-grid');
 
   function switchView(view: 'table' | 'grid') {
     if (activeView === view) return;
     activeView = view;
-
-    // Uncheck everything to prevent hidden selections
-    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
-      (cb as HTMLInputElement).checked = false;
-    });
+    document.querySelectorAll('.image-select-checkbox').forEach(cb => { (cb as HTMLInputElement).checked = false; });
     if (selectAllCheckbox) selectAllCheckbox.checked = false;
     updateBulkActionsState();
 
@@ -1177,9 +1050,7 @@ const formattedImages = images.map((img: any) => {
       if (gridViewEl) gridViewEl.style.display = 'block';
       if (tableViewEl) tableViewEl.style.display = 'none';
     }
-
-    currentPage = 1;
-    updatePagination();
+    loadPosts(1);
   }
 
   viewToggleTable?.addEventListener('click', () => switchView('table'));
@@ -1238,18 +1109,12 @@ const formattedImages = images.map((img: any) => {
     }
   });
 
-  // Select all checkbox handler
+  // Select all checkbox handler — affects only currently visible rows
   selectAllCheckbox?.addEventListener('change', () => {
     const isChecked = selectAllCheckbox.checked;
-    
-    // Check/uncheck only currently filtered/visible rows
-    filteredRows.forEach(rowEl => {
-      const cb = rowEl.querySelector('.image-select-checkbox') as HTMLInputElement | null;
-      if (cb) {
-        cb.checked = isChecked;
-      }
+    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
+      (cb as HTMLInputElement).checked = isChecked;
     });
-
     updateBulkActionsState();
   });
 
@@ -1404,47 +1269,12 @@ const formattedImages = images.map((img: any) => {
       }
     }
 
-    applyFilters();
+    loadPosts(1);
   }
 
   tabPublished?.addEventListener('click', () => switchTab('published'));
   tabPending?.addEventListener('click', () => switchTab('pending'));
 
-  // =========== Approve button listener ===========
-  document.querySelectorAll('.approve-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const imgId = btn.getAttribute('data-id');
-      if (!imgId) return;
-
-      (btn as HTMLButtonElement).disabled = true;
-      btn.textContent = '核准中...';
-
-      try {
-        const response = await fetch('/api/admin/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: imgId })
-        });
-
-        const data = await response.json();
-
-        if (response.ok && data.success) {
-          window.location.reload();
-        } else {
-          alert(`核准失敗：${data.error || '未知錯誤'}`);
-          (btn as HTMLButtonElement).disabled = false;
-          btn.textContent = '核准';
-        }
-      } catch (err) {
-        console.error(err);
-        alert('核准失敗，伺服器發生錯誤。');
-        (btn as HTMLButtonElement).disabled = false;
-        btn.textContent = '核准';
-      }
-    });
-  });
-
-
-  // Initialize
-  applyFilters();
+  // Initialize — load first page of posts
+  loadPosts(1);
 </script>
