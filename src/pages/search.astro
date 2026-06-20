@@ -158,8 +158,8 @@ const formattedImages = images.map((img: any) => ({
         <h2 class="results-heading">{searchHeading} ({formattedImages.length})</h2>
         {formattedImages.length > 0 ? (
           <div class="image-grid">
-            {formattedImages.map((image) => (
-              <ImageCard image={image} />
+            {formattedImages.map((image, index) => (
+              <ImageCard image={image} index={index} />
             ))}
           </div>
         ) : (

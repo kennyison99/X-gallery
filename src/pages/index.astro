@@ -97,8 +97,8 @@ const pageTitle = activeTag
         data-offset={formattedImages.length}
         data-has-more={hasMore ? 'true' : 'false'}
       >
-        {formattedImages.map((image) => (
-          <ImageCard image={image} />
+        {formattedImages.map((image, index) => (
+          <ImageCard image={image} index={index} />
         ))}
       </div>
       <div id="gallery-sentinel" aria-hidden="true"></div>

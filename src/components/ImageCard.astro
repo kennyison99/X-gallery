@@ -14,9 +14,11 @@ interface Props {
     created_at?: string;
     updated_at?: string;
   };
+  index?: number;
 }
 
-const { image } = Astro.props;
+const { image, index = 99 } = Astro.props;
+const isLcp = index < 8;
 
 // Split the keys
 const keys = image.r2_keys.split(',').map(k => k.trim()).filter(k => k.length > 0);
@@ -86,7 +88,8 @@ const displayDate = image.updated_at
               <img
                 src={getPreviewUrl(key)}
                 alt={image.title || 'Twitter photo'}
-                loading="lazy"
+                loading={isLcp ? "eager" : "lazy"}
+                fetchpriority={isLcp ? "high" : "auto"}
                 class="gallery-image"
               />
             )}
