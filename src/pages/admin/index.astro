@@ -124,12 +124,11 @@ try {
 <script>
   import { resolveAdminTab } from '../../lib/admin-dashboard';
 
-  // Lazily load post manager thumbnails only when the posts tab is first
-  // activated, so hidden panels don't trigger R2 fetches on page load.
-  let postsMediaHydrated = false;
+  // Lazily load post manager thumbnails only when the posts tab is active,
+  // so hidden panels don't trigger R2 fetches on page load.
   function hydratePostMedia() {
-    if (postsMediaHydrated) return;
-    postsMediaHydrated = true;
+    const activeTab = resolveAdminTab(window.location.hash);
+    if (activeTab !== 'posts') return;
     document.querySelectorAll<HTMLImageElement | HTMLVideoElement>('#panel-posts [data-src]').forEach((el) => {
       el.src = el.dataset.src!;
       el.removeAttribute('data-src');
