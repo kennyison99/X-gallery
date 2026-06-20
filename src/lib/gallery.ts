@@ -3,6 +3,8 @@ interface PhotoSwipeItem {
   type?: string;
   w?: number;
   h?: number;
+  width?: number;
+  height?: number;
   html?: string;
   element?: {
     getAttribute(name: string): string | null;
@@ -34,21 +36,41 @@ export function preparePhotoSwipeItem<T extends PhotoSwipeItem>(
 ): T {
   if (item.element?.getAttribute('data-video') !== '1') {
     const image = item.element?.querySelector?.('img');
-    if (image?.naturalWidth && image.naturalHeight && image.naturalWidth > 350) {
-      item.w = image.naturalWidth;
-      item.h = image.naturalHeight;
+    if (image?.naturalWidth && image.naturalHeight) {
+      // Scale up the thumbnail dimensions to a high-resolution size
+      // while preserving the exact aspect ratio of the image.
+      const targetMax = 2400;
+      const maxDim = Math.max(image.naturalWidth, image.naturalHeight);
+      const scale = targetMax / maxDim;
+      const factor = Math.max(1, scale);
+      
+      const targetW = Math.round(image.naturalWidth * factor);
+      const targetH = Math.round(image.naturalHeight * factor);
+      
+      item.w = targetW;
+      item.h = targetH;
+      item.width = targetW;
+      item.height = targetH;
     } else {
-      // Fallback placeholder size for thumbnails so PhotoSwipe opens in large dimensions initially
-      item.w = viewport?.width ?? 1200;
-      item.h = viewport?.height ?? 900;
+      // Fallback if no image element is found
+      const fallbackW = viewport?.width ?? 1200;
+      const fallbackH = viewport?.height ?? 900;
+      item.w = fallbackW;
+      item.h = fallbackH;
+      item.width = fallbackW;
+      item.height = fallbackH;
     }
     return item;
   }
 
   const src = escapeHtmlAttribute(item.src ?? '');
   item.type = 'html';
-  item.w = Math.min(viewport.width, 1280);
-  item.h = Math.min(viewport.height, 720);
+  const vidW = Math.min(viewport?.width ?? 1280, 1280);
+  const vidH = Math.min(viewport?.height ?? 720, 720);
+  item.w = vidW;
+  item.h = vidH;
+  item.width = vidW;
+  item.height = vidH;
   item.html = `
     <div class="pswp__video-wrapper">
       <video src="${src}" controls playsinline></video>

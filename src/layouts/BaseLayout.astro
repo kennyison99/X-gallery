@@ -173,6 +173,8 @@ const versionString = import.meta.env.PUBLIC_BUILD_VERSION || 'vUnknown';
                     if (item) {
                       item.w = img.naturalWidth;
                       item.h = img.naturalHeight;
+                      item.width = img.naturalWidth;
+                      item.height = img.naturalHeight;
                     }
                     pswp.refreshSlideContent(content.index);
                   }
