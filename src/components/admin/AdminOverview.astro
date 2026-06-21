@@ -6,7 +6,7 @@ interface Props {
   pendingPosts: number;
   totalAccounts: number;
   enabledAccounts: number;
-  authorStats: { author: string; author_display_name: string | null; photos: number; videos: number; bytes: number }[];
+  authorStats: { author: string; author_display_name: string | null; photos: number; videos: number; photo_bytes: number; video_bytes: number }[];
 }
 
 const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabledAccounts, authorStats } = Astro.props;
@@ -23,8 +23,10 @@ function formatBytes(bytes: number): string {
 // Calculate totals for summary row
 const totalPhotosSum = authorStats.reduce((sum, item) => sum + item.photos, 0);
 const totalVideosSum = authorStats.reduce((sum, item) => sum + item.videos, 0);
+const totalPhotoBytesSum = authorStats.reduce((sum, item) => sum + item.photo_bytes, 0);
+const totalVideoBytesSum = authorStats.reduce((sum, item) => sum + item.video_bytes, 0);
 const totalMediaSum = totalPhotosSum + totalVideosSum;
-const totalBytesSum = authorStats.reduce((sum, item) => sum + item.bytes, 0);
+const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
 ---
 
 <section
@@ -85,24 +87,28 @@ const totalBytesSum = authorStats.reduce((sum, item) => sum + item.bytes, 0);
                 </a>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-secondary);">
-                {item.photos} 張
+                {item.photos} 張 <span style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.85;">({formatBytes(item.photo_bytes)})</span>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-secondary);">
-                {item.videos} 部
+                {item.videos} 部 <span style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.85;">({formatBytes(item.video_bytes)})</span>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">
                 {item.photos + item.videos}
               </td>
-              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-secondary);">
-                {formatBytes(item.bytes)}
+              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-secondary); font-weight: 500;">
+                {formatBytes(item.photo_bytes + item.video_bytes)}
               </td>
             </tr>
           ))}
           {authorStats.length > 0 && (
             <tr style="border-top: 2px solid var(--border-color); font-weight: 700; background-color: var(--bg-secondary);">
               <td style="padding: 0.6rem 0.75rem; color: var(--text-primary);">總計 (Total)</td>
-              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">{totalPhotosSum} 張</td>
-              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">{totalVideosSum} 部</td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">
+                {totalPhotosSum} 張 <span style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">({formatBytes(totalPhotoBytesSum)})</span>
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">
+                {totalVideosSum} 部 <span style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">({formatBytes(totalVideoBytesSum)})</span>
+              </td>
               <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">{totalMediaSum}</td>
               <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">{formatBytes(totalBytesSum)}</td>
             </tr>
