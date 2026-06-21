@@ -6,10 +6,25 @@ interface Props {
   pendingPosts: number;
   totalAccounts: number;
   enabledAccounts: number;
-  authorStats: { author: string; author_display_name: string | null; photos: number; videos: number }[];
+  authorStats: { author: string; author_display_name: string | null; photos: number; videos: number; bytes: number }[];
 }
 
 const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabledAccounts, authorStats } = Astro.props;
+
+// Helper to format bytes to human-readable size
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Calculate totals for summary row
+const totalPhotosSum = authorStats.reduce((sum, item) => sum + item.photos, 0);
+const totalVideosSum = authorStats.reduce((sum, item) => sum + item.videos, 0);
+const totalMediaSum = totalPhotosSum + totalVideosSum;
+const totalBytesSum = authorStats.reduce((sum, item) => sum + item.bytes, 0);
 ---
 
 <section
@@ -55,9 +70,10 @@ const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabl
         <thead>
           <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
             <th style="padding: 0.5rem 0.75rem;">博主帳號</th>
-            <th style="padding: 0.5rem 0.75rem; text-align: center;">總相片數</th>
-            <th style="padding: 0.5rem 0.75rem; text-align: center;">總影片數</th>
+            <th style="padding: 0.5rem 0.75rem; text-align: center;">圖片數</th>
+            <th style="padding: 0.5rem 0.75rem; text-align: center;">影片數</th>
             <th style="padding: 0.5rem 0.75rem; text-align: right;">總計媒體數</th>
+            <th style="padding: 0.5rem 0.75rem; text-align: right;">使用容量</th>
           </tr>
         </thead>
         <tbody>
@@ -77,11 +93,23 @@ const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabl
               <td style="padding: 0.6rem 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">
                 {item.photos + item.videos}
               </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-secondary);">
+                {formatBytes(item.bytes)}
+              </td>
             </tr>
           ))}
+          {authorStats.length > 0 && (
+            <tr style="border-top: 2px solid var(--border-color); font-weight: 700; background-color: var(--bg-secondary);">
+              <td style="padding: 0.6rem 0.75rem; color: var(--text-primary);">總計 (Total)</td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">{totalPhotosSum} 張</td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">{totalVideosSum} 部</td>
+              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">{totalMediaSum}</td>
+              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">{formatBytes(totalBytesSum)}</td>
+            </tr>
+          )}
           {authorStats.length === 0 && (
             <tr>
-              <td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">
+              <td colspan="5" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">
                 目前尚無任何博主統計資料。
               </td>
             </tr>
