@@ -71,16 +71,25 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
       <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
         <thead>
           <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
-            <th style="padding: 0.5rem 0.75rem;">博主帳號</th>
-            <th style="padding: 0.5rem 0.75rem; text-align: center;">圖片數</th>
-            <th style="padding: 0.5rem 0.75rem; text-align: center;">影片數</th>
-            <th style="padding: 0.5rem 0.75rem; text-align: right;">總計媒體數</th>
-            <th style="padding: 0.5rem 0.75rem; text-align: right;">使用容量</th>
+            <th style="padding: 0.5rem 0.75rem; cursor: pointer; user-select: none;" class="sort-header" data-sort="author">博主帳號 <span class="sort-icon">⇅</span></th>
+            <th style="padding: 0.5rem 0.75rem; text-align: center; cursor: pointer; user-select: none;" class="sort-header" data-sort="photos">圖片數 <span class="sort-icon">⇅</span></th>
+            <th style="padding: 0.5rem 0.75rem; text-align: center; cursor: pointer; user-select: none;" class="sort-header" data-sort="videos">影片數 <span class="sort-icon">⇅</span></th>
+            <th style="padding: 0.5rem 0.75rem; text-align: right; cursor: pointer; user-select: none;" class="sort-header" data-sort="media">總計媒體數 <span class="sort-icon">⇅</span></th>
+            <th style="padding: 0.5rem 0.75rem; text-align: right; cursor: pointer; user-select: none;" class="sort-header" data-sort="bytes">使用容量 <span class="sort-icon">⇅</span></th>
           </tr>
         </thead>
-        <tbody>
-          {authorStats.map((item) => (
-            <tr style="border-bottom: 1px dashed var(--border-color); transition: background-color 0.2s;" class="stat-row">
+        <tbody id="author-stats-tbody">
+          {authorStats.map((item, index) => (
+            <tr 
+              style="border-bottom: 1px dashed var(--border-color); transition: background-color 0.2s;" 
+              class="stat-row"
+              data-index={index}
+              data-author={item.author_display_name || item.author}
+              data-photos={item.photos}
+              data-videos={item.videos}
+              data-media={item.photos + item.videos}
+              data-bytes={item.photo_bytes + item.video_bytes}
+            >
               <td style="padding: 0.6rem 0.75rem;">
                 <a href={`https://x.com/${item.author}`} target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">
                   {item.author_display_name ? `${item.author_display_name} (@${item.author})` : `@${item.author}`}
@@ -101,7 +110,7 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
             </tr>
           ))}
           {authorStats.length > 0 && (
-            <tr style="border-top: 2px solid var(--border-color); font-weight: 700; background-color: var(--bg-secondary);">
+            <tr class="total-row" style="border-top: 2px solid var(--border-color); font-weight: 700; background-color: var(--bg-secondary);">
               <td style="padding: 0.6rem 0.75rem; color: var(--text-primary);">總計 (Total)</td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">
                 {totalPhotosSum} 張 <span style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">({formatBytes(totalPhotoBytesSum)})</span>
@@ -137,4 +146,105 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
   .stat-row:hover {
     background-color: var(--bg-secondary);
   }
+  .sort-header {
+    transition: background-color 0.2s, color 0.2s;
+    border-radius: 4px;
+  }
+  .sort-header:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary) !important;
+  }
+  .sort-header.active {
+    color: var(--text-primary) !important;
+  }
+  .sort-icon {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 0.75rem;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+  .sort-header.active .sort-icon {
+    opacity: 1;
+  }
 </style>
+
+<script>
+  function initTableSorting() {
+    const tbody = document.getElementById('author-stats-tbody');
+    if (!tbody) return;
+
+    const headers = document.querySelectorAll('.sort-header');
+    const rows = Array.from(tbody.querySelectorAll('.stat-row'));
+    const totalRow = tbody.querySelector('.total-row');
+
+    let currentSortKey: string | null = null;
+    let currentDir: 'desc' | 'asc' | 'default' = 'default';
+
+    headers.forEach((header) => {
+      header.addEventListener('click', () => {
+        const sortKey = header.getAttribute('data-sort');
+        if (!sortKey) return;
+
+        // Cycle through: desc -> asc -> default
+        if (currentSortKey === sortKey) {
+          if (currentDir === 'desc') {
+            currentDir = 'asc';
+          } else if (currentDir === 'asc') {
+            currentDir = 'default';
+          } else {
+            currentDir = 'desc';
+          }
+        } else {
+          currentSortKey = sortKey;
+          currentDir = 'desc';
+        }
+
+        // Sort the rows array
+        rows.sort((a, b) => {
+          if (currentDir === 'default') {
+            const idxA = parseInt(a.getAttribute('data-index') || '0', 10);
+            const idxB = parseInt(b.getAttribute('data-index') || '0', 10);
+            return idxA - idxB;
+          }
+
+          const valA = a.getAttribute(`data-${sortKey}`) || '';
+          const valB = b.getAttribute(`data-${sortKey}`) || '';
+
+          if (sortKey === 'author') {
+            return currentDir === 'asc'
+              ? valA.localeCompare(valB, 'zh-Hant')
+              : valB.localeCompare(valA, 'zh-Hant');
+          } else {
+            const numA = parseFloat(valA) || 0;
+            const numB = parseFloat(valB) || 0;
+            return currentDir === 'asc' ? numA - numB : numB - numA;
+          }
+        });
+
+        // Re-append elements in sorted order
+        rows.forEach((row) => tbody.appendChild(row));
+        if (totalRow) {
+          tbody.appendChild(totalRow);
+        }
+
+        // Update indicators
+        headers.forEach((h) => {
+          const icon = h.querySelector('.sort-icon');
+          if (!icon) return;
+
+          if (h === header && currentDir !== 'default') {
+            h.classList.add('active');
+            icon.textContent = currentDir === 'desc' ? '▼' : '▲';
+          } else {
+            h.classList.remove('active');
+            icon.textContent = '⇅';
+          }
+        });
+      });
+    });
+  }
+
+  // Run on page load
+  initTableSorting();
+</script>

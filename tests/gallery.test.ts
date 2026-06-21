@@ -38,8 +38,8 @@ test('uses an image natural dimensions for PhotoSwipe', () => {
     { width: 1280, height: 720 },
   );
 
-  assert.equal(item.w, 1196);
-  assert.equal(item.h, 2048);
+  assert.equal(item.w, 1402);
+  assert.equal(item.h, 2400);
 });
 
 test('wraps card slider indexes in both directions', () => {

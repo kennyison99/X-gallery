@@ -51,14 +51,6 @@ try {
   totalPosts = countRow?.total ?? 0;
   publishedCount = countRow?.published ?? 0;
   pendingCount = countRow?.pending ?? 0;
-
-  // Approximate photo/video counts via r2_keys LIKE (good enough for overview display)
-  const mediaRow = await env.DB.prepare(`SELECT
-    COUNT(CASE WHEN r2_keys NOT LIKE '%.mp4%' AND r2_keys NOT LIKE '%.webm%' AND r2_keys NOT LIKE '%.mov%' AND r2_keys NOT LIKE '%.m4v%' THEN 1 END) as photos,
-    COUNT(CASE WHEN r2_keys LIKE '%.mp4%' OR r2_keys LIKE '%.webm%' OR r2_keys LIKE '%.mov%' OR r2_keys LIKE '%.m4v%' THEN 1 END) as videos
-    FROM images`).first<any>();
-  totalPhotos = mediaRow?.photos ?? 0;
-  totalVideos = mediaRow?.videos ?? 0;
 } catch (err) {
   console.error('Error fetching image counts for admin:', err);
 }
@@ -108,6 +100,9 @@ try {
   const authorRows = await env.DB.prepare('SELECT author, author_display_name, r2_keys FROM images').all();
   const authorMap = new Map<string, { display: string | null; photos: number; videos: number; photoBytes: number; videoBytes: number }>();
   
+  let calculatedPhotos = 0;
+  let calculatedVideos = 0;
+
   (authorRows.results || []).forEach((row: any) => {
     const author = row.author;
     const displayName = row.author_display_name || null;
@@ -140,7 +135,13 @@ try {
     if (displayName && !current.display) {
       current.display = displayName;
     }
+
+    calculatedPhotos += photosCount;
+    calculatedVideos += videosCount;
   });
+
+  totalPhotos = calculatedPhotos;
+  totalVideos = calculatedVideos;
 
   authorStats = Array.from(authorMap.entries()).map(([author, stats]) => ({
     author,

@@ -89,14 +89,14 @@ test('admin post controls expose nick and canonical author metadata', () => {
     'utf8',
   );
   const postsSource = readFileSync(
-    new URL('../src/components/admin/AdminPostManager.astro', import.meta.url),
+    new URL('../src/pages/api/admin-posts.ts', import.meta.url),
     'utf8',
   );
 
   assert.match(uploadSource, /name="author_display_name"/);
   assert.match(postsSource, /formatAuthorName\(image\.author_display_name, image\.author\)/);
-  assert.match(postsSource, /data-author-display-name=\{image\.author_display_name \|\| ''\}/);
-  assert.match(postsSource, /data-author-search=\{authorSearchText\(image\.author_display_name, image\.author\)\}/);
+  assert.match(postsSource, /data-author-display-name="\$\{escapeAttr\(image\.author_display_name \|\| ''\)\}"/);
+  assert.match(postsSource, /data-author-search="\$\{escapeAttr\(authorSearch\)\}"/);
 });
 
 test('admin dashboard uses a shared responsive stylesheet', () => {
