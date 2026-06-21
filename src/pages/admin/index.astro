@@ -708,29 +708,30 @@ try {
         const data = await res.json();
 
         if (res.ok && data.success) {
-          showCrawlMessage(`已新增 @${username}`, 'success');
+          const cleanUsername = data.username || username;
+          showCrawlMessage(`已新增 @${cleanUsername}`, 'success');
           crawlUsernameInput.value = '';
           
           // Add to DOM — insert at top (newest first, matching ORDER BY created_at DESC)
           if (crawlEmptyText) crawlEmptyText.remove();
           const item = document.createElement('div');
           item.className = 'crawl-account-item';
-          item.setAttribute('data-username', username);
+          item.setAttribute('data-username', cleanUsername);
           item.innerHTML = `
             <div class="crawl-account-info">
-              <span class="crawl-account-name">@${username}</span>
-              <a href="https://x.com/${username}" target="_blank" rel="noopener noreferrer" class="crawl-account-link" title="前往 Twitter">↗</a>
+              <span class="crawl-account-name">@${cleanUsername}</span>
+              <a href="https://x.com/${cleanUsername}" target="_blank" rel="noopener noreferrer" class="crawl-account-link" title="前往 Twitter">↗</a>
             </div>
             <div class="crawl-account-settings" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
               <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);">
-                <input type="checkbox" class="toggle-enabled-cb" data-username="${username}" checked />
+                <input type="checkbox" class="toggle-enabled-cb" data-username="${cleanUsername}" checked />
                 <span>啟用自動爬取</span>
               </label>
               <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);">
-                <input type="checkbox" class="toggle-crawlall-cb" data-username="${username}" />
+                <input type="checkbox" class="toggle-crawlall-cb" data-username="${cleanUsername}" />
                 <span>爬取全部歷史圖片</span>
               </label>
-              <button class="btn btn-danger remove-crawl-btn" data-username="${username}" style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">移除</button>
+              <button class="btn btn-danger remove-crawl-btn" data-username="${cleanUsername}" style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">移除</button>
             </div>
           `;
           crawlAccountsList?.prepend(item);

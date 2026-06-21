@@ -702,6 +702,13 @@
     margin-bottom: 1rem;
   }
 
+  @media (max-width: 576px) {
+    .crawl-add-form {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+
   .crawl-add-form input {
     flex: 1;
     padding: 0.6rem 0.8rem;
