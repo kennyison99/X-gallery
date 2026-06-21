@@ -127,7 +127,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('鳴潮');
   }
 
-  if (matchesAny(descLower, ['zzz', 'zenless', '絕區零', '绝区零'])) {
+  if (matchesAny(descLower, ['zzz', 'zenless', '絕區零', '绝区零', '仪玄', 'イーシェン', 'ゼンレスゾーンゼロ', 'yixuan'])) {
     autoTags.add('絕區零');
   }
 
@@ -169,6 +169,42 @@ export function generateAutoTags(author: string | null, description: string | nu
 
   if (matchesAny(descLower, ['miside'])) {
     autoTags.add('MiSide');
+  }
+
+  if (matchesAny(descLower, ['魔法少女ノ魔女裁判', 'まのさば', '橘シェリー', '桜羽エマ', 'sakuraba ema'])) {
+    autoTags.add('魔女裁判');
+  }
+
+  if (matchesAny(descLower, ['物語シリーズ', '物语系列', '物语', '物語', '忍野忍', 'oshino shinobu', 'shinobu'])) {
+    autoTags.add('物語系列');
+  }
+
+  if (matchesAny(descLower, ['少女前线', '少女前線', 'girlsfrontline', 'girls frontline'])) {
+    autoTags.add('少女前線');
+  }
+
+  if (matchesAny(descLower, ['fgo', 'fate', 'fate/grand order', 'fate/stay night', '阿斯托爾福', '阿斯托尔福', 'astolfo', 'アストルフォ'])) {
+    autoTags.add('Fate');
+  }
+
+  if (matchesAny(descLower, ['和泉纱雾', '和泉紗霧', '和泉さぎり', 'sagiri'])) {
+    autoTags.add('和泉紗霧');
+  }
+
+  if (matchesAny(descLower, ['山田凉', '山田涼', 'ぼっち・ざ・ろっく', 'bocchi'])) {
+    autoTags.add('孤獨搖滾');
+  }
+
+  if (matchesAny(descLower, ['超かぐや姫', '駒澤乃依', 'こまざわ のい', 'cosmic princess kaguya'])) {
+    autoTags.add('超かぐや姫');
+  }
+
+  if (matchesAny(descLower, ['樋口円香', '樋口圓香', '円香', '圓香', 'madoka', 'higuchi madoka'])) {
+    autoTags.add('偶像大師');
+  }
+
+  if (matchesAny(descLower, ['miku', '初音ミク', '初音未来', '初音未來'])) {
+    autoTags.add('初音未來');
   }
 
   return [...autoTags];
