@@ -1038,12 +1038,22 @@ try {
 
   // Filter event listeners (debounce search, immediate for selects)
   searchInput?.addEventListener('input', () => {
+    sessionStorage.setItem('admin-filter-search', searchInput.value);
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => loadPosts(1), 300);
   });
-  authorFilter?.addEventListener('change', () => loadPosts(1));
-  tagFilter?.addEventListener('change', () => loadPosts(1));
-  mediaFilter?.addEventListener('change', () => loadPosts(1));
+  authorFilter?.addEventListener('change', () => {
+    sessionStorage.setItem('admin-filter-author', authorFilter.value);
+    loadPosts(1);
+  });
+  tagFilter?.addEventListener('change', () => {
+    sessionStorage.setItem('admin-filter-tag', tagFilter.value);
+    loadPosts(1);
+  });
+  mediaFilter?.addEventListener('change', () => {
+    sessionStorage.setItem('admin-filter-media', mediaFilter.value);
+    loadPosts(1);
+  });
 
   // Pagination buttons
   firstPageBtn?.addEventListener('click', () => { if (currentPage > 1) loadPosts(1); });
@@ -1325,6 +1335,12 @@ try {
 
   tabPublished?.addEventListener('click', () => switchTab('published'));
   tabPending?.addEventListener('click', () => switchTab('pending'));
+
+  // 同步初始化篩選器 DOM 狀態
+  if (searchInput) searchInput.value = sessionStorage.getItem('admin-filter-search') || '';
+  if (authorFilter) authorFilter.value = sessionStorage.getItem('admin-filter-author') || '';
+  if (tagFilter) tagFilter.value = sessionStorage.getItem('admin-filter-tag') || '';
+  if (mediaFilter) mediaFilter.value = sessionStorage.getItem('admin-filter-media') || '';
 
   // 同步初始化 View 模式的 DOM 狀態
   if (activeView === 'grid') {
