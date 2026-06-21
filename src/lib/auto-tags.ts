@@ -111,7 +111,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('蔚藍檔案');
   }
 
-  if (matchesAny(descLower, ['明日方舟', 'arknights', 'アークナイツ', '阿米娅', '阿米婭', '阿尔图罗', '塑心', '德克萨斯', 'texas', '普瑞赛斯', 'endfield', '終末地', '终末地', 'エンドフィールド', '千咲'])) {
+  if (matchesAny(descLower, ['明日方舟', 'arknights', 'アークナイツ', '阿米娅', '阿米婭', '阿尔图罗', '塑心', '德克萨斯', 'texas', '普瑞赛斯', 'endfield', '終末地', '终末地', 'エンドフィールド'])) {
     autoTags.add('明日方舟');
   }
 
@@ -123,7 +123,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('原神');
   }
 
-  if (matchesAny(descLower, ['鳴潮', '鸣潮', 'wutheringwaves', 'wuthering waves', '卡提希娅', '卡提希婭', '卡提西娅', 'cartethyia', 'カルテジア', 'ショアキーパー', '守岸人', '折枝', '今汐', '長離', '长离', '吟霖'])) {
+  if (matchesAny(descLower, ['鳴潮', '鸣潮', 'wutheringwaves', 'wuthering waves', '卡提希娅', '卡提希婭', '卡提西娅', 'cartethyia', 'カルテジア', 'ショアキーパー', '守岸人', '折枝', '今汐', '長離', '长离', '吟霖', '千咲', '千咲ちゃん'])) {
     autoTags.add('鳴潮');
   }
 
