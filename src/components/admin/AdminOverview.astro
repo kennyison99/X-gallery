@@ -6,9 +6,10 @@ interface Props {
   pendingPosts: number;
   totalAccounts: number;
   enabledAccounts: number;
+  authorStats: { author: string; author_display_name: string | null; photos: number; videos: number }[];
 }
 
-const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabledAccounts } = Astro.props;
+const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabledAccounts, authorStats } = Astro.props;
 ---
 
 <section
@@ -44,10 +45,62 @@ const { totalPosts, totalPhotos, totalVideos, pendingPosts, totalAccounts, enabl
       <p class="storage-warning" id="storage-warning" hidden></p>
     </article>
   </div>
-  <div class="quick-actions" aria-label="快捷操作">
+
+  <div class="author-stats-card" style="margin-top: 1.5rem; background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
+    <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.4rem;">
+      👤 博主貼文統計
+    </h3>
+    <div style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
+            <th style="padding: 0.5rem 0.75rem;">博主帳號</th>
+            <th style="padding: 0.5rem 0.75rem; text-align: center;">總相片數</th>
+            <th style="padding: 0.5rem 0.75rem; text-align: center;">總影片數</th>
+            <th style="padding: 0.5rem 0.75rem; text-align: right;">總計媒體數</th>
+          </tr>
+        </thead>
+        <tbody>
+          {authorStats.map((item) => (
+            <tr style="border-bottom: 1px dashed var(--border-color); transition: background-color 0.2s;" class="stat-row">
+              <td style="padding: 0.6rem 0.75rem;">
+                <a href={`https://x.com/${item.author}`} target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">
+                  {item.author_display_name ? `${item.author_display_name} (@${item.author})` : `@${item.author}`}
+                </a>
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-secondary);">
+                {item.photos} 張
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-secondary);">
+                {item.videos} 部
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">
+                {item.photos + item.videos}
+              </td>
+            </tr>
+          ))}
+          {authorStats.length === 0 && (
+            <tr>
+              <td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">
+                目前尚無任何博主統計資料。
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="quick-actions" aria-label="快捷操作" style="margin-top: 1.5rem;">
     <a href="#upload" class="btn btn-primary">新增貼文</a>
     <a href="#posts" class="btn" data-post-status="pending">查看待審查</a>
     <a href="#crawler" class="btn">管理爬蟲帳號</a>
     <a href="#auto-tag" class="btn">執行 Auto-tag</a>
   </div>
 </section>
+
+<style>
+  .stat-row:hover {
+    background-color: var(--bg-secondary);
+  }
+</style>

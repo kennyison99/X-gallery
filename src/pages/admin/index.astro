@@ -84,6 +84,49 @@ try {
   console.error('Error fetching crawl accounts:', err);
 }
 
+// 4. Fetch author image/video counts for statistics
+let authorStats: { author: string; author_display_name: string | null; photos: number; videos: number }[] = [];
+try {
+  const authorRows = await env.DB.prepare('SELECT author, author_display_name, r2_keys FROM images').all();
+  const authorMap = new Map<string, { display: string | null; photos: number; videos: number }>();
+  
+  (authorRows.results || []).forEach((row: any) => {
+    const author = row.author;
+    const displayName = row.author_display_name || null;
+    const keys = (row.r2_keys || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+    
+    let photosCount = 0;
+    let videosCount = 0;
+    keys.forEach((key: string) => {
+      const lowerKey = key.toLowerCase();
+      if (lowerKey.endsWith('.mp4') || lowerKey.endsWith('.webm') || lowerKey.endsWith('.mov') || lowerKey.endsWith('.m4v')) {
+        videosCount++;
+      } else {
+        photosCount++;
+      }
+    });
+
+    if (!authorMap.has(author)) {
+      authorMap.set(author, { display: displayName, photos: 0, videos: 0 });
+    }
+    const current = authorMap.get(author)!;
+    current.photos += photosCount;
+    current.videos += videosCount;
+    if (displayName && !current.display) {
+      current.display = displayName;
+    }
+  });
+
+  authorStats = Array.from(authorMap.entries()).map(([author, stats]) => ({
+    author,
+    author_display_name: stats.display,
+    photos: stats.photos,
+    videos: stats.videos
+  })).sort((a, b) => (b.photos + b.videos) - (a.photos + a.videos));
+} catch (err) {
+  console.error('Error fetching author stats:', err);
+}
+
 ---
 
 <BaseLayout title="CMS 後台管理 - Twitter 照片牆">
@@ -102,6 +145,7 @@ try {
       pendingPosts={pendingCount}
       totalAccounts={crawlAccounts.length}
       enabledAccounts={crawlAccounts.filter((account) => account.enabled === 1).length}
+      authorStats={authorStats}
     />
 
     <div class="admin-grid">
