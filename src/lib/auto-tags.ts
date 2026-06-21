@@ -123,6 +123,10 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('原神');
   }
 
+  if (matchesAny(descLower, ['鳴潮', '鸣潮', 'wutheringwaves', 'wuthering waves', '卡提希娅', '卡提希婭', '卡提西娅', 'cartethyia', 'カルテジア', 'ショアキーパー', '守岸人', '折枝', '今汐', '長離', '长离', '吟霖'])) {
+    autoTags.add('鳴潮');
+  }
+
   if (matchesAny(descLower, ['zzz', 'zenless', '絕區零', '绝区零'])) {
     autoTags.add('絕區零');
   }
@@ -159,7 +163,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('中二病');
   }
 
-  if (matchesAny(descLower, ['カルテジア', 'cartethyia', 'cartesia', '卡尔特西娅', '卡爾特西婭'])) {
+  if (matchesAny(descLower, ['cartesia', '卡尔特西娅', '卡爾特西婭'])) {
     autoTags.add('遊戲王');
   }
 
