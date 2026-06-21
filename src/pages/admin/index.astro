@@ -269,9 +269,20 @@ try {
     if (text) text.textContent = message;
   }
 
+  function syncCheckboxesFromState() {
+    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
+      const htmlCb = cb as HTMLInputElement;
+      const idAttr = htmlCb.getAttribute('data-id');
+      const id = idAttr ? parseInt(idAttr, 10) : NaN;
+      if (!isNaN(id)) {
+        htmlCb.checked = selectedIds.has(id);
+      }
+    });
+    updateBulkActionsState();
+  }
+
   function updateBulkActionsState() {
-    const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
-    const checkedCount = checkedCheckboxes.length;
+    const checkedCount = selectedIds.size;
 
     if (selectedCountDisplay) {
       selectedCountDisplay.textContent = `已選擇 ${checkedCount} 筆照片`;
@@ -286,7 +297,7 @@ try {
     }
 
     if (selectAllCheckbox) {
-      const visibleCheckboxes = (typeof filteredRows !== 'undefined' && filteredRows) ? filteredRows.map(row => row.querySelector('.image-select-checkbox') as HTMLInputElement).filter(Boolean) : [];
+      const visibleCheckboxes = Array.from(document.querySelectorAll('.image-select-checkbox')) as HTMLInputElement[];
       const checkedVisibleCount = visibleCheckboxes.filter(cb => cb.checked).length;
       selectAllCheckbox.checked = visibleCheckboxes.length > 0 && checkedVisibleCount === visibleCheckboxes.length;
     }
@@ -842,8 +853,10 @@ try {
   const tableViewEl = document.querySelector('.view-mode-table') as HTMLElement | null;
   const gridViewEl = document.querySelector('.view-mode-grid') as HTMLElement | null;
 
-  let activeView: 'table' | 'grid' = 'table';
-  let currentPage = 1;
+  let activeView: 'table' | 'grid' = (localStorage.getItem('admin-active-view') as 'table' | 'grid') || 'table';
+  let currentPage = parseInt(sessionStorage.getItem('admin-current-page') || '1', 10);
+  if (isNaN(currentPage) || currentPage < 1) currentPage = 1;
+  let selectedIds = new Set<number>();
   let totalItems = 0;
   let postsLoading = false;
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -867,6 +880,7 @@ try {
     if (postsLoading) return;
     postsLoading = true;
     currentPage = page;
+    sessionStorage.setItem('admin-current-page', String(page)); // 保存頁數
 
     const perPage = itemsPerPage();
     const offset = (page - 1) * perPage;
@@ -892,6 +906,14 @@ try {
 
       totalItems = data.total;
 
+      // 檢查是否因為刪除而導致頁碼越界，若越界則跳回最後一頁並重新加載
+      const totalPages = Math.ceil(totalItems / perPage) || 1;
+      if (currentPage > totalPages) {
+        postsLoading = false;
+        loadPosts(totalPages);
+        return;
+      }
+
       // Inject HTML
       if (tableBody) tableBody.innerHTML = data.table_rows || '';
       if (gridBody) gridBody.innerHTML = data.grid_cards || '';
@@ -907,8 +929,10 @@ try {
       // Rebind row-level event handlers
       rebindRowHandlers();
 
+      // 同步 DOM 勾選狀態與 selectedIds，支援跨頁勾選
+      syncCheckboxesFromState();
+
       // Update pagination UI
-      const totalPages = Math.ceil(totalItems / perPage) || 1;
       if (paginationInfo) {
         if (totalItems > 0) {
           paginationInfo.textContent = `顯示第 ${data.showing_start}-${data.showing_end} 筆，共 ${totalItems} 筆`;
@@ -962,6 +986,8 @@ try {
           const response = await fetch(`/api/images/${imgId}`, { method: 'DELETE' });
           const data = await response.json();
           if (response.ok && data.success) {
+            const idInt = parseInt(imgId, 10);
+            if (!isNaN(idInt)) selectedIds.delete(idInt);
             loadPosts(currentPage);
             refreshStorage();
           } else {
@@ -1037,7 +1063,8 @@ try {
   function switchView(view: 'table' | 'grid') {
     if (activeView === view) return;
     activeView = view;
-    document.querySelectorAll('.image-select-checkbox').forEach(cb => { (cb as HTMLInputElement).checked = false; });
+    localStorage.setItem('admin-active-view', view); // 保存 view 設定
+    
     if (selectAllCheckbox) selectAllCheckbox.checked = false;
     updateBulkActionsState();
 
@@ -1052,7 +1079,7 @@ try {
       if (gridViewEl) gridViewEl.style.display = 'block';
       if (tableViewEl) tableViewEl.style.display = 'none';
     }
-    loadPosts(1);
+    loadPosts(currentPage); // 切換視圖時保留當前頁碼
   }
 
   viewToggleTable?.addEventListener('click', () => switchView('table'));
@@ -1067,6 +1094,16 @@ try {
   document.addEventListener('change', (e) => {
     const target = e.target as HTMLElement;
     if (target && target.classList.contains('image-select-checkbox')) {
+      const htmlCb = target as HTMLInputElement;
+      const idAttr = htmlCb.getAttribute('data-id');
+      const id = idAttr ? parseInt(idAttr, 10) : NaN;
+      if (!isNaN(id)) {
+        if (htmlCb.checked) {
+          selectedIds.add(id);
+        } else {
+          selectedIds.delete(id);
+        }
+      }
       updateBulkActionsState();
     }
   });
@@ -1115,7 +1152,17 @@ try {
   selectAllCheckbox?.addEventListener('change', () => {
     const isChecked = selectAllCheckbox.checked;
     document.querySelectorAll('.image-select-checkbox').forEach(cb => {
-      (cb as HTMLInputElement).checked = isChecked;
+      const htmlCb = cb as HTMLInputElement;
+      htmlCb.checked = isChecked;
+      const idAttr = htmlCb.getAttribute('data-id');
+      const id = idAttr ? parseInt(idAttr, 10) : NaN;
+      if (!isNaN(id)) {
+        if (isChecked) {
+          selectedIds.add(id);
+        } else {
+          selectedIds.delete(id);
+        }
+      }
     });
     updateBulkActionsState();
   });
@@ -1186,8 +1233,7 @@ try {
 
   // Bulk delete action handler
   bulkDeleteBtn?.addEventListener('click', async () => {
-    const checkedCheckboxes = document.querySelectorAll('.image-select-checkbox:checked');
-    const ids = Array.from(checkedCheckboxes).map(cb => parseInt(cb.getAttribute('data-id') || '', 10)).filter(id => !isNaN(id));
+    const ids = Array.from(selectedIds);
 
     if (ids.length === 0) return;
 
@@ -1231,6 +1277,7 @@ try {
       });
 
       alert(`成功刪除 ${deletedCount} 筆照片！`);
+      selectedIds.clear();
       window.location.reload();
     } catch (err: any) {
       console.error('Error in bulk delete:', err);
@@ -1246,6 +1293,7 @@ try {
   function switchTab(newTab: 'published' | 'pending') {
     if (activeTab === newTab) return;
     activeTab = newTab;
+    selectedIds.clear(); // 切換 Tab 時清空選取
 
     if (tabPublished && tabPending) {
       if (activeTab === 'published') {
@@ -1277,6 +1325,19 @@ try {
   tabPublished?.addEventListener('click', () => switchTab('published'));
   tabPending?.addEventListener('click', () => switchTab('pending'));
 
-  // Initialize — load first page of posts
-  loadPosts(1);
+  // 同步初始化 View 模式的 DOM 狀態
+  if (activeView === 'grid') {
+    viewToggleGrid?.classList.add('active');
+    viewToggleTable?.classList.remove('active');
+    if (gridViewEl) gridViewEl.style.display = 'block';
+    if (tableViewEl) tableViewEl.style.display = 'none';
+  } else {
+    viewToggleTable?.classList.add('active');
+    viewToggleGrid?.classList.remove('active');
+    if (tableViewEl) tableViewEl.style.display = 'block';
+    if (gridViewEl) gridViewEl.style.display = 'none';
+  }
+
+  // Initialize — load saved page of posts
+  loadPosts(currentPage);
 </script>
