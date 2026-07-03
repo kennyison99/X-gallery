@@ -23,6 +23,13 @@ test('maps observed gallery descriptions to existing and new canonical tags', ()
       'ExampleUser',
       '#蔚蓝档案 #BuleArchive #柚鸟夏 #阿尔图罗 #塑心 #MushokuTensei #maimai 袜子挺碍事的 搓搓脚'
     ),
-    ['絲襪', '足控', '蔚藍檔案', '明日方舟', '無職轉生', 'maimai']
+    ['絲襪', '足控', '蔚藍檔案', '明日方舟', '無職轉生', 'maimai', '柚鳥夏', '阿爾圖羅']
+  );
+});
+
+test('adds character tags together with their work tags', () => {
+  assert.deepEqual(
+    generateAutoTags('ExampleUser', '#Firefly #HonkaiStarRail #Chisa #WutheringWaves #仪玄'),
+    ['星穹鐵道', '鳴潮', '絕區零', '流螢', '千咲', '儀玄']
   );
 });

@@ -760,11 +760,34 @@ try {
     }, 3000);
   }
 
+  function normalizeCrawlUsernameInput(input: string) {
+    let username = input.trim().replace(/^@+/, '');
+    if (username.includes('/') || username.includes('http')) {
+      try {
+        const cleanUrl = username.startsWith('http') ? username : `https://${username}`;
+        const url = new URL(cleanUrl);
+        username = url.pathname.split('/').filter(Boolean)[0] || username;
+      } catch {
+        const match = username.match(/(?:twitter|x)\.com\/([a-zA-Z0-9_]+)/i);
+        if (match) username = match[1];
+      }
+    }
+    return username.replace(/^@+/, '').toLowerCase();
+  }
+
   if (addCrawlBtn && crawlUsernameInput) {
     addCrawlBtn.addEventListener('click', async () => {
-      const username = crawlUsernameInput.value.trim().replace(/^@/, '');
+      const username = normalizeCrawlUsernameInput(crawlUsernameInput.value);
       if (!username) {
         showCrawlMessage('請輸入帳號名稱', 'error');
+        return;
+      }
+
+      const existingAccount = Array.from(document.querySelectorAll('.crawl-account-item')).some((item) => (
+        item.getAttribute('data-username')?.toLowerCase() === username
+      ));
+      if (existingAccount) {
+        showCrawlMessage(`@${username} 已在爬蟲帳號列表中`, 'error');
         return;
       }
 

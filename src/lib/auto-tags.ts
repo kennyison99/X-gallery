@@ -1,3 +1,5 @@
+import { applyWorkCharacterTags } from './work-tags.ts';
+
 export function generateAutoTags(author: string | null, description: string | null): string[] {
   const autoTags = new Set<string>();
 
@@ -222,6 +224,8 @@ export function generateAutoTags(author: string | null, description: string | nu
   if (matchesAny(descLower, ['白聖女と黒牧師', '白聖女與黑牧師', '白圣女与黑牧师'])) {
     autoTags.add('白聖女與黑牧師');
   }
+
+  applyWorkCharacterTags(autoTags, descLower);
 
   return [...autoTags];
 }

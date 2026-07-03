@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { normalizeCrawlUsername } from '../../lib/crawl-accounts.ts';
 
 // GET — 取得所有爬取帳號
 export const GET: APIRoute = async () => {
@@ -37,26 +38,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    let username = (body.username || '').trim().replace(/^@/, '');
-
-    // Automatically extract username if they pasted a full Twitter/X URL
-    if (username.includes('/') || username.includes('http')) {
-      try {
-        const cleanUrl = username.startsWith('http') ? username : `https://${username}`;
-        const url = new URL(cleanUrl);
-        const paths = url.pathname.split('/').filter(p => p);
-        if (paths.length > 0) {
-          // The first segment of the path is the username (e.g. /97san97/status/123 -> 97san97)
-          username = paths[0];
-        }
-      } catch (e) {
-        // Regex fallback
-        const match = username.match(/(?:twitter|x)\.com\/([a-zA-Z0-9_]+)/i);
-        if (match) {
-          username = match[1];
-        }
-      }
-    }
+    const username = normalizeCrawlUsername(body.username);
 
     if (!username) {
       return new Response(JSON.stringify({ error: '請輸入 Twitter 帳號名稱' }), {
@@ -65,8 +47,23 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    const existing = await env.DB.prepare(
+      'SELECT username FROM crawl_accounts WHERE lower(username) = ? LIMIT 1'
+    ).bind(username).first<{ username: string }>();
+
+    if (existing) {
+      return new Response(JSON.stringify({
+        error: `@${existing.username} 已在爬蟲帳號列表中`,
+        duplicate: true,
+        username: existing.username
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     await env.DB.prepare(
-      'INSERT OR IGNORE INTO crawl_accounts (username) VALUES (?)'
+      'INSERT INTO crawl_accounts (username) VALUES (?)'
     ).bind(username).run();
 
     return new Response(JSON.stringify({ success: true, username }), {
@@ -91,24 +88,7 @@ export const DELETE: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    let username = (body.username || '').trim().replace(/^@/, '');
-
-    // Automatically extract username if they pasted a full Twitter/X URL
-    if (username.includes('/') || username.includes('http')) {
-      try {
-        const cleanUrl = username.startsWith('http') ? username : `https://${username}`;
-        const url = new URL(cleanUrl);
-        const paths = url.pathname.split('/').filter(p => p);
-        if (paths.length > 0) {
-          username = paths[0];
-        }
-      } catch (e) {
-        const match = username.match(/(?:twitter|x)\.com\/([a-zA-Z0-9_]+)/i);
-        if (match) {
-          username = match[1];
-        }
-      }
-    }
+    const username = normalizeCrawlUsername(body.username);
 
     if (!username) {
       return new Response(JSON.stringify({ error: '請輸入要刪除的帳號名稱' }), {
@@ -118,7 +98,7 @@ export const DELETE: APIRoute = async ({ request }) => {
     }
 
     await env.DB.prepare(
-      'DELETE FROM crawl_accounts WHERE username = ?'
+      'DELETE FROM crawl_accounts WHERE lower(username) = ?'
     ).bind(username).run();
 
     return new Response(JSON.stringify({ success: true }), {
@@ -143,7 +123,7 @@ export const PUT: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const username = (body.username || '').trim().replace(/^@/, '');
+    const username = normalizeCrawlUsername(body.username);
     const enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : null;
     const crawlAll = body.crawl_all !== undefined ? (body.crawl_all ? 1 : 0) : null;
 
@@ -156,15 +136,15 @@ export const PUT: APIRoute = async ({ request }) => {
 
     if (enabled !== null && crawlAll !== null) {
       await env.DB.prepare(
-        'UPDATE crawl_accounts SET enabled = ?, crawl_all = ? WHERE username = ?'
+        'UPDATE crawl_accounts SET enabled = ?, crawl_all = ? WHERE lower(username) = ?'
       ).bind(enabled, crawlAll, username).run();
     } else if (enabled !== null) {
       await env.DB.prepare(
-        'UPDATE crawl_accounts SET enabled = ? WHERE username = ?'
+        'UPDATE crawl_accounts SET enabled = ? WHERE lower(username) = ?'
       ).bind(enabled, username).run();
     } else if (crawlAll !== null) {
       await env.DB.prepare(
-        'UPDATE crawl_accounts SET crawl_all = ? WHERE username = ?'
+        'UPDATE crawl_accounts SET crawl_all = ? WHERE lower(username) = ?'
       ).bind(crawlAll, username).run();
     }
 
