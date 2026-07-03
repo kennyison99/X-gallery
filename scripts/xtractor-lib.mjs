@@ -9,30 +9,30 @@ import { createHash } from "node:crypto";
 // binary to the same on-disk location (scripts/.xtractor-bin) and share the
 // SHA-256-verified download + JSON parsing logic.
 
-// xtractor binary (latest release, SHA-256 verified against the GitHub release digest).
+// xtractor binary (pinned release, SHA-256 verified against the GitHub release digest).
 // Source: https://github.com/afkarxyz/xtractor-binaries (MIT).
 // The extractor is a PyInstaller binary; the CLI contract below mirrors
 // https://github.com/afkarxyz/Twitter-X-Media-Batch-Downloader backend/twitter.go
-const XTRACTOR_RELEASE_URL = "https://api.github.com/repos/afkarxyz/xtractor-binaries/releases/latest";
-const DEFAULT_XTRACTOR_VERSION = "v1.2";
+const DEFAULT_XTRACTOR_VERSION = "v1.1";
+const XTRACTOR_RELEASE_URL = `https://api.github.com/repos/afkarxyz/xtractor-binaries/releases/tags/${DEFAULT_XTRACTOR_VERSION}`;
 const DEFAULT_XTRACTOR_ASSETS = {
   linux: {
-    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/linux-amd64.zip",
-    sha256: "970f7174cf5d5ecd744af9a63920767ad83d74df881cf441158cc90c7d73c5ca",
+    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/linux-amd64.zip",
+    sha256: "6361f46860e08ebc78c86a92e23cb43030169f52daa6e7b026f5c15dcc3357e7",
   },
   darwin: {
     arm64: {
-      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/macos-arm64.zip",
-      sha256: "90461291e9d7d178807a827d94195e2b518b39fc39fa11eb6fb1761b9b6a34c7",
+      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/macos-arm64.zip",
+      sha256: "a733229ef72050dbe1f5942d9a56180c50d3466edf64cbfb0d8c091f0874fb39",
     },
     amd64: {
-      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/macos-amd64.zip",
-      sha256: "26c556f4fe22cf0ecf9b4e570b10522adcccd49eb293d882df3687df49974e05",
+      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/macos-amd64.zip",
+      sha256: "57f82c3ac4926c61d8e8d0d9ebc7d6d6baae2304f80f2a9caea81773447742cc",
     },
   },
   win32: {
-    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/windows-amd64.zip",
-    sha256: "6380719e89da597d3fc0bb84c1c378509127fd9b2cfd5236ae58fb55aa63b446",
+    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/windows-amd64.zip",
+    sha256: "240dfae5fdefb63a0d4fc6e907a1f5a5377c85545fa2a69c80276ffa79999368",
   },
 };
 
@@ -77,12 +77,12 @@ async function resolveXtractorAsset(fetchImpl = fetch, platform = process.platfo
     const releaseAsset = release.assets?.find((asset) => asset.name === name);
     const sha256 = releaseAsset?.digest?.replace(/^sha256:/, "");
     if (!release.tag_name || !releaseAsset?.browser_download_url || !sha256) {
-      throw new Error(`latest xtractor release is missing ${name}`);
+      throw new Error(`${DEFAULT_XTRACTOR_VERSION} xtractor release is missing ${name}`);
     }
     return { version: release.tag_name, url: releaseAsset.browser_download_url, sha256 };
   } catch (err) {
     if (fetchImpl !== fetch) throw err;
-    console.warn(`Could not resolve latest xtractor release (${err.message}); using ${DEFAULT_XTRACTOR_VERSION}.`);
+    console.warn(`Could not resolve xtractor ${DEFAULT_XTRACTOR_VERSION} release (${err.message}); using bundled metadata.`);
     return { version: DEFAULT_XTRACTOR_VERSION, ...pickDefaultAsset(platform, arch) };
   }
 }
