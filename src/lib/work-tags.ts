@@ -12,7 +12,7 @@ export interface WorkTagGroup {
 export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   {
     work: '蔚藍檔案',
-    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아卡池', '블루아카이브', '키보토스'],
+    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아카', '블루아카이브', '키보토스'],
     characters: [
       { tag: '龍華妃咲', keywords: ['龍華妃咲', '龙华妃咲', '妃咲', 'kisaki', 'キサキ', '竜華キサキ'] },
       { tag: '桐生桔梗', keywords: ['桐生桔梗', '桐生キキョウ', 'キキョウ', 'kikyou'] },
@@ -22,6 +22,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '早瀬優香', keywords: ['早瀬優香', '早瀨優香', '早濑优香', '優香', '优香', '体操服优香', 'yuuka', 'ユウカ', '早瀬ユウカ'] },
       { tag: '靜山マシロ', keywords: ['静山マシロ', '靜山マシロ', '静山真白', '靜山真白', 'mashiro', 'マシロ'] },
       { tag: '陸八魔亞瑠', keywords: ['陸八魔亞瑠', '陆八魔爱露', '陸八魔アル', 'アル', '아루', 'aru', '阿露'] },
+      { tag: '杏山和紗', keywords: ['杏山和紗', '杏山和纱', '杏山カズサ', 'カズサ', 'kazusa', 'kyoyama kazusa'] },
     ],
   },
   {
@@ -33,6 +34,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '艾雅法拉', keywords: ['艾雅法拉', 'eyjafjalla', 'エイヤフィヤトラ'] },
       { tag: '能天使', keywords: ['能天使', 'exusiai', 'エクシア'] },
       { tag: '德克薩斯', keywords: ['德克薩斯', '德克萨斯', 'texas', 'テキサス'] },
+      { tag: '阿米婭', keywords: ['阿米婭', '阿米娅', 'amiya', 'アーミヤ'] },
     ],
   },
   {
@@ -166,7 +168,22 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: 'Gawr Gura', keywords: ['gawr gura', 'gura', 'がうるぐら', 'がうる・ぐら', '古拉'] },
       { tag: '星街彗星', keywords: ['星街彗星', '星街すいせい', 'suisei', 'hoshimachi suisei'] },
       { tag: '兔田佩克拉', keywords: ['兔田佩克拉', '兔田佩克菈', '兔田佩科拉', '兎田ぺこら', 'pekora', 'usada pekora'] },
-      { tag: '寶鐘瑪琳', keywords: ['寶鐘瑪琳', '宝钟玛丽琳', '宝钟玛琳', '宝钟マリン', '宝鐘マリン', 'marine', 'houshou marine'] },
+      { tag: '寶鐘瑪琳', keywords: ['寶鐘瑪琳', '宝钟 marine', '宝钟玛琳', '宝钟マリン', '宝鐘マリン', 'marine', 'houshou marine'] },
+      { tag: '湊阿庫婭', keywords: ['湊阿庫婭', '凑阿库娅', 'minato aqua', 'aqua', '湊あくあ', 'あくあ'] },
+    ],
+  },
+  {
+    work: '中二病也想談戀愛！',
+    keywords: ['中二病也想談戀愛！', '中二病也想谈恋爱', '中二病', 'love, chunibyo & other delusions', '中二病でも恋がしたい'],
+    characters: [
+      { tag: '小鳥遊六花', keywords: ['小鳥遊六花', '小鸟游六花', 'rikka', 'takanashi rikka', 'たかなし りっか'] },
+    ],
+  },
+  {
+    work: 'Vocaloid',
+    keywords: ['vocaloid', '初音未來', '初音未来', 'miku', '初音ミク'],
+    characters: [
+      { tag: '初音未來', keywords: ['初音未來', '初音未来', 'miku', 'hatsune miku', '初音ミク'] },
     ],
   },
 ];
