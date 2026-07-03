@@ -27,10 +27,14 @@ const characterTagSet = new Set<string>();
 
 for (const group of WORK_TAG_GROUPS) {
   workTagSet.add(group.work.toLowerCase());
-  group.keywords.forEach(kw => workTagSet.add(kw.toLowerCase()));
+  group.keywords.forEach(kw => {
+    if (typeof kw === 'string') workTagSet.add(kw.toLowerCase());
+  });
   for (const char of group.characters) {
     characterTagSet.add(char.tag.toLowerCase());
-    char.keywords.forEach(kw => characterTagSet.add(kw.toLowerCase()));
+    char.keywords.forEach(kw => {
+      if (typeof kw === 'string') characterTagSet.add(kw.toLowerCase());
+    });
   }
 }
 

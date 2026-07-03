@@ -76,29 +76,11 @@ try {
   console.error('Error fetching crawl accounts:', err);
 }
 
-// 4. Fetch R2 file sizes
-let r2Sizes = new Map<string, number>();
-try {
-  if (env.BUCKET) {
-    let cursor: string | undefined = undefined;
-    for (let i = 0; i < 20; i++) {
-      const listResult = await env.BUCKET.list({ cursor });
-      (listResult.objects || []).forEach((obj: any) => {
-        r2Sizes.set(obj.key, obj.size);
-      });
-      if (!listResult.truncated) break;
-      cursor = listResult.cursor;
-    }
-  }
-} catch (err) {
-  console.error('Error listing R2 bucket objects:', err);
-}
-
-// 5. Fetch author image/video counts and bytes for statistics
+// 4. Fetch author image/video counts (bytes will be lazy-loaded client-side)
 let authorStats: { author: string; author_display_name: string | null; photos: number; videos: number; photo_bytes: number; video_bytes: number }[] = [];
 try {
   const authorRows = await env.DB.prepare('SELECT author, author_display_name, r2_keys FROM images').all();
-  const authorMap = new Map<string, { display: string | null; photos: number; videos: number; photoBytes: number; videoBytes: number }>();
+  const authorMap = new Map<string, { display: string | null; photos: number; videos: number }>();
   
   let calculatedPhotos = 0;
   let calculatedVideos = 0;
@@ -110,28 +92,21 @@ try {
     
     let photosCount = 0;
     let videosCount = 0;
-    let pBytes = 0;
-    let vBytes = 0;
     keys.forEach((key: string) => {
       const lowerKey = key.toLowerCase();
-      const fileSize = r2Sizes.get(key) || 0;
       if (lowerKey.endsWith('.mp4') || lowerKey.endsWith('.webm') || lowerKey.endsWith('.mov') || lowerKey.endsWith('.m4v')) {
         videosCount++;
-        vBytes += fileSize;
       } else {
         photosCount++;
-        pBytes += fileSize;
       }
     });
 
     if (!authorMap.has(author)) {
-      authorMap.set(author, { display: displayName, photos: 0, videos: 0, photoBytes: 0, videoBytes: 0 });
+      authorMap.set(author, { display: displayName, photos: 0, videos: 0 });
     }
     const current = authorMap.get(author)!;
     current.photos += photosCount;
     current.videos += videosCount;
-    current.photoBytes += pBytes;
-    current.videoBytes += vBytes;
     if (displayName && !current.display) {
       current.display = displayName;
     }
@@ -148,8 +123,8 @@ try {
     author_display_name: stats.display,
     photos: stats.photos,
     videos: stats.videos,
-    photo_bytes: stats.photoBytes,
-    video_bytes: stats.videoBytes
+    photo_bytes: 0,
+    video_bytes: 0
   })).sort((a, b) => (b.photos + b.videos) - (a.photos + a.videos));
 } catch (err) {
   console.error('Error fetching author stats:', err);

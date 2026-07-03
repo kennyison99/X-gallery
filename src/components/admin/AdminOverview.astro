@@ -20,13 +20,10 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Calculate totals for summary row
+// Calculate totals for summary row (bytes will be lazy-loaded client-side)
 const totalPhotosSum = authorStats.reduce((sum, item) => sum + item.photos, 0);
 const totalVideosSum = authorStats.reduce((sum, item) => sum + item.videos, 0);
-const totalPhotoBytesSum = authorStats.reduce((sum, item) => sum + item.photo_bytes, 0);
-const totalVideoBytesSum = authorStats.reduce((sum, item) => sum + item.video_bytes, 0);
 const totalMediaSum = totalPhotosSum + totalVideosSum;
-const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
 ---
 
 <section
@@ -88,7 +85,8 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
               data-photos={item.photos}
               data-videos={item.videos}
               data-media={item.photos + item.videos}
-              data-bytes={item.photo_bytes + item.video_bytes}
+              data-bytes={0}
+              data-author-handle={item.author}
             >
               <td style="padding: 0.6rem 0.75rem;">
                 <a href={`https://x.com/${item.author}`} target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">
@@ -96,16 +94,16 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
                 </a>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-secondary);">
-                {item.photos} 張 <span style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.85;">({formatBytes(item.photo_bytes)})</span>
+                {item.photos} 張 <span class="author-photo-bytes" data-author={item.author} style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.85;">(計算中...)</span>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-secondary);">
-                {item.videos} 部 <span style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.85;">({formatBytes(item.video_bytes)})</span>
+                {item.videos} 部 <span class="author-video-bytes" data-author={item.author} style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.85;">(計算中...)</span>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">
                 {item.photos + item.videos}
               </td>
-              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-secondary); font-weight: 500;">
-                {formatBytes(item.photo_bytes + item.video_bytes)}
+              <td class="author-total-bytes" data-author={item.author} style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-secondary); font-weight: 500;">
+                計算中...
               </td>
             </tr>
           ))}
@@ -113,13 +111,13 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
             <tr class="total-row" style="border-top: 2px solid var(--border-color); font-weight: 700; background-color: var(--bg-secondary);">
               <td style="padding: 0.6rem 0.75rem; color: var(--text-primary);">總計 (Total)</td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">
-                {totalPhotosSum} 張 <span style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">({formatBytes(totalPhotoBytesSum)})</span>
+                {totalPhotosSum} 張 <span id="total-photo-bytes" style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">(計算中...)</span>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--text-primary);">
-                {totalVideosSum} 部 <span style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">({formatBytes(totalVideoBytesSum)})</span>
+                {totalVideosSum} 部 <span id="total-video-bytes" style="font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);">(計算中...)</span>
               </td>
               <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">{totalMediaSum}</td>
-              <td style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">{formatBytes(totalBytesSum)}</td>
+              <td id="total-all-bytes" style="padding: 0.6rem 0.75rem; text-align: right; color: var(--text-primary);">計算中...</td>
             </tr>
           )}
           {authorStats.length === 0 && (
@@ -245,6 +243,69 @@ const totalBytesSum = totalPhotoBytesSum + totalVideoBytesSum;
     });
   }
 
+  // --- Lazy-load per-author byte stats ---
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  async function loadAuthorBytes() {
+    try {
+      const res = await fetch('/api/author-stats');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const authors: Record<string, { photo_bytes: number; video_bytes: number }> = data.authors || {};
+
+      let totalPhotoBytes = 0;
+      let totalVideoBytes = 0;
+
+      // Update per-author cells
+      for (const [handle, stats] of Object.entries(authors)) {
+        const totalBytes = stats.photo_bytes + stats.video_bytes;
+        totalPhotoBytes += stats.photo_bytes;
+        totalVideoBytes += stats.video_bytes;
+
+        document.querySelectorAll<HTMLElement>(`.author-photo-bytes[data-author="${handle}"]`).forEach(el => {
+          el.textContent = `(${formatBytes(stats.photo_bytes)})`;
+        });
+        document.querySelectorAll<HTMLElement>(`.author-video-bytes[data-author="${handle}"]`).forEach(el => {
+          el.textContent = `(${formatBytes(stats.video_bytes)})`;
+        });
+        document.querySelectorAll<HTMLElement>(`.author-total-bytes[data-author="${handle}"]`).forEach(el => {
+          el.textContent = formatBytes(totalBytes);
+        });
+
+        // Update data-bytes attribute for sorting
+        document.querySelectorAll<HTMLElement>(`.stat-row[data-author-handle="${handle}"]`).forEach(el => {
+          el.setAttribute('data-bytes', String(totalBytes));
+        });
+      }
+
+      // Update totals row
+      const totalPhotoBytesEl = document.getElementById('total-photo-bytes');
+      if (totalPhotoBytesEl) totalPhotoBytesEl.textContent = `(${formatBytes(totalPhotoBytes)})`;
+
+      const totalVideoBytesEl = document.getElementById('total-video-bytes');
+      if (totalVideoBytesEl) totalVideoBytesEl.textContent = `(${formatBytes(totalVideoBytes)})`;
+
+      const totalAllBytesEl = document.getElementById('total-all-bytes');
+      if (totalAllBytesEl) totalAllBytesEl.textContent = formatBytes(totalPhotoBytes + totalVideoBytes);
+    } catch (err) {
+      console.error('Failed to load author byte stats:', err);
+      // Show error state
+      document.querySelectorAll<HTMLElement>('.author-photo-bytes, .author-video-bytes').forEach(el => {
+        el.textContent = '(N/A)';
+      });
+      document.querySelectorAll<HTMLElement>('.author-total-bytes').forEach(el => {
+        el.textContent = 'N/A';
+      });
+    }
+  }
+
   // Run on page load
   initTableSorting();
+  loadAuthorBytes();
 </script>
