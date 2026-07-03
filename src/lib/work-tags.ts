@@ -15,7 +15,6 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아카', '블루아카이브', '키보토스'],
     characters: [
       { tag: '龍華妃咲', keywords: ['龍華妃咲', '龙华妃咲', '妃咲', 'kisaki', 'キサキ'] },
-      { tag: '四季夏目', keywords: ['四季夏目', 'natsume', 'ナツメ'] },
       { tag: '桐生桔梗', keywords: ['桐生桔梗', '桐生キキョウ', 'キキョウ', 'kikyou'] },
       { tag: '柚鳥夏', keywords: ['柚鳥夏', '柚鸟夏', '柚鳥ナツ', '柚鸟ナツ', 'natsu', 'ナツ'] },
       { tag: '小鳥遊星野', keywords: ['小鳥遊星野', '小鸟游星野', '星野', 'hoshino', 'takanashihoshino', 'ホシノ'] },
@@ -114,22 +113,29 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     work: '魔女裁判',
     keywords: ['魔法少女ノ魔女裁判', '魔女裁判'],
     characters: [
-      { tag: '橘シェリー', keywords: ['橘シェリー'] },
-      { tag: '桜羽エマ', keywords: ['桜羽エマ', 'sakuraba ema'] },
+      { tag: '橘雪莉', keywords: ['橘雪莉', '橘シェリー', 'sherry', 'tachibana sherry'] },
+      { tag: '櫻羽艾瑪', keywords: ['櫻羽艾瑪', '樱羽艾玛', '桜羽エマ', 'sakuraba ema', 'ema'] },
     ],
   },
   {
     work: '物語系列',
     keywords: ['物語シリーズ', '物語系列', '物语系列'],
     characters: [
-      { tag: '忍野忍', keywords: ['忍野忍', 'oshino shinobu', 'shinobu'] },
+      { tag: '忍野忍', keywords: ['忍野忍', 'oshino shinobu', 'shinobu', 'シノブ'] },
     ],
   },
   {
     work: '偶像大師',
     keywords: ['偶像大師', '偶像大师', 'idolmaster'],
     characters: [
-      { tag: '樋口円香', keywords: ['樋口円香', '樋口圓香', 'higuchi madoka', 'madoka'] },
+      { tag: '樋口圓香', keywords: ['樋口圓香', '樋口円香', 'madoka', 'higuchi madoka', 'マドカ'] },
+    ],
+  },
+  {
+    work: '星光咖啡館與死神之蝶',
+    keywords: ['星光咖啡館與死神之蝶', '星光咖啡馆与死神之蝶', '喫茶ステラと死神の蝶', '死神之蝶', '柚子社', 'yuzusoft'],
+    characters: [
+      { tag: '四季夏目', keywords: ['四季夏目', 'natsume', 'ナツメ'] },
     ],
   },
 ];
