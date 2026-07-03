@@ -17,7 +17,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('絲襪');
   }
 
-  if (matchesAny(descLower, ['絲襪', '丝袜', 'タイツ', 'tights', 'pantyhose', 'ストッキング', '網襪', '网袜'])) {
+  if (matchesAny(descLower, ['絲襪', '丝袜', '襪子', '袜子', '長襪', '长袜', 'タイツ', 'tights', 'pantyhose', 'ストッキング', '網襪', '网袜', '漁網襪', '渔网袜', '絕對領域', '绝对领域'])) {
     autoTags.add('絲襪');
   }
 
@@ -54,7 +54,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('吊帶襪');
   }
 
-  if (matchesAny(descLower, ['足控', '美足', '足控福利', '足底'])) {
+  if (matchesAny(descLower, ['足控', '美足', '足控福利', '足底', '搓搓腳', '搓搓脚', '🦶'])) {
     autoTags.add('足控');
   }
 
@@ -107,15 +107,15 @@ export function generateAutoTags(author: string | null, description: string | nu
   }
 
   // --- Game, Anime & Character Tags ---
-  if (matchesAny(descLower, ['bluearchive', 'blue archive', '碧藍檔案', '蔚藍檔案', '碧蓝档案', '蔚蓝档案', 'ブルアカ', '妃咲', 'kisaki', '夏目', 'natsume', 'コハル', '下江コハル', 'hoshino', 'takanashihoshino', '星野', '小鸟游星野', 'キキョウ', '桐生桔梗', '桐生キキョウ'])) {
+  if (matchesAny(descLower, ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', '碧藍檔案', '蔚藍檔案', '碧蓝档案', '蔚蓝档案', 'ブルアカ', 'ブルーアーカイブ', '키보토스', '妃咲', 'kisaki', '夏目', 'natsume', 'コハル', '下江コハル', 'hoshino', 'takanashihoshino', '星野', '小鸟游星野', 'キキョウ', '桐生桔梗', '桐生キキョウ', '柚鳥夏', '柚鸟夏'])) {
     autoTags.add('蔚藍檔案');
   }
 
-  if (matchesAny(descLower, ['明日方舟', 'arknights', 'アークナイツ', '阿米娅', '阿米婭', '阿尔图罗', '塑心', '德克萨斯', 'texas', '普瑞赛斯', 'endfield', '終末地', '终末地', 'エンドフィールド'])) {
+  if (matchesAny(descLower, ['明日方舟', 'arknights', 'アークナイツ', '阿米娅', '阿米婭', '阿尔图罗', '阿爾圖羅', '塑心', 'virtuosa', '德克萨斯', 'texas', '普瑞赛斯', '普瑞賽斯', 'priestess', '艾雅法拉', '能天使', 'endfield', '終末地', '终末地', 'エンドフィールド'])) {
     autoTags.add('明日方舟');
   }
 
-  if (matchesAny(descLower, ['崩壊スターレイル', '崩壞星穹鐵道', '崩坏星穹铁道', 'honkaistarrail', 'starrail', 'star rail', 'スターレイル', '银狼', '銀狼', 'firefly', '流萤', '流螢', 'sparkle', '花火'])) {
+  if (matchesAny(descLower, ['崩壊スターレイル', '崩壞星穹鐵道', '崩坏星穹铁道', 'honkaistarrail', 'starrail', 'star rail', 'スターレイル', '银狼', '銀狼', 'firefly', '流萤', '流螢', 'ホタル', 'sparkle', '花火', 'hyacine', 'cyrene', 'キュレネ', '長夜月', 'evernight'])) {
     autoTags.add('星穹鐵道');
   }
 
@@ -123,7 +123,7 @@ export function generateAutoTags(author: string | null, description: string | nu
     autoTags.add('原神');
   }
 
-  if (matchesAny(descLower, ['鳴潮', '鸣潮', 'wutheringwaves', 'wuthering waves', '卡提希娅', '卡提希婭', '卡提西娅', 'cartethyia', 'カルテジア', 'ショアキーパー', '守岸人', '折枝', '今汐', '長離', '长离', '吟霖', '千咲', '千咲ちゃん'])) {
+  if (matchesAny(descLower, ['鳴潮', '鸣潮', 'wutheringwaves', 'wuthering waves', '卡提希娅', '卡提希婭', '卡提西娅', 'cartethyia', 'カルテジア', 'ショアキーパー', '守岸人', '折枝', '今汐', '長離', '长离', '吟霖', '千咲', '千咲ちゃん', 'chisa', 'denia', 'ユーノ'])) {
     autoTags.add('鳴潮');
   }
 
@@ -205,6 +205,22 @@ export function generateAutoTags(author: string | null, description: string | nu
 
   if (matchesAny(descLower, ['miku', '初音ミク', '初音未来', '初音未來'])) {
     autoTags.add('初音未來');
+  }
+
+  if (matchesAny(descLower, ['mushokutensei', '無職転生', '無職轉生', '无职转生'])) {
+    autoTags.add('無職轉生');
+  }
+
+  if (matchesAny(descLower, ['maimai'])) {
+    autoTags.add('maimai');
+  }
+
+  if (matchesAny(descLower, ['星の翼', '星之翼'])) {
+    autoTags.add('星之翼');
+  }
+
+  if (matchesAny(descLower, ['白聖女と黒牧師', '白聖女與黑牧師', '白圣女与黑牧师'])) {
+    autoTags.add('白聖女與黑牧師');
   }
 
   return [...autoTags];

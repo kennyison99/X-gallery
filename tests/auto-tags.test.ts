@@ -16,3 +16,13 @@ test('preserves existing traditional Chinese keyword behavior', () => {
     ['黑絲', '絲襪', '白絲', '裸足', '寫真', '日常']
   );
 });
+
+test('maps observed gallery descriptions to existing and new canonical tags', () => {
+  assert.deepEqual(
+    generateAutoTags(
+      'ExampleUser',
+      '#蔚蓝档案 #BuleArchive #柚鸟夏 #阿尔图罗 #塑心 #MushokuTensei #maimai 袜子挺碍事的 搓搓脚'
+    ),
+    ['絲襪', '足控', '蔚藍檔案', '明日方舟', '無職轉生', 'maimai']
+  );
+});

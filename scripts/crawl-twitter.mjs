@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { XTRACTOR_VERSION, ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
+import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
 import { dedupeMediaItems, mediaIdFromUrl } from "./media-items.mjs";
 
 const execAsync = promisify(exec);
@@ -327,7 +327,6 @@ async function main() {
   console.log("=== Twitter Image Crawl (xtractor engine) ===");
   console.log(`Site URL        : ${SITE_URL}`);
   console.log(`Archive         : ${ARCHIVE_PATH}`);
-  console.log(`xtractor        : ${XTRACTOR_VERSION} (concurrency ${DOWNLOAD_CONCURRENCY})`);
   console.log();
 
   if (!TWITTER_COOKIES) {
@@ -346,7 +345,8 @@ async function main() {
     process.exit(1);
   }
 
-  await ensureXtractor();
+  const xtractor = await ensureXtractor();
+  console.log(`xtractor        : ${xtractor.version} (concurrency ${DOWNLOAD_CONCURRENCY})`);
 
   console.log("Fetching account list…");
   const accountsRes = await fetch(`${SITE_URL}/api/crawl-accounts`);

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { execSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 
@@ -8,29 +9,30 @@ import { createHash } from "node:crypto";
 // binary to the same on-disk location (scripts/.xtractor-bin) and share the
 // SHA-256-verified download + JSON parsing logic.
 
-// xtractor binary (pinned, SHA-256 verified against the GitHub release digest).
+// xtractor binary (latest release, SHA-256 verified against the GitHub release digest).
 // Source: https://github.com/afkarxyz/xtractor-binaries (MIT).
 // The extractor is a PyInstaller binary; the CLI contract below mirrors
 // https://github.com/afkarxyz/Twitter-X-Media-Batch-Downloader backend/twitter.go
-const XTRACTOR_VERSION = "v1.1";
-const XTRACTOR_ASSETS = {
+const XTRACTOR_RELEASE_URL = "https://api.github.com/repos/afkarxyz/xtractor-binaries/releases/latest";
+const DEFAULT_XTRACTOR_VERSION = "v1.2";
+const DEFAULT_XTRACTOR_ASSETS = {
   linux: {
-    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/linux-amd64.zip",
-    sha256: "6361f46860e08ebc78c86a92e23cb43030169f52daa6e7b026f5c15dcc3357e7",
+    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/linux-amd64.zip",
+    sha256: "970f7174cf5d5ecd744af9a63920767ad83d74df881cf441158cc90c7d73c5ca",
   },
   darwin: {
     arm64: {
-      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/macos-arm64.zip",
-      sha256: "a733229ef72050dbe1f5942d9a56180c50d3466edf64cbfb0d8c091f0874fb39",
+      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/macos-arm64.zip",
+      sha256: "90461291e9d7d178807a827d94195e2b518b39fc39fa11eb6fb1761b9b6a34c7",
     },
     amd64: {
-      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/macos-amd64.zip",
-      sha256: "57f82c3ac4926c61d8e8d0d9ebc7d6d6baae2304f80f2a9caea81773447742cc",
+      url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/macos-amd64.zip",
+      sha256: "26c556f4fe22cf0ecf9b4e570b10522adcccd49eb293d882df3687df49974e05",
     },
   },
   win32: {
-    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.1/windows-amd64.zip",
-    sha256: "240dfae5fdefb63a0d4fc6e907a1f5a5377c85545fa2a69c80276ffa79999368",
+    url: "https://github.com/afkarxyz/xtractor-binaries/releases/download/v1.2/windows-amd64.zip",
+    sha256: "6380719e89da597d3fc0bb84c1c378509127fd9b2cfd5236ae58fb55aa63b446",
   },
 };
 
@@ -46,14 +48,43 @@ const XTRACTOR_VERSION_PATH = path.join(BIN_DIR, "xtractor-version.json");
 // Binary management
 // ---------------------------------------------------------------------------
 
-function pickAsset() {
-  if (process.platform === "linux") return XTRACTOR_ASSETS.linux;
-  if (process.platform === "win32") return XTRACTOR_ASSETS.win32;
-  if (process.platform === "darwin") {
-    const arch = process.arch === "arm64" ? "arm64" : "amd64";
-    return XTRACTOR_ASSETS.darwin[arch];
+function xtractorAssetName(platform = process.platform, arch = process.arch) {
+  const archName = arch === "arm64" ? "arm64" : "amd64";
+  if (platform === "linux") return `linux-${archName}.zip`;
+  if (platform === "win32") return `windows-${archName}.zip`;
+  if (platform === "darwin") return `macos-${archName}.zip`;
+  throw new Error(`unsupported platform for xtractor: ${platform}`);
+}
+
+function pickDefaultAsset(platform = process.platform, arch = process.arch) {
+  if (platform === "linux") return DEFAULT_XTRACTOR_ASSETS.linux;
+  if (platform === "win32") return DEFAULT_XTRACTOR_ASSETS.win32;
+  if (platform === "darwin") {
+    const archName = arch === "arm64" ? "arm64" : "amd64";
+    return DEFAULT_XTRACTOR_ASSETS.darwin[archName];
   }
-  throw new Error(`unsupported platform for xtractor: ${process.platform}`);
+  throw new Error(`unsupported platform for xtractor: ${platform}`);
+}
+
+async function resolveXtractorAsset(fetchImpl = fetch, platform = process.platform, arch = process.arch) {
+  try {
+    const res = await fetchImpl(XTRACTOR_RELEASE_URL, {
+      headers: { "User-Agent": "magical-brahmagupta-crawler" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const release = await res.json();
+    const name = xtractorAssetName(platform, arch);
+    const releaseAsset = release.assets?.find((asset) => asset.name === name);
+    const sha256 = releaseAsset?.digest?.replace(/^sha256:/, "");
+    if (!release.tag_name || !releaseAsset?.browser_download_url || !sha256) {
+      throw new Error(`latest xtractor release is missing ${name}`);
+    }
+    return { version: release.tag_name, url: releaseAsset.browser_download_url, sha256 };
+  } catch (err) {
+    if (fetchImpl !== fetch) throw err;
+    console.warn(`Could not resolve latest xtractor release (${err.message}); using ${DEFAULT_XTRACTOR_VERSION}.`);
+    return { version: DEFAULT_XTRACTOR_VERSION, ...pickDefaultAsset(platform, arch) };
+  }
 }
 
 function sha256File(filePath) {
@@ -112,19 +143,19 @@ function findExtractedBinary(dir) {
 }
 
 async function ensureXtractor() {
-  if (fs.existsSync(XTRACTOR_PATH) && readInstalledVersion() === XTRACTOR_VERSION) {
+  const asset = await resolveXtractorAsset();
+  if (fs.existsSync(XTRACTOR_PATH) && readInstalledVersion() === asset.version) {
     if (process.platform !== "win32") {
       try { fs.chmodSync(XTRACTOR_PATH, 0o755); } catch { /* ignore */ }
     }
-    console.log(`xtractor ${XTRACTOR_VERSION} already installed at ${XTRACTOR_PATH}`);
-    return;
+    console.log(`xtractor ${asset.version} already installed at ${XTRACTOR_PATH}`);
+    return asset;
   }
 
-  const asset = pickAsset();
   fs.mkdirSync(BIN_DIR, { recursive: true });
   const zipPath = path.join(BIN_DIR, "xtractor.zip");
 
-  console.log(`Downloading xtractor ${XTRACTOR_VERSION}…`);
+  console.log(`Downloading xtractor ${asset.version}...`);
   const res = await fetch(asset.url);
   if (!res.ok) throw new Error(`failed to download xtractor: HTTP ${res.status}`);
   fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
@@ -149,8 +180,9 @@ async function ensureXtractor() {
 
   fs.rmSync(extractDir, { recursive: true, force: true });
   fs.unlinkSync(zipPath);
-  writeInstalledVersion(XTRACTOR_VERSION);
+  writeInstalledVersion(asset.version);
   console.log(`  Installed to ${XTRACTOR_PATH}`);
+  return asset;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,4 +349,9 @@ async function extractAllMedia(username, authToken, {
   return items;
 }
 
-export { XTRACTOR_VERSION, XTRACTOR_PATH, ensureXtractor, runXtractor, extractAllMedia };
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv[2] === "--print-version") {
+  const asset = await resolveXtractorAsset();
+  console.log(asset.version);
+}
+
+export { DEFAULT_XTRACTOR_VERSION as XTRACTOR_VERSION, XTRACTOR_PATH, ensureXtractor, runXtractor, extractAllMedia, resolveXtractorAsset };

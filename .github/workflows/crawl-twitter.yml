@@ -31,14 +31,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache xtractor binary
-        uses: actions/cache@v4
-        with:
-          path: scripts/.xtractor-bin
-          key: xtractor-bin-v1.1-${{ github.run_id }}
-          restore-keys: |
-            xtractor-bin-v1.1-
-
       - name: Cache xtractor dedup archive
         uses: actions/cache@v4
         with:
@@ -57,6 +49,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Resolve xtractor version
+        id: xtractor_version
+        run: echo "version=$(node scripts/xtractor-lib.mjs --print-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache xtractor binary
+        uses: actions/cache@v4
+        with:
+          path: scripts/.xtractor-bin
+          key: xtractor-bin-${{ steps.xtractor_version.outputs.version }}-${{ github.run_id }}
+          restore-keys: |
+            xtractor-bin-${{ steps.xtractor_version.outputs.version }}-
 
       - name: Install Pillow
         if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
