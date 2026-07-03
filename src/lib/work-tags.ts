@@ -12,20 +12,21 @@ export interface WorkTagGroup {
 export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   {
     work: '蔚藍檔案',
-    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아卡池', '블루아卡池', '키보托스', '키보토斯', '키보토斯', '키보토스'],
+    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아카', '블루아카이브', '키보토스'],
     characters: [
       { tag: '龍華妃咲', keywords: ['龍華妃咲', '龙华妃咲', '妃咲', 'kisaki', 'キサキ', '竜華キサキ'] },
       { tag: '桐生桔梗', keywords: ['桐生桔梗', '桐生キキョウ', 'キキョウ', 'kikyou'] },
       { tag: '柚鳥夏', keywords: ['柚鳥夏', '柚鸟夏', '柚鳥ナツ', '柚鸟ナツ', 'natsu', 'ナツ'] },
       { tag: '小鳥遊星野', keywords: ['小鳥遊星野', '小鸟游星野', '星野', 'hoshino', 'takanashihoshino', 'ホシノ', '小鳥遊ホシノ'] },
       { tag: '聖園彌香', keywords: ['聖園彌香', '圣园未花', 'misonomika', 'mika', 'ミカ', '聖園ミカ'] },
-      { tag: '早瀬優香', keywords: ['早瀬優香', '早瀨優香', '早濑优香', '優香', '优香', '体操服优香', 'yuuka', 'ユウカ', '早瀬ユウ加', '早瀬ユウカ'] },
+      { tag: '早瀬優香', keywords: ['早瀬優香', '早瀨優香', '早濑优香', '優香', '优香', '体操服优香', 'yuuka', 'ユウカ', '早瀬ユウカ'] },
       { tag: '靜山マシロ', keywords: ['静山マシロ', '靜山マシロ', '静山真白', '靜山真白', 'mashiro', 'マシロ'] },
       { tag: '陸八魔亞瑠', keywords: ['陸八魔亞瑠', '陆八魔爱露', '陸八魔アル', 'アル', '아루', 'aru', '阿露'] },
       { tag: '杏山和紗', keywords: ['杏山和紗', '杏山和纱', '杏山カズサ', 'カズサ', 'kazusa', 'kyoyama kazusa'] },
       { tag: '下江小春', keywords: ['下江小春', '下江コハル', 'コハル', 'koharu', '小春'] },
       { tag: '才羽桃井', keywords: ['才羽桃井', '才羽モモイ', 'モモイ', 'momoi', '桃井'] },
       { tag: '伊落瑪麗', keywords: ['伊落瑪麗', '伊落玛丽', '伊落マリー', 'マリー', 'marie', '瑪麗', '玛丽'] },
+      { tag: '阿羅娜', keywords: ['阿羅娜', '阿罗娜', 'arona', 'アロナ'] },
     ],
   },
   {
@@ -46,11 +47,11 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     keywords: ['星穹鐵道', '星穹铁道', '崩壞星穹鐵道', '崩坏星穹铁道', '崩壊スターレイル', 'honkaistarrail', 'starrail', 'star rail', 'スターレイル'],
     characters: [
       { tag: '流螢', keywords: ['流螢', '流萤', 'firefly', 'ホタル'] },
-      { tag: '花火', keywords: ['花火', 'sparkle', 'ハナビ'] },
+      { tag: '花火', keywords: ['花火', '火花', 'sparkle', 'ハナビ'] },
       { tag: '風堇', keywords: ['風堇', '风堇', '雅辛忒絲', '雅辛忒丝', 'hyacine', 'hyacinthia', 'ヒアシンシア'] },
       { tag: '昔漣', keywords: ['昔漣', '昔涟', 'cyrene', 'キュレネ'] },
       { tag: '長夜月', keywords: ['長夜月', '长夜月', 'evernight', 'エバーナイト', 'ながよづき'] },
-      { tag: '銀狼', keywords: ['銀狼', '銀狼', '银狼', 'silver wolf', 'silverwolf', 'シルバーウルフ'] },
+      { tag: '銀狼', keywords: ['銀狼', '银狼', 'silver wolf', 'silverwolf', 'シルバーウルフ'] },
     ],
   },
   {
@@ -108,6 +109,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '十六夜咲夜', keywords: ['十六夜咲夜', '咲夜', 'sakuya', 'さくや', 'サクヤ'] },
       { tag: '博麗靈夢', keywords: ['博麗靈夢', '博丽灵梦', '靈夢', '灵梦', 'reimu', 'れいむ', 'レイム', '博麗霊夢', '霊夢'] },
       { tag: '古明地戀', keywords: ['古明地戀', '古明地恋', 'こいし', 'koishi', 'コイシ', '古明地こいし'] },
+      { tag: '鈴仙', keywords: ['鈴仙', '铃仙', 'reisen', 'reisen udongein inaba', '鈴仙・優曇華院・イナバ'] },
     ],
   },
   {
@@ -216,14 +218,71 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '森亞露露卡', keywords: ['森亞露露卡', '森亚露露卡', 'るるか', 'ルルカ', 'ruruka', 'moria ruruka', '森亜るるか', 'キュアアルカナ', 'アルカナシャドウ'] },
     ],
   },
+  {
+    work: '葬送的芙莉蓮',
+    keywords: ['葬送的芙莉蓮', '葬送的芙丽莲', 'frieren', '葬送のフリーレン'],
+    characters: [
+      { tag: '芙莉蓮', keywords: ['芙莉蓮', '芙丽莲', 'frieren', 'フリーレン'] },
+    ],
+  },
+  {
+    work: '無職轉生',
+    keywords: ['無職轉生', '无职转生', 'mushokutensei', 'mushoku tensei', '無職転生'],
+    characters: [
+      { tag: '洛琪希', keywords: ['洛琪希', 'roxy', 'roxy migurdia', 'ロキシー'] },
+    ],
+  },
+  {
+    work: '勝利女神：妮姬',
+    keywords: ['勝利女神：妮姬', '胜利女神：妮姬', '妮姬', 'nikke', '勝利の女神：nikke', '勝利の女神', 'メガニケ', 'ニケ'],
+    characters: [],
+  },
+  {
+    work: 'Maimai',
+    keywords: ['maimai', 'マイマイ'],
+    characters: [],
+  },
+  {
+    work: 'MiSide',
+    keywords: ['miside', 'ミサイド'],
+    characters: [],
+  },
+  {
+    work: '埃羅芒阿老師',
+    keywords: ['埃羅芒阿老師', '埃罗芒阿老师', 'eromanga sensei', 'エロマンガ先生'],
+    characters: [
+      { tag: '和泉紗霧', keywords: ['和泉紗霧', '和泉纱雾', 'sagiri', 'izumi sagiri', '和泉サギリ', 'サキリ', 'サギリ'] },
+    ],
+  },
+  {
+    work: '超かぐや姫',
+    keywords: ['超かぐや姫', 'chokaguyahime', 'cosmic princess kaguya', '超竹取物語'],
+    characters: [],
+  },
+  {
+    work: '孤獨搖滾',
+    keywords: ['孤獨搖滾', '孤独摇滚', 'bocchitherock', 'bocchi the rock', 'ぼっちざろっく', 'ぼっち・ざ・ろっく', 'ぼざろ'],
+    characters: [
+      { tag: '後藤一里', keywords: ['後藤一里', '后藤一里', '波奇', 'bocchi', 'hitori gotoh', 'gotoh hitori', '後藤ひとり', 'ぼっち'] },
+      { tag: '喜多郁代', keywords: ['喜多郁代', 'kita ikuyo', 'ikuyo', 'きたちゃん', 'キタちゃん'] },
+      { tag: '山田涼', keywords: ['山田涼', '山田凉', 'ryo yamada', 'yamada ryo', '山田リョウ', 'リョウ'] },
+      { tag: '伊地知虹夏', keywords: ['伊地知虹夏', 'nijika ijichi', 'ijichi nijika', 'にじか', 'ニジカ'] },
+    ],
+  },
+  {
+    work: '少女前線',
+    keywords: ['少女前線', '少女前线', 'girlsfrontline', 'girls frontline', 'ドールズフロントライン', 'ドルフロ'],
+    characters: [],
+  },
 ];
 
 export const WORK_TAGS = WORK_TAG_GROUPS.map((group) => group.work);
 
 export function applyWorkCharacterTags(autoTags: Set<string>, description: string): void {
+  const descLower = description.toLowerCase();
   for (const group of WORK_TAG_GROUPS) {
-    const matchedCharacters = group.characters.filter((character) => matchesAny(description, character.keywords));
-    if (matchedCharacters.length > 0 || matchesAny(description, group.keywords)) {
+    const matchedCharacters = group.characters.filter((character) => matchesAny(descLower, character.keywords));
+    if (matchedCharacters.length > 0 || matchesAny(descLower, group.keywords)) {
       autoTags.add(group.work);
     }
     for (const character of matchedCharacters) {
@@ -232,6 +291,6 @@ export function applyWorkCharacterTags(autoTags: Set<string>, description: strin
   }
 }
 
-function matchesAny(description: string, keywords: string[]): boolean {
-  return keywords.some((keyword) => description.includes(keyword.toLowerCase()));
+function matchesAny(descLower: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => descLower.includes(keyword.toLowerCase()));
 }
