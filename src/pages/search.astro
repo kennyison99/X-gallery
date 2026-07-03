@@ -27,7 +27,9 @@ const characterTagSet = new Set(WORK_TAG_GROUPS.flatMap(group => group.character
 const workGroups = WORK_TAG_GROUPS.filter(group =>
   tagNameSet.has(group.work) || group.characters.some(character => tagNameSet.has(character.tag))
 );
-const activeWorkGroup = WORK_TAG_GROUPS.find(group => group.work === filterWork) || null;
+const activeWorkGroup = WORK_TAG_GROUPS.find(group => group.work === filterWork) ||
+  WORK_TAG_GROUPS.find(group => group.characters.some(character => character.tag === filterTag)) ||
+  null;
 const allTags = tagsQuery.results
   .map((t: any) => t.name)
   .filter((name: string) =>
@@ -151,7 +153,7 @@ const formattedImages = images.map((img: any) => ({
           {allAuthors.length > 0 ? (
             allAuthors.map((item) => (
               <a 
-                href={`/search?author=${encodeURIComponent(item.author)}`} 
+                href={filterAuthor === item.author ? '/search' : `/search?author=${encodeURIComponent(item.author)}`} 
                 class={`author-badge ${filterAuthor === item.author ? 'active' : ''}`}
               >
                 @{item.author}
@@ -169,8 +171,8 @@ const formattedImages = images.map((img: any) => ({
           {workGroups.length > 0 ? (
             workGroups.map((group) => (
               <a
-                href={`/search?work=${encodeURIComponent(group.work)}`}
-                class={`tag-badge ${filterWork === group.work ? 'active' : ''}`}
+                href={filterWork === group.work ? '/search' : `/search?work=${encodeURIComponent(group.work)}`}
+                class={`tag-badge ${(filterWork === group.work || (!filterWork && group.characters.some(c => c.tag === filterTag))) ? 'active' : ''}`}
               >
                 {group.work}
               </a>
@@ -186,7 +188,7 @@ const formattedImages = images.map((img: any) => ({
             <div class="tag-badges">
               {activeWorkGroup.characters.map((character) => (
                 <a
-                  href={`/search?tag=${encodeURIComponent(character.tag)}`}
+                  href={filterTag === character.tag ? '/search' : `/search?tag=${encodeURIComponent(character.tag)}`}
                   class={`tag-badge character-badge ${filterTag === character.tag ? 'active' : ''}`}
                 >
                   #{character.tag}
@@ -203,7 +205,7 @@ const formattedImages = images.map((img: any) => ({
           {allTags.length > 0 ? (
             allTags.map((tag) => (
               <a 
-                href={`/search?tag=${encodeURIComponent(tag)}`} 
+                href={filterTag === tag ? '/search' : `/search?tag=${encodeURIComponent(tag)}`} 
                 class={`tag-badge ${filterTag === tag ? 'active' : ''}`}
               >
                 #{tag}
