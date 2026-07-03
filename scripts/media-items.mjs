@@ -20,3 +20,17 @@ export function dedupeMediaItems(items) {
     return true;
   });
 }
+
+export function latestPostSignature(items) {
+  const item = items.find((media) => media?.tweet_id);
+  if (!item) return null;
+  return {
+    postId: String(item.tweet_id),
+    date: item.date ? String(item.date) : "",
+  };
+}
+
+export function samePostSignature(a, b) {
+  if (!a || !b || a.postId !== b.postId) return false;
+  return !a.date || !b.date || a.date === b.date;
+}

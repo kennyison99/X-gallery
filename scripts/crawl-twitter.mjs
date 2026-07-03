@@ -4,7 +4,7 @@ import os from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
-import { dedupeMediaItems, mediaIdFromUrl } from "./media-items.mjs";
+import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, samePostSignature } from "./media-items.mjs";
 
 const execAsync = promisify(exec);
 
@@ -20,8 +20,7 @@ const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? "";
 const CRAWL_RUN_TYPE = process.env.CRAWL_RUN_TYPE === "manual" ? "manual" : "auto";
 
-// Archive: map of already-downloaded media content ids -> 1.
-// Keyed by the pbs.twimg.com media id so the same image is never re-downloaded.
+// Archive: downloaded media ids plus per-account latest post signatures.
 const ARCHIVE_PATH = path.resolve("scripts/.xtractor-archive.json");
 
 // Crawl tuning
@@ -161,21 +160,33 @@ function renderProgressLine(label, current, total) {
 
 // Extract media items for one account, paginating via cursor for full history.
 // Returns a flat array of media items: { url, tweet_id, date, type, content, ... }
-async function extractMediaForAccount(username, authToken, { all }) {
+async function extractMediaForAccount(username, authToken, { all, previousLatest }) {
   const url = `https://x.com/${username}/media`;
   // --type all returns photo + video + animated_gif so we can support videos
   // and convert animated_gif to animated WebP.
   const baseArgs = ["--type", "all", "--retweets", INCLUDE_RETWEETS ? "include" : "skip"];
   const items = [];
-  let cursor = "";
   let pages = 0;
 
-  if (!all) {
-    const resp = await runXtractor(url, authToken, [...baseArgs, "--limit", String(LATEST_LIMIT)]);
-    return resp.media ?? [];
+  const firstLimit = all ? ALL_PAGE_LIMIT : LATEST_LIMIT;
+  const firstResp = await runXtractor(url, authToken, [...baseArgs, "--limit", String(firstLimit)]);
+  const firstPageItems = firstResp.media ?? [];
+  const latest = latestPostSignature(firstPageItems);
+  if (samePostSignature(latest, previousLatest)) {
+    return { media: [], latest, skipped: true };
   }
 
-  while (pages < MAX_ALL_PAGES) {
+  if (!all) {
+    return { media: firstPageItems, latest, skipped: false };
+  }
+
+  items.push(...firstPageItems);
+  pages++;
+  let cursor = firstResp.cursor;
+  let completed = firstResp.completed === true || !cursor || firstPageItems.length === 0;
+  console.log(`  Extracted page ${pages}: +${firstPageItems.length} (total ${items.length})`);
+
+  while (!completed && pages < MAX_ALL_PAGES) {
     const args = [...baseArgs, "--limit", String(ALL_PAGE_LIMIT)];
     if (cursor) args.push("--cursor", cursor);
 
@@ -200,7 +211,7 @@ async function extractMediaForAccount(username, authToken, { all }) {
     cursor = resp.cursor;
     await sleep(PAGE_DELAY_MS);
   }
-  return items;
+  return { media: items, latest, skipped: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +230,24 @@ function saveArchive(archive) {
   const tmp = ARCHIVE_PATH + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(archive));
   fs.renameSync(tmp, ARCHIVE_PATH);
+}
+
+function accountArchiveKey(username) {
+  return username.toLowerCase();
+}
+
+function getAccountLatest(archive, username) {
+  return archive.__accounts?.[accountArchiveKey(username)]?.latest ?? null;
+}
+
+function setAccountLatest(archive, username, latest) {
+  if (!latest) return;
+  archive.__accounts ??= {};
+  archive.__accounts[accountArchiveKey(username)] = { latest };
+}
+
+function countArchivedMedia(archive) {
+  return Object.values(archive).filter((value) => value === 1).length;
 }
 
 // File extension for a media URL, using ?format= when present
@@ -365,7 +394,7 @@ async function main() {
   }
 
   const archive = loadArchive();
-  console.log(`Archive has ${Object.keys(archive).length} known media item(s).\n`);
+  console.log(`Archive has ${countArchivedMedia(archive)} known media item(s).\n`);
 
   let totalAccountsProcessed = 0;
   let totalImagesDownloaded = 0;
@@ -391,9 +420,18 @@ async function main() {
     try {
       // 1) Extract media URLs + metadata via xtractor ---------------------
       console.log(`Extracting media via xtractor (${crawlMode})…`);
+      const previousLatest = getAccountLatest(archive, username);
       let mediaItems = [];
+      let latest = null;
       try {
-        mediaItems = await extractMediaForAccount(username, authToken, { all: isCrawlAll });
+        const extracted = await extractMediaForAccount(username, authToken, { all: isCrawlAll, previousLatest });
+        mediaItems = extracted.media;
+        latest = extracted.latest;
+        if (extracted.skipped) {
+          console.log(`  Latest post unchanged (${latest.postId}${latest.date ? ` @ ${latest.date}` : ""}); skipping @${username}.`);
+          await reportCrawlComplete(username, crawlMode, 0);
+          continue;
+        }
       } catch (extErr) {
         console.error(`  ✗ xtractor failed for @${username}: ${extErr.message}`);
         await reportCrawlComplete(username, crawlMode, 0);
@@ -418,6 +456,8 @@ async function main() {
 
       if (mediaItems.length === 0) {
         console.log(`  No new media to process.`);
+        setAccountLatest(archive, username, latest);
+        saveArchive(archive);
         await reportCrawlComplete(username, crawlMode, 0);
         continue;
       }
@@ -589,6 +629,8 @@ async function main() {
       }
 
       // 6) Report this account's crawl result ---------------------------
+      setAccountLatest(archive, username, latest);
+      saveArchive(archive);
       await reportCrawlComplete(username, crawlMode, accountImagesUploaded);
       console.log(`  Reported crawl-complete: ${crawlMode} mode, +${accountImagesUploaded} new image(s).`);
     } catch (err) {
