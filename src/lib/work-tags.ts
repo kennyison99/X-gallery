@@ -12,17 +12,20 @@ export interface WorkTagGroup {
 export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   {
     work: '蔚藍檔案',
-    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아카', '블루아카이브', '키보토스'],
+    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아卡池', '블루아卡池', '키보托스', '키보토斯', '키보토斯', '키보토스'],
     characters: [
       { tag: '龍華妃咲', keywords: ['龍華妃咲', '龙华妃咲', '妃咲', 'kisaki', 'キサキ', '竜華キサキ'] },
       { tag: '桐生桔梗', keywords: ['桐生桔梗', '桐生キキョウ', 'キキョウ', 'kikyou'] },
       { tag: '柚鳥夏', keywords: ['柚鳥夏', '柚鸟夏', '柚鳥ナツ', '柚鸟ナツ', 'natsu', 'ナツ'] },
       { tag: '小鳥遊星野', keywords: ['小鳥遊星野', '小鸟游星野', '星野', 'hoshino', 'takanashihoshino', 'ホシノ', '小鳥遊ホシノ'] },
       { tag: '聖園彌香', keywords: ['聖園彌香', '圣园未花', 'misonomika', 'mika', 'ミカ', '聖園ミカ'] },
-      { tag: '早瀬優香', keywords: ['早瀬優香', '早瀨優香', '早濑优香', '優香', '优香', '体操服优香', 'yuuka', 'ユウカ', '早瀬ユウカ'] },
+      { tag: '早瀬優香', keywords: ['早瀬優香', '早瀨優香', '早濑优香', '優香', '优香', '体操服优香', 'yuuka', 'ユウカ', '早瀬ユウ加', '早瀬ユウカ'] },
       { tag: '靜山マシロ', keywords: ['静山マシロ', '靜山マシロ', '静山真白', '靜山真白', 'mashiro', 'マシロ'] },
       { tag: '陸八魔亞瑠', keywords: ['陸八魔亞瑠', '陆八魔爱露', '陸八魔アル', 'アル', '아루', 'aru', '阿露'] },
       { tag: '杏山和紗', keywords: ['杏山和紗', '杏山和纱', '杏山カズサ', 'カズサ', 'kazusa', 'kyoyama kazusa'] },
+      { tag: '下江小春', keywords: ['下江小春', '下江コハル', 'コハル', 'koharu', '小春'] },
+      { tag: '才羽桃井', keywords: ['才羽桃井', '才羽モモイ', 'モモイ', 'momoi', '桃井'] },
+      { tag: '伊落瑪麗', keywords: ['伊落瑪麗', '伊落玛丽', '伊落マリー', 'マリー', 'marie', '瑪麗', '玛丽'] },
     ],
   },
   {
@@ -35,6 +38,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '能天使', keywords: ['能天使', 'exusiai', 'エクシア'] },
       { tag: '德克薩斯', keywords: ['德克薩斯', '德克萨斯', 'texas', 'テキサス'] },
       { tag: '阿米婭', keywords: ['阿米婭', '阿米娅', 'amiya', 'アーミヤ'] },
+      { tag: '霍爾海雅', keywords: ['霍爾海雅', '霍尔海雅', 'ho\'olheyak', 'hoolheyak', 'ホルハイヤ'] },
     ],
   },
   {
@@ -46,7 +50,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '風堇', keywords: ['風堇', '风堇', '雅辛忒絲', '雅辛忒丝', 'hyacine', 'hyacinthia', 'ヒアシンシア'] },
       { tag: '昔漣', keywords: ['昔漣', '昔涟', 'cyrene', 'キュレネ'] },
       { tag: '長夜月', keywords: ['長夜月', '长夜月', 'evernight', 'エバーナイト', 'ながよづき'] },
-      { tag: '銀狼', keywords: ['銀狼', '银狼', 'silver wolf', 'silverwolf', 'シルバーウルフ'] },
+      { tag: '銀狼', keywords: ['銀狼', '銀狼', '银狼', 'silver wolf', 'silverwolf', 'シルバーウルフ'] },
     ],
   },
   {
@@ -81,10 +85,11 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   },
   {
     work: 'MyGO',
-    keywords: ['mygo', '豐川祥子', '丰川祥子', '若葉睦', '若叶睦'],
+    keywords: ['mygo', '豐川祥子', '丰川祥子', '若葉睦', '若叶睦', 'avemujica'],
     characters: [
       { tag: '豐川祥子', keywords: ['豐川祥子', '丰川祥子', '祥子', 'sakiko', 'さきこ', 'サキコ', '豊川祥子'] },
       { tag: '若葉睦', keywords: ['若葉睦', '若叶睦', '睦ちゃん', 'mutsumi', 'むつみ', 'ムツミ'] },
+      { tag: '千早愛音', keywords: ['千早愛音', '千早爱音', 'anon', 'chihaya anon', 'あのん', 'アノン', '愛音', '爱音'] },
     ],
   },
   {
@@ -93,6 +98,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     characters: [
       { tag: '綾波', keywords: ['綾波', '绫波', 'ayanami', 'アヤナミ'] },
       { tag: '埃塞克斯', keywords: ['埃塞克斯', 'essex', 'エセックス'] },
+      { tag: '拉菲', keywords: ['拉菲', 'laffey', 'ラフィー'] },
     ],
   },
   {
@@ -113,7 +119,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   },
   {
     work: '魔女裁判',
-    keywords: ['魔法少女ノ魔女裁判', '魔女裁判'],
+    keywords: ['魔法少女ノ魔女裁判', '魔女裁判', 'まのさば', 'まのさば二次創作'],
     characters: [
       { tag: '橘雪莉', keywords: ['橘雪莉', '橘シェリー', 'sherry', 'tachibana sherry'] },
       { tag: '櫻羽艾瑪', keywords: ['櫻羽艾瑪', '樱羽艾玛', '桜羽エマ', 'sakuraba ema', 'ema'] },
@@ -146,7 +152,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     characters: [
       { tag: '佩麗卡', keywords: ['佩麗卡', '佩丽卡', 'perlica', 'ペリカ'] },
       { tag: '陳千語', keywords: ['陳千語', '陈千语', 'chen qianyu', 'qianyu', 'チェン・センユー', 'チェン センユー'] },
-      { tag: '伊馮', keywords: ['伊馮', '伊风', 'yvonne', 'イヴォン'] },
+      { tag: '伊馮', keywords: ['伊馮', '伊风', 'yvonne', 'イヴォン', 'イヴォンヌ'] },
     ],
   },
   {
@@ -162,14 +168,17 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     ],
   },
   {
-    work: 'Hololive',
-    keywords: ['hololive', 'ホロライブ', 'ホロ'],
+    work: 'VTuber',
+    keywords: ['vtuber', 'virtual youtuber', 'バーチャルyoutuber', 'hololive', 'ホロライブ', 'ホロ'],
     characters: [
       { tag: 'Gawr Gura', keywords: ['gawr gura', 'gura', 'がうるぐら', 'がうる・ぐら', '古拉'] },
       { tag: '星街彗星', keywords: ['星街彗星', '星街すいせい', 'suisei', 'hoshimachi suisei'] },
       { tag: '兔田佩克拉', keywords: ['兔田佩克拉', '兔田佩克菈', '兔田佩科拉', '兎田ぺこら', 'pekora', 'usada pekora'] },
       { tag: '寶鐘瑪琳', keywords: ['寶鐘瑪琳', '宝钟 marine', '宝钟玛琳', '宝钟マリン', '宝鐘マリン', 'marine', 'houshou marine'] },
       { tag: '湊阿庫婭', keywords: ['湊阿庫婭', '凑阿库娅', 'minato aqua', 'aqua', '湊あくあ', 'あくあ'] },
+      { tag: '永雛塔菲', keywords: ['永雛塔菲', '永雏塔菲', 'taffy', 'タフィ'] },
+      { tag: '東雪蓮', keywords: ['東雪蓮', '东雪莲', 'azuma ren', 'アズマレン'] },
+      { tag: '時雨羽衣', keywords: ['時雨羽衣', '时雨羽衣', 'shigure ui', 'しぐれうい', 'ういちゃん'] },
     ],
   },
   {
@@ -184,6 +193,27 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     keywords: ['vocaloid', '初音未來', '初音未来', 'miku', '初音ミク'],
     characters: [
       { tag: '初音未來', keywords: ['初音未來', '初音未来', 'miku', 'hatsune miku', '初音ミク'] },
+    ],
+  },
+  {
+    work: '世界計畫',
+    keywords: ['世界計畫', '世界计划', 'proseka', 'project sekai', 'プロセカ'],
+    characters: [
+      { tag: '曉山瑞希', keywords: ['曉山瑞希', '晓山瑞希', 'akiyama mizuki', 'mizuki', '暁山瑞希', 'みずき'] },
+    ],
+  },
+  {
+    work: '魔女之旅',
+    keywords: ['魔女之旅', 'majo no tabitabi', 'wandering witch', '魔女の旅々'],
+    characters: [
+      { tag: '伊蕾娜', keywords: ['伊蕾娜', 'elaina', 'イレイナ'] },
+    ],
+  },
+  {
+    work: '名偵探光之美少女',
+    keywords: ['名偵探光之美少女', '名侦探光之美少女', '名探偵プリキュア', '名探偵ぷりきゅあ'],
+    characters: [
+      { tag: '森亞露露卡', keywords: ['森亞露露卡', '森亚露露卡', 'るるか', 'ルルカ', 'ruruka', 'moria ruruka', '森亜るるか', 'キュアアルカナ', 'アルカナシャドウ'] },
     ],
   },
 ];
