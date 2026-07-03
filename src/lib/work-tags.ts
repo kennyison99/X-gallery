@@ -1,18 +1,18 @@
 export interface WorkCharacterTag {
   tag: string;
-  keywords: string[];
+  keywords: (string | RegExp)[];
 }
 
 export interface WorkTagGroup {
   work: string;
-  keywords: string[];
+  keywords: (string | RegExp)[];
   characters: WorkCharacterTag[];
 }
 
 export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   {
     work: '蔚藍檔案',
-    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아卡池', '블루아卡池', '키보토스'],
+    keywords: ['bluearchive', 'blue archive', 'bulearchive', 'bluearhcive', 'bluearchieve', '蔚藍檔案', '蔚蓝档案', '碧藍檔案', '碧蓝档案', 'ブルアカ', 'ブルーアーカイブ', '블루아카', '블루아카이브', '키보토스'],
     characters: [
       { tag: '龍華妃咲', keywords: ['龍華妃咲', '龙华妃咲', '妃咲', 'kisaki', 'キサキ', '竜華キサキ'] },
       { tag: '桐生桔梗', keywords: ['桐生桔梗', '桐生キキョウ', 'キキョウ', 'kikyou'] },
@@ -30,17 +30,29 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '天童愛麗絲', keywords: ['天童愛麗絲', '天童爱丽丝', 'アリス', 'alice', 'tendou alice', 'テンドウアリス'] },
       { tag: '普拉娜', keywords: ['普拉娜', 'プラナ', 'prana'] },
       { tag: '砂狼白子', keywords: ['砂狼白子', '白子', 'シロコ', 'shiroko', 'sunaookami shiroko'] },
+      { tag: '一之瀨明日奈', keywords: ['一之瀨明日奈', '一之濑明日奈', 'ichinose asuna', '一之瀬アスナ'] },
+      { tag: '橘光', keywords: ['橘光', 'hikari', 'ヒカリ'] },
+      { tag: '黑見芹香', keywords: ['黑見芹香', '黑见芹香', '芹香', 'serika', 'セリカ', '黒見セリカ'] },
+    ],
+  },
+  {
+    work: '明日方舟：終末地',
+    keywords: ['明日方舟：終末地', '明日方舟终末地', 'endfield', /arknights[:\s-]*endfield/i, 'エンドフィールド', 'arknightsendfield', /アークナイツ[\sー・-]*エンドフィールド/i],
+    characters: [
+      { tag: '佩麗卡', keywords: ['佩麗卡', '佩丽卡', 'perlica', 'ペリカ'] },
+      { tag: '陳千語', keywords: ['陳千語', '陈千语', 'chen qianyu', 'qianyu', 'チェン・センユー', 'チェン センユー'] },
+      { tag: '伊馮', keywords: ['伊馮', '伊风', 'yvonne', 'イヴォン', 'イヴォンヌ'] },
     ],
   },
   {
     work: '明日方舟',
-    keywords: ['明日方舟', 'arknights', 'アークナイツ'],
+    keywords: [/明日方舟(?!：?終末地|：?终末地|之?终末地)/i, /arknights(?![:\s-]*endfield)/i, /アークナイツ(?![\sー・-]*エンドフィールド)/i],
     characters: [
       { tag: '阿爾圖羅', keywords: ['阿爾圖羅', '阿尔图罗', '塑心', 'virtuosa', 'ヴィルトゥオーサ'] },
       { tag: '普瑞賽斯', keywords: ['普瑞賽斯', '普瑞赛斯', 'priestess', 'プリースティス'] },
       { tag: '艾雅法拉', keywords: ['艾雅法拉', 'eyjafjalla', 'エイヤフィヤトラ'] },
       { tag: '能天使', keywords: ['能天使', 'exusiai', 'エクシア', '新约能天使'] },
-      { tag: '德克薩斯', keywords: ['德克薩斯', '德克萨斯', 'texas', 'テキサス', '缄默德克萨斯', '緘默德克薩斯'] },
+      { tag: '德克薩斯', keywords: ['德克薩斯', '德克萨斯', 'texas', 'テキサス', '緘默德克薩斯', '缄默德克萨斯'] },
       { tag: '阿米婭', keywords: ['阿米婭', '阿米娅', 'amiya', 'アーミヤ'] },
       { tag: '霍爾海雅', keywords: ['霍爾海雅', '霍尔海雅', 'ho\'olheyak', 'hoolheyak', 'ホルハイヤ'] },
       { tag: '羽毛筆', keywords: ['羽毛筆', '羽毛笔', 'la pluma', 'lapluma', 'ラ・プーマ', 'ラプーマ'] },
@@ -60,6 +72,8 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '昔漣', keywords: ['昔漣', '昔涟', 'cyrene', 'キュレネ'] },
       { tag: '長夜月', keywords: ['長夜月', '长夜月', 'evernight', 'エバーナイト', 'ながよづき'] },
       { tag: '銀狼', keywords: ['銀狼', '银狼', 'silver wolf', 'silverwolf', 'シルバーウルフ'] },
+      { tag: '賽飛兒', keywords: ['賽飛兒', '赛飞儿', 'cipher', 'サフェル'] },
+      { tag: '遐蝶', keywords: ['遐蝶', 'castorice', 'キャストリス'] },
     ],
   },
   {
@@ -81,6 +95,7 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     characters: [
       { tag: '儀玄', keywords: ['儀玄', '仪玄', 'yixuan', 'イーシェン'] },
       { tag: '千夏', keywords: ['千夏', 'chinatsu', 'ちなつ', 'チナツ', 'sunna'] },
+      { tag: '星見雅', keywords: ['星見雅', '星见雅', 'miyabi', 'hoshimi miyabi', 'ほしみ みやび', 'みやび', 'ミヤビ'] },
     ],
   },
   {
@@ -95,6 +110,11 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '八重神子', keywords: ['八重神子', 'yae miko', 'yaemiko', 'やえみこ', 'ヤエミコ'] },
       { tag: '刻晴', keywords: ['刻晴', 'keqing', 'コクセイ', 'こくせい', '각청'] },
       { tag: '千織', keywords: ['千織', '千织', 'chiori', 'ちおり', 'チオリ', '치오리'] },
+      { tag: '胡桃', keywords: ['胡桃', 'hu tao', 'hutao', 'フータオ'] },
+      { tag: '優菈', keywords: ['優菈', '优菈', 'eula', 'エウルア'] },
+      { tag: '菲謝爾', keywords: ['菲謝爾', '菲谢尔', 'fischl', 'フィッシュル'] },
+      { tag: '芙寧娜', keywords: ['芙寧娜', '芙宁娜', 'furina', 'フリーナ'] },
+      { tag: '申鶴', keywords: ['申鶴', '申鹤', 'shenhe', 'シェンヘ'] },
     ],
   },
   {
@@ -116,6 +136,8 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '尾張', keywords: ['尾張', '尾张', 'owari', 'オワリ', 'おわり'] },
       { tag: '能代', keywords: ['能代', 'noshiro', 'のしろ', 'ノシロ'] },
       { tag: '塔什干', keywords: ['塔什干', 'tashkent', 'タシュケント'] },
+      { tag: '帕薩迪納', keywords: ['帕薩迪納', '帕萨迪纳', 'pasadena', 'パサデナ'] },
+      { tag: '柴郡', keywords: ['柴郡', 'cheshire', 'チェシャー'] },
     ],
   },
   {
@@ -133,6 +155,9 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     keywords: ['fgo', 'fate', 'fate/grand order', 'fategrandorder', 'fate/stay night'],
     characters: [
       { tag: '阿斯托爾福', keywords: ['阿斯托爾福', '阿斯托尔福', '阿福', 'astolfo', 'アストルフォ'] },
+      { tag: '美遊', keywords: ['美遊', '美游', 'miyu', 'ミユ'] },
+      { tag: '伊莉雅', keywords: ['伊莉雅', 'ilyasviel', 'イリヤ'] },
+      { tag: '克洛伊', keywords: ['克洛伊', 'chloe', 'クロエ'] },
     ],
   },
   {
@@ -165,15 +190,6 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     ],
   },
   {
-    work: '明日方舟：終末地',
-    keywords: ['明日方舟：終末地', '明日方舟终末地', 'endfield', 'arknights: endfield', 'エンドフィールド'],
-    characters: [
-      { tag: '佩麗卡', keywords: ['佩麗卡', '佩丽卡', 'perlica', 'ペリカ'] },
-      { tag: '陳千語', keywords: ['陳千語', '陈千语', 'chen qianyu', 'qianyu', 'チェン・センユー', 'チェン センユー'] },
-      { tag: '伊馮', keywords: ['伊馮', '伊风', 'yvonne', 'イヴォン', 'イヴォンヌ'] },
-    ],
-  },
-  {
     work: '賽馬娘',
     keywords: ['賽馬娘', '赛马娘', 'umamusume', 'uma musume', 'ウマ娘', 'ウマ娘プリティーダービー'],
     characters: [
@@ -185,7 +201,16 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
       { tag: '米浴', keywords: ['米浴', 'rice shower', 'ライスシャワー'] },
       { tag: '小栗帽', keywords: ['小栗帽', 'oguri cap', 'オグリキャップ', 'オグリキャップ生誕祭2023'] },
       { tag: '玉藻十字', keywords: ['玉藻十字', 'tamamo cross', 'タマモクロス'] },
-      { tag: '泡泡糖步步', keywords: ['泡泡糖步步', 'bubble gum fellow', 'バブルガムフェロー'] },
+      { tag: '黃金旅程', keywords: ['黃金旅程', '黄金旅程', 'stay gold', 'staygold', 'ステイゴールド'] },
+    ],
+  },
+  {
+    work: '勝利女神：妮姬',
+    keywords: ['勝利女神：妮姬', '胜利女神：妮姬', '妮姬', 'nikke', '勝利の女神：nikke', '勝利の女神', 'メガニケ', 'ニケ', 'nikkecosplay'],
+    characters: [
+      { tag: '毒蛇', keywords: ['毒蛇', 'viper', 'バイパー', '바이퍼'] },
+      { tag: '愛麗絲', keywords: ['愛麗絲', '艾丽丝', 'alice', 'アリス'] },
+      { tag: '馬斯特', keywords: ['馬斯特', '马斯特', 'mast', 'マスト', '마스트'] },
     ],
   },
   {
@@ -247,17 +272,9 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
   },
   {
     work: '無職轉生',
-    keywords: ['無職轉生', '无职转生', 'mushokutensei', 'mushoku tensei', '無職轉生', '無職転生'],
+    keywords: ['無職轉生', '无职转生', 'mushokutensei', 'mushoku tensei', '無職轉生', '無職轉生', '無職転生'],
     characters: [
       { tag: '洛琪希', keywords: ['洛琪希', 'roxy', 'roxy migurdia', 'ロキシー'] },
-    ],
-  },
-  {
-    work: '勝利女神：妮姬',
-    keywords: ['勝利女神：妮姬', '胜利女神：妮姬', '妮姬', 'nikke', '勝利の女神：nikke', '勝利の女神', 'メガニケ', 'ニケ', 'nikkecosplay'],
-    characters: [
-      { tag: '毒蛇', keywords: ['毒蛇', 'viper', 'バイパー', '바이퍼'] },
-      { tag: '愛麗絲', keywords: ['愛麗絲', '艾丽丝', 'alice', 'アリス'] },
     ],
   },
   {
@@ -301,6 +318,59 @@ export const WORK_TAG_GROUPS: WorkTagGroup[] = [
     keywords: ['少女前線', '少女前线', 'girlsfrontline', 'girls frontline', 'ドールズフロントライン', 'ドルフロ', '소녀전선'],
     characters: [],
   },
+  {
+    work: '星之翼',
+    keywords: ['星之翼', 'starward', '星の翼', 'star wings', 'starwings'],
+    characters: [],
+  },
+  {
+    work: '白聖女與黑牧師',
+    keywords: ['白聖女與黑牧師', '白圣女与黑牧师', 'saint cecilia and pastor lawrence', '白聖女と黒牧師'],
+    characters: [],
+  },
+  {
+    work: 'Re:從零開始的異世界生活',
+    keywords: ['re:從零開始的異世界生活', 're:从零开始的异世界生活', 're:zero', 're:ゼロ', 'reゼロ'],
+    characters: [
+      { tag: '愛蜜莉雅', keywords: ['愛蜜莉雅', '爱蜜莉雅', 'emilia', 'エミリア'] },
+      { tag: '雷姆', keywords: ['雷姆', 'レム', 'rem'] },
+      { tag: '拉姆', keywords: ['拉姆', 'ラム', 'ram'] },
+    ],
+  },
+  {
+    work: '異環',
+    keywords: ['異環', '异环', 'neverness to everland', 'nte'],
+    characters: [],
+  },
+  {
+    work: '超異域公主連結 Re:Dive',
+    keywords: ['超異域公主連結', '超异域公主连结', '公主連結', '公主连结', 'princess connect', 'priconne', 'プリンセスコネクト'],
+    characters: [],
+  },
+  {
+    work: '為美好的世界獻上祝福！',
+    keywords: ['為美好的世界獻上祝福！', '为美好的世界献上祝福！', 'konosuba', 'この素晴らしい世界に祝福を', 'このすば'],
+    characters: [
+      { tag: '惠惠', keywords: ['惠惠', 'めぐみん', 'megumin'] },
+      { tag: '阿庫婭', keywords: ['阿庫婭', '阿库娅', 'アクア', 'aqua'] },
+      { tag: '達克妮絲', keywords: ['達克妮絲', '达克妮斯', 'ダクネス', 'darkness'] },
+    ],
+  },
+  {
+    work: '莉可麗絲',
+    keywords: ['莉可麗絲', '莉可丽丝', 'lycoris recoil', 'リコリス・リコイル', 'リコリコ'],
+    characters: [
+      { tag: '錦木千束', keywords: ['錦木千束', '锦木千束', '千束', 'chisato'] },
+      { tag: '井之上瀧奈', keywords: ['井之上瀧奈', '井之上泷奈', '瀧奈', '泷奈', 'takina'] },
+    ],
+  },
+  {
+    work: '刀劍神域',
+    keywords: ['刀劍神域', '刀剑神域', 'sword art online', 'sao', 'ソードアート・オンライン'],
+    characters: [
+      { tag: '結城明日奈', keywords: ['結城明日奈', '结城明日奈', '亞絲娜', '亚丝娜', 'asuna'] },
+    ],
+  },
 ];
 
 export const WORK_TAGS = WORK_TAG_GROUPS.map((group) => group.work);
@@ -318,10 +388,13 @@ export function applyWorkCharacterTags(autoTags: Set<string>, description: strin
   }
 }
 
-function matchesAny(descLower: string, keywords: string[]): boolean {
+function matchesAny(descLower: string, keywords: (string | RegExp)[]): boolean {
   return keywords.some((keyword) => {
+    if (keyword instanceof RegExp) {
+      return keyword.test(descLower);
+    }
     const kw = keyword.toLowerCase();
-    if (kw.length <= 3 && /^[a-z0-9]+$/i.test(kw)) {
+    if (/^[a-z0-9\s-]+$/i.test(kw)) {
       const regex = new RegExp(`\\b${kw}\\b`);
       return regex.test(descLower);
     }
