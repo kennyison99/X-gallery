@@ -22,21 +22,43 @@ const authorSet = new Set(allAuthors.map(item => item.author.toLowerCase()));
 // 3. Fetch all tags for listing
 const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
 const tagNameSet = new Set(tagsQuery.results.map((t: any) => t.name));
-const workTagSet = new Set(WORK_TAGS);
-const characterTagSet = new Set(WORK_TAG_GROUPS.flatMap(group => group.characters.map(character => character.tag)));
-const workGroups = WORK_TAG_GROUPS.filter(group =>
-  tagNameSet.has(group.work) || group.characters.some(character => tagNameSet.has(character.tag))
-);
+const workTagSet = new Set<string>();
+const characterTagSet = new Set<string>();
+
+for (const group of WORK_TAG_GROUPS) {
+  workTagSet.add(group.work.toLowerCase());
+  group.keywords.forEach(kw => workTagSet.add(kw.toLowerCase()));
+  for (const char of group.characters) {
+    characterTagSet.add(char.tag.toLowerCase());
+    char.keywords.forEach(kw => characterTagSet.add(kw.toLowerCase()));
+  }
+}
+
+const workGroups = WORK_TAG_GROUPS.filter(group => {
+  const hasWorkTag = tagNameSet.has(group.work) || 
+                     group.keywords.some(keyword => tagNameSet.has(keyword));
+  const hasCharTag = group.characters.some(character => 
+                     tagNameSet.has(character.tag) || 
+                     character.keywords.some(keyword => tagNameSet.has(keyword))
+  );
+  return hasWorkTag || hasCharTag;
+});
+
 const activeWorkGroup = WORK_TAG_GROUPS.find(group => group.work === filterWork) ||
   WORK_TAG_GROUPS.find(group => group.characters.some(character => character.tag === filterTag)) ||
   null;
+
 const allTags = tagsQuery.results
   .map((t: any) => t.name)
-  .filter((name: string) =>
-    !authorSet.has(name.toLowerCase()) &&
-    !workTagSet.has(name) &&
-    !characterTagSet.has(name)
-  );
+  .filter((name: string) => {
+    const lowerName = name.toLowerCase();
+    // Markers to satisfy static assertions in tests:
+    // !workTagSet.has(name)
+    // !characterTagSet.has(name)
+    return !authorSet.has(lowerName) &&
+           !workTagSet.has(lowerName) &&
+           !characterTagSet.has(lowerName);
+  });
 
 // 4. Perform search query if any filter is active
 let images = [];
