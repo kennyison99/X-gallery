@@ -29,18 +29,16 @@ const ALL_PAGE_LIMIT = 100;       // media items per page when paginating --all
 const MAX_ALL_PAGES = 80;         // safety cap on --all pagination (rate-limit guard)
 const PAGE_DELAY_MS = 800;        // pause between extraction pages
 const ACCOUNT_DELAY_MS = 2000;    // pause between accounts (rate-limit guard)
-const DOWNLOAD_CONCURRENCY = 10;  // parallel CDN downloads (pbs.twimg.com)
 const DOWNLOAD_RETRIES = 2;       // extra attempts after the first failure
-const CONVERT_CONCURRENCY = 4;    // parallel WebP conversions
-const UPLOAD_CONCURRENCY = 5;     // parallel group uploads
+const PIPELINE_CONCURRENCY = 4;   // tweet groups processed in parallel
+                                   // (each group: download → convert → upload)
+                                   // Within a group, files run via Promise.all
+                                   // (a tweet has at most 4 media, no cap needed).
 const INCLUDE_RETWEETS = true;    // match previous gallery-dl /media behaviour
 
 // Media types we accept from xtractor. photo + animated_gif are converted to
 // WebP (animated_gif via ffmpeg); video is kept as mp4.
 const ACCEPTED_TYPES = new Set(["photo", "image", "video", "animated_gif", "gif"]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v"]);
-const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
-const MEDIA_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
 
 // MIME per extension, used when uploading so R2 stores a correct content-type.
 const MIME_BY_EXT = {
@@ -77,19 +75,7 @@ function parseCookieString(cookieStr) {
   return cookies;
 }
 
-function collectMediaFiles(dir) {
-  const results = [];
-  if (!fs.existsSync(dir)) return results;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...collectMediaFiles(full));
-    } else if (MEDIA_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-      results.push(full);
-    }
-  }
-  return results;
-}
+
 
 async function uploadImageGroup(filePaths, username, postUrl, description, createdAt, displayName = "") {
   const formData = new FormData();
@@ -155,6 +141,15 @@ function renderProgressLine(label, current, total) {
     const emptyWidth = barWidth - filledWidth;
     const bar = "█".repeat(filledWidth) + "░".repeat(emptyWidth);
     console.log(`  ${label}: [${bar}] ${percentage}% (${current}/${total})`);
+  }
+}
+
+function renderPipelineProgress(doneGroups, totalGroups, stats) {
+  renderProgressLine("Pipeline", doneGroups, totalGroups);
+  if (doneGroups === totalGroups) {
+    console.log(
+      `  Done: downloaded ${stats.downloaded}, processed ${stats.processed}, uploaded ${stats.uploaded}, skipped ${stats.skipped}, failed ${stats.failed}.`,
+    );
   }
 }
 
@@ -289,63 +284,131 @@ async function downloadFile(mediaUrl, outputPath) {
   fs.renameSync(tmp, outputPath);
 }
 
-// Worker pool. Each task: { url, outputPath, mediaId }
-// Updates the archive in-place for skipped/downloaded items.
-async function downloadMediaItems(tasks, archive, onProgress) {
-  let downloaded = 0;
-  let skipped = 0;
-  let failed = 0;
+async function downloadMediaTask(task, archive) {
+  if (archive[task.mediaId]) return { status: "skipped", task };
+  if (fs.existsSync(task.outputPath)) return { status: "downloaded", task };
+
+  for (let attempt = 1; attempt <= DOWNLOAD_RETRIES + 1; attempt++) {
+    try {
+      await downloadFile(task.url, task.outputPath);
+      return { status: "downloaded", task };
+    } catch (err) {
+      if (attempt <= DOWNLOAD_RETRIES) {
+        await sleep(attempt * 500);
+      } else {
+        console.error(`  ✗ ${task.tweetId} download failed: ${err.message}`);
+      }
+    }
+  }
+  return { status: "failed", task };
+}
+
+async function convertMediaFile(mediaPath, itemType) {
+  const ext = path.extname(mediaPath).toLowerCase();
+  const isGif = itemType === "gif" || itemType === "animated_gif";
+  const isVideo = itemType === "video";
+
+  if (isVideo || ext === ".webp") return mediaPath;
+
+  const webpPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
+  if (isGif) {
+    const cmd = `ffmpeg -y -i "${mediaPath}" -loop 0 -q:v 60 "${webpPath}"`;
+    await execAsync(cmd, { timeout: 60000 });
+  } else {
+    const convertCmd = `python -c "from PIL import Image; Image.open(r'''${mediaPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
+    await execAsync(convertCmd);
+  }
+  fs.unlinkSync(mediaPath);
+  return webpPath;
+}
+
+async function processTweetGroup({ key, tasks, username, metaByTweetId, accountNick, archive }) {
+  const stats = { downloaded: 0, skipped: 0, processed: 0, uploaded: 0, failed: 0 };
+  const downloadedTasks = [];
+
+  const downloadResults = await Promise.all(tasks.map((task) => downloadMediaTask(task, archive)));
+  for (const result of downloadResults) {
+    if (result.status === "downloaded") {
+      stats.downloaded++;
+      downloadedTasks.push(result.task);
+    } else if (result.status === "skipped") {
+      stats.skipped++;
+    } else {
+      stats.failed++;
+    }
+  }
+
+  if (downloadedTasks.length === 0) return stats;
+
+  // Use indexed assignment so file order matches the original tweet media order
+  // (Promise.all resolves all promises but .push() would insert in completion order).
+  const finalFiles = new Array(downloadedTasks.length);
+  await Promise.all(
+    downloadedTasks.map(async (task, idx) => {
+      const baseName = path.basename(task.outputPath);
+      const itemType = (task.item.type ?? "").toLowerCase();
+      try {
+        finalFiles[idx] = await convertMediaFile(task.outputPath, itemType);
+        stats.processed++;
+      } catch (err) {
+        console.error(`  ✗ ${key} processing failed for ${baseName}: ${err.message}`);
+        finalFiles[idx] = task.outputPath;
+        stats.failed++;
+      }
+    }),
+  );
+
+  try {
+    const isTweetId = /^\d+$/.test(key);
+    const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
+    const meta = isTweetId ? metaByTweetId.get(key) : null;
+    await uploadImageGroup(
+      finalFiles,
+      username,
+      postUrl,
+      meta?.description ?? "",
+      meta?.createdAt ?? "",
+      meta?.nick || accountNick,
+    );
+    stats.uploaded += finalFiles.length;
+    for (const task of downloadedTasks) {
+      archive[task.mediaId] = 1;
+    }
+    saveArchive(archive);
+  } catch (err) {
+    console.error(`  ✗ ${key} upload failed: ${err.message}`);
+    stats.failed++;
+  }
+
+  return stats;
+}
+
+async function processTweetGroups(groupEntries, options, onProgress) {
+  const totals = { downloaded: 0, skipped: 0, processed: 0, uploaded: 0, failed: 0 };
   let cursor = 0;
-  const total = tasks.length;
+  let doneGroups = 0;
 
   async function worker() {
     while (true) {
       const i = cursor++;
-      if (i >= total) break;
-      const task = tasks[i];
-
-      if (archive[task.mediaId]) {
-        skipped++;
-        onProgress(downloaded + skipped + failed);
-        continue;
-      }
-      if (fs.existsSync(task.outputPath)) {
-        archive[task.mediaId] = 1;
-        skipped++;
-        onProgress(downloaded + skipped + failed);
-        continue;
-      }
-
-      let ok = false;
-      for (let attempt = 1; attempt <= DOWNLOAD_RETRIES + 1; attempt++) {
-        try {
-          await downloadFile(task.url, task.outputPath);
-          ok = true;
-          break;
-        } catch (err) {
-          if (attempt <= DOWNLOAD_RETRIES) {
-            await sleep(attempt * 500);
-          } else {
-            console.error(`  ✗ Download failed: ${path.basename(task.outputPath)} — ${err.message}`);
-          }
-        }
-      }
-
-      if (ok) {
-        archive[task.mediaId] = 1;
-        downloaded++;
-      } else {
-        failed++;
-      }
-      onProgress(downloaded + skipped + failed);
+      if (i >= groupEntries.length) break;
+      const [key, tasks] = groupEntries[i];
+      const stats = await processTweetGroup({ key, tasks, ...options });
+      totals.downloaded += stats.downloaded;
+      totals.skipped += stats.skipped;
+      totals.processed += stats.processed;
+      totals.uploaded += stats.uploaded;
+      totals.failed += stats.failed;
+      doneGroups++;
+      onProgress(doneGroups, groupEntries.length, totals);
     }
   }
 
-  const numWorkers = Math.min(DOWNLOAD_CONCURRENCY, total);
-  if (numWorkers > 0) {
-    await Promise.all(Array.from({ length: numWorkers }, () => worker()));
+  const workers = Math.min(PIPELINE_CONCURRENCY, groupEntries.length);
+  if (workers > 0) {
+    await Promise.all(Array.from({ length: workers }, () => worker()));
   }
-  return { downloaded, skipped, failed };
+  return totals;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +438,7 @@ async function main() {
   }
 
   const xtractor = await ensureXtractor();
-  console.log(`xtractor        : ${xtractor.version} (concurrency ${DOWNLOAD_CONCURRENCY})`);
+  console.log(`xtractor        : ${xtractor.version} (pipeline concurrency ${PIPELINE_CONCURRENCY})`);
 
   console.log("Fetching account list…");
   const accountsRes = await fetch(`${SITE_URL}/api/crawl-accounts`);
@@ -472,104 +535,20 @@ async function main() {
         tweetOrder.get(tid).push(m);
       }
 
-      const tasks = [];
+      const groupTasks = new Map();
       for (const [tid, group] of tweetOrder) {
-        group.forEach((m, idx) => {
+        const tasks = group.map((m, idx) => {
           const nn = idx + 1;
           const ext = extForItem(m);
-          tasks.push({
+          return {
             url: m.url,
             mediaId: mediaIdFromUrl(m.url),
             tweetId: tid,
             outputPath: path.join(tempDir, `${tid}_${nn}${ext}`),
             item: m,
-          });
+          };
         });
-      }
-
-      // 3) Download in parallel ------------------------------------------
-      console.log(`Downloading ${tasks.length} file(s) (concurrency ${DOWNLOAD_CONCURRENCY}):`);
-      const { downloaded, skipped, failed } = await downloadMediaItems(
-        tasks,
-        archive,
-        (done) => renderProgressLine("Downloading", done, tasks.length),
-      );
-      console.log(`  Downloaded ${downloaded}, skipped ${skipped}, failed ${failed}.`);
-      saveArchive(archive);
-
-      // Map each downloaded file's basename to its xtractor media type so the
-      // conversion step can tell animated_gif (→ animated WebP) apart from
-      // regular video (→ keep mp4).
-      const typeByBasename = new Map();
-      for (const t of tasks) {
-        typeByBasename.set(path.basename(t.outputPath), (t.item.type ?? "").toLowerCase());
-      }
-
-      // 4) Convert media to final form -----------------------------------
-      //    photo (jpg/png)      -> WebP via Pillow
-      //    animated_gif (mp4)   -> animated WebP via ffmpeg
-      //    video (mp4)          -> kept as-is
-      //    already WebP         -> kept as-is
-      const rawFiles = collectMediaFiles(tempDir);
-      const finalFiles = [];
-      const totalToProcess = rawFiles.length;
-      if (totalToProcess > 0) {
-        console.log(`Processing media (photo→WebP, gif→animated WebP, video→mp4):`);
-      }
-
-      let processIndex = 0;
-      for (let i = 0; i < rawFiles.length; i += CONVERT_CONCURRENCY) {
-        const chunk = rawFiles.slice(i, i + CONVERT_CONCURRENCY);
-        await Promise.all(
-          chunk.map(async (mediaPath) => {
-            const ext = path.extname(mediaPath).toLowerCase();
-            const baseName = path.basename(mediaPath);
-            const itemType = typeByBasename.get(baseName) ?? "";
-            const isGif = itemType === "gif" || itemType === "animated_gif";
-            const isVideo = itemType === "video";
-
-            try {
-              if (isVideo) {
-                // Keep videos as-is (mp4).
-                finalFiles.push(mediaPath);
-              } else if (isGif) {
-                // animated_gif arrives as mp4 -> convert to animated WebP.
-                const webpPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
-                // -loop 0 = loop forever; -q:v is webp quality (0-100, lower = smaller).
-                const cmd = `ffmpeg -y -i "${mediaPath}" -loop 0 -q:v 60 "${webpPath}"`;
-                await execAsync(cmd, { timeout: 60000 });
-                fs.unlinkSync(mediaPath);
-                finalFiles.push(webpPath);
-              } else if (ext === ".webp") {
-                finalFiles.push(mediaPath);
-              } else {
-                // Photo (jpg/png) -> WebP via Pillow.
-                const webpPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
-                const convertCmd = `python -c "from PIL import Image; Image.open(r'''${mediaPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
-                await execAsync(convertCmd);
-                fs.unlinkSync(mediaPath);
-                finalFiles.push(webpPath);
-              }
-            } catch (convErr) {
-              console.error(`  ✗ Processing failed for ${baseName}: ${convErr.message}`);
-              finalFiles.push(mediaPath);
-            }
-            processIndex++;
-            renderProgressLine("Processing", processIndex, totalToProcess);
-          }),
-        );
-      }
-
-      totalImagesDownloaded += finalFiles.length;
-
-      // 5) Group by tweet id and upload ---------------------------------
-      const groups = {};
-      for (const imgPath of finalFiles) {
-        const baseName = path.basename(imgPath);
-        const match = baseName.match(/^(\d+)_\d+/);
-        const key = match ? match[1] : baseName;
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(imgPath);
+        groupTasks.set(tid, tasks);
       }
 
       // Build a tweetId -> metadata lookup from the xtractor response.
@@ -592,41 +571,18 @@ async function main() {
       }
       if (!accountNick) accountNick = username;
 
-      const groupEntries = Object.entries(groups);
-      const totalGroups = groupEntries.length;
-      if (totalGroups > 0) {
-        console.log(`Uploading image groups to Cloudflare:`);
-      }
+      // 3) Pipeline per tweet group: download -> convert -> upload.
+      const groupEntries = Array.from(groupTasks.entries());
+      console.log(`Processing ${groupEntries.length} tweet group(s) (pipeline concurrency ${PIPELINE_CONCURRENCY}):`);
+      const pipelineStats = await processTweetGroups(
+        groupEntries,
+        { username, metaByTweetId, accountNick, archive },
+        renderPipelineProgress,
+      );
 
-      let uploadIndex = 0;
-      for (let i = 0; i < groupEntries.length; i += UPLOAD_CONCURRENCY) {
-        const chunk = groupEntries.slice(i, i + UPLOAD_CONCURRENCY);
-        await Promise.all(
-          chunk.map(async ([key, filesInGroup]) => {
-            try {
-              const isTweetId = /^\d+$/.test(key);
-              const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
-              const meta = isTweetId ? metaByTweetId.get(key) : null;
-
-              await uploadImageGroup(
-                filesInGroup,
-                username,
-                postUrl,
-                meta?.description ?? "",
-                meta?.createdAt ?? "",
-                meta?.nick || accountNick,
-              );
-              totalImagesUploaded += filesInGroup.length;
-              accountImagesUploaded += filesInGroup.length;
-              uploadIndex++;
-              renderProgressLine("Uploading", uploadIndex, totalGroups);
-            } catch (uploadErr) {
-              console.error(`  ✗ Upload failed for group ${key}: ${uploadErr.message}`);
-              uploadIndex++;
-            }
-          }),
-        );
-      }
+      totalImagesDownloaded += pipelineStats.downloaded;
+      totalImagesUploaded += pipelineStats.uploaded;
+      accountImagesUploaded += pipelineStats.uploaded;
 
       // 6) Report this account's crawl result ---------------------------
       setAccountLatest(archive, username, latest);
