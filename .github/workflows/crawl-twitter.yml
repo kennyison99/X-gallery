@@ -68,7 +68,10 @@ jobs:
 
       - name: Set up FFmpeg
         if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
-        uses: federicocarboni/setup-ffmpeg@v3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version
 
       - name: Run Twitter crawl script
         if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
