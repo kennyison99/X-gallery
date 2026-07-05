@@ -34,6 +34,7 @@ const { accounts: crawlAccounts } = Astro.props;
                     <input type="checkbox" class="toggle-crawlall-cb" data-username={account.username} checked={account.crawl_all === 1} />
                     <span>爬取全部歷史圖片</span>
                   </label>
+                  <button class="btn rename-crawl-btn" data-username={account.username} style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">改名</button>
                   <button class="btn btn-danger remove-crawl-btn" data-username={account.username} style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">移除</button>
                 </div>
               </div>

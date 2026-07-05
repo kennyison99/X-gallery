@@ -18,3 +18,12 @@ test('crawler account API rejects case-insensitive duplicates before insert', ()
   assert.match(source, /'INSERT INTO crawl_accounts \(username\) VALUES \(\?\)'/);
   assert.doesNotMatch(source, /INSERT OR IGNORE INTO crawl_accounts/);
 });
+
+test('crawler account API can rename account handles and existing posts', () => {
+  const source = readFileSync(new URL('../src/pages/api/crawl-accounts.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /new_username/);
+  assert.match(source, /UPDATE crawl_accounts SET username = \?/);
+  assert.match(source, /UPDATE images/);
+  assert.match(source, /post_url = replace\(replace\(post_url/);
+});

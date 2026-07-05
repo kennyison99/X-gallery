@@ -34,3 +34,16 @@ export function samePostSignature(a, b) {
   if (!a || !b || a.postId !== b.postId) return false;
   return !a.date || !b.date || a.date === b.date;
 }
+
+function isNewerPost(item, previousLatest) {
+  if (!previousLatest?.postId || !item?.tweet_id) return true;
+  try {
+    return BigInt(String(item.tweet_id)) > BigInt(String(previousLatest.postId));
+  } catch {
+    return item.date && previousLatest.date ? String(item.date) > String(previousLatest.date) : true;
+  }
+}
+
+export function newerThanLatest(items, previousLatest) {
+  return previousLatest ? items.filter((item) => isNewerPost(item, previousLatest)) : items;
+}

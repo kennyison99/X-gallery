@@ -124,12 +124,63 @@ export const PUT: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
     const username = normalizeCrawlUsername(body.username);
+    const newUsername = body.new_username !== undefined ? normalizeCrawlUsername(body.new_username) : '';
     const enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : null;
     const crawlAll = body.crawl_all !== undefined ? (body.crawl_all ? 1 : 0) : null;
 
     if (!username) {
       return new Response(JSON.stringify({ error: '請輸入帳號名稱' }), {
         status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (newUsername) {
+      if (newUsername === username) {
+        return new Response(JSON.stringify({ success: true, username }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const duplicate = await env.DB.prepare(
+        'SELECT username FROM crawl_accounts WHERE lower(username) = ? LIMIT 1'
+      ).bind(newUsername).first<{ username: string }>();
+
+      if (duplicate) {
+        return new Response(JSON.stringify({
+          error: `@${duplicate.username} 已在爬蟲帳號列表中`,
+          duplicate: true,
+          username: duplicate.username
+        }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      await env.DB.prepare(
+        'UPDATE crawl_accounts SET username = ? WHERE lower(username) = ?'
+      ).bind(newUsername, username).run();
+
+      await env.DB.prepare(
+        `UPDATE images
+         SET author = ?,
+             author_url = ?,
+             post_url = replace(replace(post_url, ?, ?), ?, ?),
+             title = replace(title, ?, ?)
+         WHERE lower(author) = ?`
+      ).bind(
+        newUsername,
+        `https://x.com/${newUsername}`,
+        `https://x.com/${username}/status/`,
+        `https://x.com/${newUsername}/status/`,
+        `https://twitter.com/${username}/status/`,
+        `https://x.com/${newUsername}/status/`,
+        `@${username}`,
+        `@${newUsername}`,
+        username,
+      ).run();
+
+      return new Response(JSON.stringify({ success: true, username: newUsername }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }

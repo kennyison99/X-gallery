@@ -4,7 +4,7 @@ import os from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
-import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, samePostSignature } from "./media-items.mjs";
+import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, newerThanLatest, samePostSignature } from "./media-items.mjs";
 
 const execAsync = promisify(exec);
 
@@ -30,6 +30,7 @@ const MAX_ALL_PAGES = 80;         // safety cap on --all pagination (rate-limit 
 const PAGE_DELAY_MS = 800;        // pause between extraction pages
 const ACCOUNT_DELAY_MS = 2000;    // pause between accounts (rate-limit guard)
 const DOWNLOAD_RETRIES = 2;       // extra attempts after the first failure
+const DISCOVERY_CONCURRENCY = 3;  // latest-mode xtractor checks in parallel
 const PIPELINE_CONCURRENCY = 4;   // tweet groups processed in parallel
                                    // (each group: download → convert → upload)
                                    // Within a group, files run via Promise.all
@@ -172,7 +173,7 @@ async function extractMediaForAccount(username, authToken, { all, previousLatest
   }
 
   if (!all) {
-    return { media: firstPageItems, latest, skipped: false };
+    return { media: newerThanLatest(firstPageItems, previousLatest), latest, skipped: false };
   }
 
   items.push(...firstPageItems);
@@ -207,6 +208,44 @@ async function extractMediaForAccount(username, authToken, { all, previousLatest
     await sleep(PAGE_DELAY_MS);
   }
   return { media: items, latest, skipped: false };
+}
+
+function accountCrawlAll(account) {
+  return (
+    process.argv.includes("--all") ||
+    account.crawl_all === 1 ||
+    account.crawl_all === "1" ||
+    account.crawl_all === true
+  );
+}
+
+async function discoverLatestAccounts(accounts, authToken, archive) {
+  const results = new Map();
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= accounts.length) break;
+      const account = accounts[i];
+      const username = account.username;
+      try {
+        const previousLatest = getAccountLatest(archive, username);
+        results.set(username, await extractMediaForAccount(username, authToken, {
+          all: false,
+          previousLatest,
+        }));
+      } catch (err) {
+        results.set(username, { error: err });
+      }
+    }
+  }
+
+  const workers = Math.min(DISCOVERY_CONCURRENCY, accounts.length);
+  if (workers > 0) {
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -458,6 +497,13 @@ async function main() {
 
   const archive = loadArchive();
   console.log(`Archive has ${countArchivedMedia(archive)} known media item(s).\n`);
+  const latestAccounts = enabledAccounts.filter((account) => !accountCrawlAll(account));
+  const discoveredLatest = latestAccounts.length > 0
+    ? await discoverLatestAccounts(latestAccounts, authToken, archive)
+    : new Map();
+  if (latestAccounts.length > 0) {
+    console.log(`Pre-checked ${latestAccounts.length} latest-mode account(s) (concurrency ${DISCOVERY_CONCURRENCY}).\n`);
+  }
 
   let totalAccountsProcessed = 0;
   let totalImagesDownloaded = 0;
@@ -473,11 +519,7 @@ async function main() {
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `tw-${username}-`));
     let accountImagesUploaded = 0;
-    const isCrawlAll =
-      process.argv.includes("--all") ||
-      account.crawl_all === 1 ||
-      account.crawl_all === "1" ||
-      account.crawl_all === true;
+    const isCrawlAll = accountCrawlAll(account);
     const crawlMode = isCrawlAll ? "all" : "latest";
 
     try {
@@ -487,7 +529,11 @@ async function main() {
       let mediaItems = [];
       let latest = null;
       try {
-        const extracted = await extractMediaForAccount(username, authToken, { all: isCrawlAll, previousLatest });
+        const extracted = isCrawlAll
+          ? await extractMediaForAccount(username, authToken, { all: true, previousLatest })
+          : discoveredLatest.get(username);
+        if (!extracted) throw new Error("latest discovery result missing");
+        if (extracted?.error) throw extracted.error;
         mediaItems = extracted.media;
         latest = extracted.latest;
         if (extracted.skipped) {

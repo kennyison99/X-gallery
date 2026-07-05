@@ -801,6 +801,7 @@ try {
                 <input type="checkbox" class="toggle-crawlall-cb" data-username="${cleanUsername}" />
                 <span>爬取全部歷史圖片</span>
               </label>
+              <button class="btn rename-crawl-btn" data-username="${cleanUsername}" style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">改名</button>
               <button class="btn btn-danger remove-crawl-btn" data-username="${cleanUsername}" style="font-size: 0.8rem; padding: 0.25rem 0.5rem; margin-left: 0.5rem;">移除</button>
             </div>
           `;
@@ -808,6 +809,7 @@ try {
           
           // Attach remove handler
           item.querySelector('.remove-crawl-btn')?.addEventListener('click', handleRemoveCrawl);
+          item.querySelector('.rename-crawl-btn')?.addEventListener('click', handleRenameCrawl);
           // Attach settings change handlers
           item.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             cb.addEventListener('change', handleToggleCrawlSetting);
@@ -860,6 +862,42 @@ try {
     }
   }
 
+  async function handleRenameCrawl(this: HTMLElement) {
+    const username = this.getAttribute('data-username');
+    if (!username) return;
+
+    const nextUsername = normalizeCrawlUsernameInput(prompt(`新的 Twitter/X 帳號（目前 @${username}）`, username) || '');
+    if (!nextUsername || nextUsername === username) return;
+
+    (this as HTMLButtonElement).disabled = true;
+
+    try {
+      const res = await fetch('/api/crawl-accounts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, new_username: nextUsername })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        const cleanUsername = data.username || nextUsername;
+        const item = document.querySelector(`.crawl-account-item[data-username="${username}"]`);
+        item?.setAttribute('data-username', cleanUsername);
+        item?.querySelector('.crawl-account-name')?.replaceChildren(`@${cleanUsername}`);
+        const link = item?.querySelector('.crawl-account-link') as HTMLAnchorElement | null;
+        if (link) link.href = `https://x.com/${cleanUsername}`;
+        item?.querySelectorAll('[data-username]').forEach(el => el.setAttribute('data-username', cleanUsername));
+        showCrawlMessage(`已改名：@${username} → @${cleanUsername}`, 'success');
+      } else {
+        showCrawlMessage(data.error || '改名失敗', 'error');
+      }
+    } catch (err) {
+      showCrawlMessage('網絡錯誤，改名失敗', 'error');
+    } finally {
+      (this as HTMLButtonElement).disabled = false;
+    }
+  }
+
   async function handleRemoveCrawl(this: HTMLElement) {
     const username = this.getAttribute('data-username');
     if (!username) return;
@@ -904,6 +942,9 @@ try {
   // Attach remove handlers to existing buttons
   document.querySelectorAll('.remove-crawl-btn').forEach(btn => {
     btn.addEventListener('click', handleRemoveCrawl);
+  });
+  document.querySelectorAll('.rename-crawl-btn').forEach(btn => {
+    btn.addEventListener('click', handleRenameCrawl);
   });
 
   // =========== Admin List — Server-Side Pagination via AJAX ===========
