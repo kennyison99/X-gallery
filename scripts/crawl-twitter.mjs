@@ -501,8 +501,21 @@ async function main() {
   const discoveredLatest = latestAccounts.length > 0
     ? await discoverLatestAccounts(latestAccounts, authToken, archive)
     : new Map();
+  const skippedLatestUsernames = latestAccounts
+    .map((account) => account.username)
+    .filter((username) => discoveredLatest.get(username)?.skipped);
+  const runnableAccountCount = enabledAccounts.length - skippedLatestUsernames.length;
   if (latestAccounts.length > 0) {
-    console.log(`Pre-checked ${latestAccounts.length} latest-mode account(s) (concurrency ${DISCOVERY_CONCURRENCY}).\n`);
+    console.log(`Pre-checked ${latestAccounts.length} latest-mode account(s) (concurrency ${DISCOVERY_CONCURRENCY}).`);
+    if (skippedLatestUsernames.length > 0) {
+      console.log("Following accounts will be skipped:");
+      for (const username of skippedLatestUsernames) {
+        console.log(`@${username}`);
+      }
+      console.log(`Total [${skippedLatestUsernames.length}/${enabledAccounts.length}] account(s) skipped.\n`);
+    } else {
+      console.log("No latest-mode account will be skipped.\n");
+    }
   }
 
   let totalAccountsProcessed = 0;
@@ -511,16 +524,22 @@ async function main() {
 
   for (let ai = 0; ai < enabledAccounts.length; ai++) {
     const account = enabledAccounts[ai];
-    totalAccountsProcessed++;
     const { username } = account;
+    const isCrawlAll = accountCrawlAll(account);
+    const crawlMode = isCrawlAll ? "all" : "latest";
+    const discovered = isCrawlAll ? null : discoveredLatest.get(username);
+    if (!isCrawlAll && discovered?.skipped) {
+      await reportCrawlComplete(username, crawlMode, 0);
+      continue;
+    }
+
+    totalAccountsProcessed++;
     console.log(`======================================================================`);
-    console.log(`[Account ${totalAccountsProcessed}/${enabledAccounts.length}] @${username}`);
+    console.log(`[Account ${totalAccountsProcessed}/${runnableAccountCount}] @${username}`);
     console.log(`======================================================================`);
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `tw-${username}-`));
     let accountImagesUploaded = 0;
-    const isCrawlAll = accountCrawlAll(account);
-    const crawlMode = isCrawlAll ? "all" : "latest";
 
     try {
       // 1) Extract media URLs + metadata via xtractor ---------------------
@@ -531,7 +550,7 @@ async function main() {
       try {
         const extracted = isCrawlAll
           ? await extractMediaForAccount(username, authToken, { all: true, previousLatest })
-          : discoveredLatest.get(username);
+          : discovered;
         if (!extracted) throw new Error("latest discovery result missing");
         if (extracted?.error) throw extracted.error;
         mediaItems = extracted.media;
