@@ -69,9 +69,12 @@ jobs:
       - name: Set up FFmpeg
         if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          ffmpeg -version
+          if command -v ffmpeg >/dev/null 2>&1; then
+            echo "FFmpeg already available."
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg >/dev/null
+          fi
 
       - name: Run Twitter crawl script
         if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
