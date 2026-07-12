@@ -114,7 +114,7 @@ export const PUT: APIRoute = async ({ params, request }) => {
       });
     }
 
-    // 1. Parse keys to keep
+    // 1. Parse and validate existing keys to keep
     const keptKeys = (existingKeysString || '')
       .split(',')
       .map((k: string) => k.trim())
@@ -124,32 +124,48 @@ export const PUT: APIRoute = async ({ params, request }) => {
     const oldImage = await env.DB.prepare('SELECT r2_keys FROM images WHERE id = ?')
       .bind(imageId)
       .first();
-    const oldKeys = oldImage && oldImage.r2_keys 
-      ? oldImage.r2_keys.split(',').map((k: string) => k.trim()).filter(Boolean) 
+    if (!oldImage) {
+      return new Response(JSON.stringify({ error: 'Image not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    const oldKeys = oldImage.r2_keys
+      ? oldImage.r2_keys.split(',').map((k: string) => k.trim()).filter(Boolean)
       : [];
+
+    if (keptKeys.some((key: string) => !oldKeys.includes(key))) {
+      return new Response(JSON.stringify({ error: 'Invalid existing image key' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     // Find keys to delete (present in oldKeys but not in keptKeys)
     const keysToDelete = oldKeys.filter((key: string) => !keptKeys.includes(key));
-    let freedBytes = 0;
-    for (const key of keysToDelete) {
+    const validFiles = files.filter(f => f && f.size > 0);
+    if (keptKeys.length === 0 && validFiles.length === 0) {
+      return new Response(JSON.stringify({ error: '貼文必須至少包含一張照片。' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Read current sizes without mutating R2 so every validation can run first.
+    const oldKeySizes = new Map<string, number>();
+    for (const key of oldKeys) {
       try {
         const head = await env.BUCKET.head(key);
-        if (head) freedBytes += head.size;
-        await env.BUCKET.delete(key);
+        if (head) oldKeySizes.set(key, head.size);
       } catch (e) {
-        console.error(`Failed to delete old key ${key} from R2:`, e);
+        console.error(`Failed to read old key ${key} from R2:`, e);
       }
     }
 
-    // 3. Upload new files if any
-    const validFiles = files.filter(f => f && f.size > 0);
     const incomingBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
-
-    // Storage guard: account for freed bytes first, then check the new upload
-    if (freedBytes > 0) {
-      await addStorageBytes(-freedBytes);
-    }
-    if (incomingBytes > 0 && await wouldExceedStorage(incomingBytes)) {
+    const removableBytes = keysToDelete.reduce((sum: number, key: string) => sum + (oldKeySizes.get(key) || 0), 0);
+    const netIncomingBytes = incomingBytes - removableBytes;
+    if (netIncomingBytes > 0 && await wouldExceedStorage(netIncomingBytes)) {
       return new Response(JSON.stringify({
         error: '儲存空間不足：R2 用量已接近 10GB 上限，請先刪除舊資料再上傳。',
       }), {
@@ -158,57 +174,57 @@ export const PUT: APIRoute = async ({ params, request }) => {
       });
     }
 
-    const newlyUploadedKeys: string[] = [];
-    for (const file of validFiles) {
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const r2Key = `${Date.now()}-${cleanFileName}`;
-      const fileArrayBuffer = await file.arrayBuffer();
-      await env.BUCKET.put(r2Key, fileArrayBuffer, {
-        httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
-      });
-      newlyUploadedKeys.push(r2Key);
-    }
-
-    // Increment the storage counter by the bytes actually written
-    if (incomingBytes > 0) {
-      await addStorageBytes(incomingBytes);
-    }
-
-    // Combine kept keys and new keys
-    const finalKeys = [...keptKeys, ...newlyUploadedKeys];
-    const finalKeysString = finalKeys.join(',');
-
-    if (finalKeys.length === 0) {
-      return new Response(JSON.stringify({ error: '貼文必須至少包含一張照片。' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Calculate final photo and video bytes from R2
+    // Calculate final persisted sizes before mutating storage.
     let photoBytes = 0;
     let videoBytes = 0;
-    for (const key of finalKeys) {
-      try {
-        const head = await env.BUCKET.head(key);
-        if (head) {
-          if (isVideoKey(key)) {
-            videoBytes += head.size;
-          } else {
-            photoBytes += head.size;
-          }
-        }
-      } catch (e) {
-        console.error(`Failed to head key ${key}:`, e);
-      }
+    for (const key of keptKeys) {
+      const size = oldKeySizes.get(key) || 0;
+      if (isVideoKey(key)) videoBytes += size;
+      else photoBytes += size;
+    }
+    for (const file of validFiles) {
+      if (isVideoKey(file.name)) videoBytes += file.size;
+      else photoBytes += file.size;
     }
 
-    // Update image metadata including final R2 keys, setting published = 1 (approved) on manual edit, and updated_at timestamp
-    await env.DB.prepare(
-      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, updated_at = datetime('now') WHERE id = ?"
-    )
-      .bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, imageId)
-      .run();
+    const newlyUploadedKeys: string[] = [];
+    try {
+      for (const file of validFiles) {
+        const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const r2Key = `${Date.now()}-${cleanFileName}`;
+        const fileArrayBuffer = await file.arrayBuffer();
+        await env.BUCKET.put(r2Key, fileArrayBuffer, {
+          httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
+        });
+        newlyUploadedKeys.push(r2Key);
+      }
+
+      const finalKeys = [...keptKeys, ...newlyUploadedKeys];
+      const finalKeysString = finalKeys.join(',');
+
+      await env.DB.prepare(
+        "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, updated_at = datetime('now') WHERE id = ?"
+      )
+        .bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, imageId)
+        .run();
+    } catch (error) {
+      for (const key of newlyUploadedKeys) {
+        await env.BUCKET.delete(key).catch(() => {});
+      }
+      throw error;
+    }
+
+    // The DB now references the final set, so removed objects can be deleted.
+    let deletedBytes = 0;
+    for (const key of keysToDelete) {
+      try {
+        await env.BUCKET.delete(key);
+        deletedBytes += oldKeySizes.get(key) || 0;
+      } catch (e) {
+        console.error(`Failed to delete old key ${key} from R2:`, e);
+      }
+    }
+    await addStorageBytes(incomingBytes - deletedBytes);
 
     // 2. Clean current tags associations
     await env.DB.prepare('DELETE FROM image_tags WHERE image_id = ?')

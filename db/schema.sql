@@ -17,7 +17,9 @@ CREATE TABLE images (
   likes INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT,               -- 最後編輯時間
-  published INTEGER DEFAULT 1
+  published INTEGER DEFAULT 1,
+  photo_bytes INTEGER DEFAULT 0,
+  video_bytes INTEGER DEFAULT 0
 );
 
 -- 標籤表格
