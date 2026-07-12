@@ -30,6 +30,7 @@ const MAX_ALL_PAGES = 80;         // safety cap on --all pagination (rate-limit 
 const PAGE_DELAY_MS = 800;        // pause between extraction pages
 const ACCOUNT_DELAY_MS = 2000;    // pause between accounts (rate-limit guard)
 const DOWNLOAD_RETRIES = 2;       // extra attempts after the first failure
+const REQUEST_TIMEOUT_MS = 60_000; // fail a stalled HTTP request instead of hanging the run
 const DISCOVERY_CONCURRENCY = 3;  // latest-mode xtractor checks in parallel
 const PIPELINE_CONCURRENCY = 4;   // tweet groups processed in parallel
                                    // (each group: download → convert → upload)
@@ -61,6 +62,17 @@ function mimeForExt(ext) {
 // ---------------------------------------------------------------------------
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  try {
+    return await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+    }
+    throw err;
+  }
+}
 
 function parseCookieString(cookieStr) {
   const cookies = {};
@@ -98,7 +110,7 @@ async function uploadImageGroup(filePaths, username, postUrl, description, creat
     formData.append("file", new Blob([fileBuffer], { type: mime }), fileName);
   }
 
-  const res = await fetch(`${SITE_URL}/api/crawl-upload`, {
+  const res = await fetchWithTimeout(`${SITE_URL}/api/crawl-upload`, {
     method: "POST",
     body: formData,
   });
@@ -111,7 +123,7 @@ async function uploadImageGroup(filePaths, username, postUrl, description, creat
 
 async function reportCrawlComplete(username, crawlMode, newImages, error = "") {
   try {
-    const res = await fetch(`${SITE_URL}/api/crawl-complete`, {
+    const res = await fetchWithTimeout(`${SITE_URL}/api/crawl-complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -314,7 +326,7 @@ function extForItem(item) {
 // ---------------------------------------------------------------------------
 
 async function downloadFile(mediaUrl, outputPath) {
-  const res = await fetch(mediaUrl, {
+  const res = await fetchWithTimeout(mediaUrl, {
     headers: { "User-Agent": "Twitter-X-Media-Batch-Downloader" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${mediaUrl}`);
@@ -483,7 +495,7 @@ async function main() {
   console.log(`xtractor        : ${xtractor.version} (pipeline concurrency ${PIPELINE_CONCURRENCY})`);
 
   console.log("Fetching account list…");
-  const accountsRes = await fetch(`${SITE_URL}/api/crawl-accounts`);
+  const accountsRes = await fetchWithTimeout(`${SITE_URL}/api/crawl-accounts`);
   if (!accountsRes.ok) {
     console.error(`ERROR: Failed to fetch accounts – HTTP ${accountsRes.status}`);
     process.exit(1);

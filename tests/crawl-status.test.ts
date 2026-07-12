@@ -40,3 +40,11 @@ test('base schema and migration include crawl error state', () => {
   assert.match(read('../db/schema.sql'), /last_crawl_error TEXT/);
   assert.match(read('../db/migration-007-crawl-error.sql'), /ADD COLUMN last_crawl_error TEXT/);
 });
+
+test('crawler applies timeouts to every HTTP request', () => {
+  const source = read('../scripts/crawl-twitter.mjs');
+
+  assert.match(source, /const REQUEST_TIMEOUT_MS = 60_000/);
+  assert.match(source, /function fetchWithTimeout\(url, options = \{\}, timeoutMs = REQUEST_TIMEOUT_MS\)/);
+  assert.ok((source.match(/fetchWithTimeout\(/g) ?? []).length >= 5);
+});
