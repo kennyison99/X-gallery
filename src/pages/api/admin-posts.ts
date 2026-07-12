@@ -11,6 +11,14 @@ import { authorSearchText, formatAuthorName, normalizeAuthorHandle } from '../..
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 const isVideoKey = (key: string) => VIDEO_EXTS.has((key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 function parseParams(url: URL) {
   const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10) || 0);
   const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') ?? '10', 10) || 10));
@@ -164,6 +172,9 @@ export const GET: APIRoute = async ({ url }) => {
     const titleAttr = escapeAttr(image.title || '無標題');
     const descAttr = escapeAttr(image.description || '');
 
+    const totalBytes = (image.photo_bytes || 0) + (image.video_bytes || 0);
+    const sizeStr = formatBytes(totalBytes);
+
     // Table row
     tableRows += `<tr class="image-row" data-id="${image.id}" data-published="${image.published}" data-has-photo="${hasPhoto}" data-has-video="${hasVideo}" data-author="${escapeAttr(authorHandle)}" data-author-display-name="${escapeAttr(image.author_display_name || '')}" data-author-search="${escapeAttr(authorSearch)}">
   <td style="text-align: center; vertical-align: middle;">
@@ -184,7 +195,7 @@ export const GET: APIRoute = async ({ url }) => {
       ${image.published === 0 ? `<span class="pending-badge ${isCritical ? 'critical' : ''}" style="margin-left: 0.5rem; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: bold; background-color: ${isCritical ? 'rgba(229, 57, 53, 0.15)' : 'rgba(255, 179, 0, 0.15)'}; color: ${isCritical ? '#e53935' : '#ffb300'}; border: 1px solid ${isCritical ? '#e53935' : '#ffb300'};">⏰ ${remainingText}</span>` : ''}
     </div>
     ${image.description ? `<div class="image-desc-preview" title="${descAttr}">${escapeHtml(image.description)}</div>` : ''}
-    <div class="image-date">${dateStr}</div>
+    <div class="image-date">${dateStr} • 💾 ${sizeStr}</div>
   </td>
   <td>
     <div class="table-tags">
@@ -198,7 +209,7 @@ export const GET: APIRoute = async ({ url }) => {
       <button class="btn btn-danger delete-btn" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;" data-id="${image.id}">刪除</button>
     </div>
   </td>
-</tr>`;
+ </tr>`;
 
     // Grid card
     gridCards += `<div class="grid-image-card" data-id="${image.id}" data-published="${image.published}" data-has-photo="${hasPhoto}" data-has-video="${hasVideo}" data-author="${escapeAttr(authorHandle)}" data-author-display-name="${escapeAttr(image.author_display_name || '')}" data-author-search="${escapeAttr(authorSearch)}">
@@ -210,6 +221,7 @@ export const GET: APIRoute = async ({ url }) => {
       ? `<video data-src="${r2Url}" class="grid-thumb" preload="metadata" muted playsinline></video>`
       : `<img data-src="${previewUrl}" alt="${titleAttr}" class="grid-thumb" />`}
     ${totalCount > 1 ? `<span class="grid-thumb-count-badge">+${totalCount - 1}</span>` : ''}
+    <span class="grid-thumb-size-badge">💾 ${sizeStr}</span>
     <div class="grid-card-hover-overlay">
       <div class="grid-card-info">
         <div class="grid-card-title" title="${titleAttr}">${escapeHtml(image.title || '無標題')}</div>
@@ -222,7 +234,7 @@ export const GET: APIRoute = async ({ url }) => {
       </div>
     </div>
   </div>
-</div>`;
+ </div>`;
   }
 
   const hasMore = params.offset + results.length < total;
