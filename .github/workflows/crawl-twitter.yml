@@ -58,9 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: scripts/.xtractor-bin
-          key: xtractor-bin-${{ steps.xtractor_version.outputs.version }}-${{ github.run_id }}
-          restore-keys: |
-            xtractor-bin-${{ steps.xtractor_version.outputs.version }}-
+          key: xtractor-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.xtractor_version.outputs.version }}
 
       - name: Install Pillow
         if: ${{ github.event.inputs.fix_links != 'true' && github.event.inputs.dedup_media != 'true' }}
