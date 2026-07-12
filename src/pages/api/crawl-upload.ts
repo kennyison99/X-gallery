@@ -172,8 +172,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Update last_crawled_at for this account
     await env.DB.prepare(
-      "UPDATE crawl_accounts SET last_crawled_at = datetime('now') WHERE username = ?"
-    ).bind(authorInput.handle).run();
+      "UPDATE crawl_accounts SET last_crawled_at = datetime('now') WHERE lower(username) = ?"
+    ).bind(authorInput.handle.toLowerCase()).run();
 
     return new Response(JSON.stringify({ 
       success: true, 

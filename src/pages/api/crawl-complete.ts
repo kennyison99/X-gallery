@@ -51,9 +51,9 @@ export const POST: APIRoute = async ({ request }) => {
              last_crawl_mode = ?,
              last_crawl_count = ?,
              last_crawl_error = ?
-         WHERE username = ?`
+         WHERE lower(username) = ?`
       )
-        .bind(runType, crawlMode, newImages, crawlError, username)
+        .bind(runType, crawlMode, newImages, crawlError, username.toLowerCase())
         .run();
     } else if (crawlMode === 'all') {
       await env.DB.prepare(
@@ -64,9 +64,9 @@ export const POST: APIRoute = async ({ request }) => {
              last_crawl_count = ?,
              last_crawl_error = NULL,
              crawl_all = 0
-         WHERE username = ?`
+         WHERE lower(username) = ?`
       )
-        .bind(runType, crawlMode, newImages, username)
+        .bind(runType, crawlMode, newImages, username.toLowerCase())
         .run();
     } else {
       await env.DB.prepare(
@@ -76,9 +76,9 @@ export const POST: APIRoute = async ({ request }) => {
              last_crawl_mode = ?,
              last_crawl_count = ?,
              last_crawl_error = NULL
-         WHERE username = ?`
+         WHERE lower(username) = ?`
       )
-        .bind(runType, crawlMode, newImages, username)
+        .bind(runType, crawlMode, newImages, username.toLowerCase())
         .run();
     }
 
