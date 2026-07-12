@@ -48,3 +48,16 @@ test('crawler applies timeouts to every HTTP request', () => {
   assert.match(source, /function fetchWithTimeout\(url, options = \{\}, timeoutMs = REQUEST_TIMEOUT_MS\)/);
   assert.ok((source.match(/fetchWithTimeout\(/g) ?? []).length >= 5);
 });
+
+test('server-side duplicate uploads count as skipped, not new uploads', () => {
+  const source = read('../scripts/crawl-twitter.mjs');
+  const groupBlock = source.slice(
+    source.indexOf('async function processTweetGroup'),
+    source.indexOf('async function processTweetGroups'),
+  );
+
+  assert.match(source, /return await res\.json\(\)/);
+  assert.match(groupBlock, /const uploadResult = await uploadImageGroup/);
+  assert.match(groupBlock, /if \(uploadResult\?\.skipped\)/);
+  assert.match(groupBlock, /stats\.skipped \+= finalFiles\.length/);
+});

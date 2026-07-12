@@ -118,7 +118,7 @@ async function uploadImageGroup(filePaths, username, postUrl, description, creat
     const text = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status} – ${text}`);
   }
-  return res;
+  return await res.json();
 }
 
 async function reportCrawlComplete(username, crawlMode, newImages, error = "") {
@@ -416,7 +416,7 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
     const isTweetId = /^\d+$/.test(key);
     const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
     const meta = isTweetId ? metaByTweetId.get(key) : null;
-    await uploadImageGroup(
+    const uploadResult = await uploadImageGroup(
       finalFiles,
       username,
       postUrl,
@@ -424,7 +424,11 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
       meta?.createdAt ?? "",
       meta?.nick || accountNick,
     );
-    stats.uploaded += finalFiles.length;
+    if (uploadResult?.skipped) {
+      stats.skipped += finalFiles.length;
+    } else {
+      stats.uploaded += finalFiles.length;
+    }
     for (const task of downloadedTasks) {
       archive[task.mediaId] = 1;
     }
