@@ -24,6 +24,9 @@ const { accounts: crawlAccounts } = Astro.props;
                   {account.lastCrawlText && (
                     <span class="crawl-last-time" title="最近一次爬取記錄">{account.lastCrawlText}</span>
                   )}
+                  {account.lastCrawlError && (
+                    <span class="crawl-error" title="最近一次爬取錯誤">錯誤：{account.lastCrawlError}</span>
+                  )}
                 </div>
                 <div class="crawl-account-settings" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
                   <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);">

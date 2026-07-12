@@ -62,6 +62,7 @@ try {
   crawlAccounts = (results || []).map((a: any) => {
     // Build "最近一次" display text from last crawl metadata
     let lastCrawlText = '';
+    const lastCrawlError = typeof a.last_crawl_error === 'string' ? a.last_crawl_error : '';
     if (a.last_crawled_at) {
       const d = new Date(a.last_crawled_at);
       const dateStr = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
@@ -70,7 +71,7 @@ try {
       const count = a.last_crawl_count ?? 0;
       lastCrawlText = `於 ${dateStr} ${typeLabel}爬取${modeLabel} (+${count})`;
     }
-    return { ...a, lastCrawlText };
+    return { ...a, lastCrawlText, lastCrawlError };
   });
 } catch (err) {
   console.error('Error fetching crawl accounts:', err);

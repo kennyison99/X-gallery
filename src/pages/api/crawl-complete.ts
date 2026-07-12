@@ -33,6 +33,7 @@ export const POST: APIRoute = async ({ request }) => {
     const runType = body.run_type === 'manual' ? 'manual' : 'auto';
     const crawlMode = body.crawl_mode === 'all' ? 'all' : 'latest';
     const newImages = Math.max(0, parseInt(body.new_images, 10) || 0);
+    const crawlError = typeof body.error === 'string' ? body.error.trim().slice(0, 1000) : '';
 
     if (!username) {
       return new Response(JSON.stringify({ error: 'username is required' }), {
@@ -41,16 +42,27 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // Record this crawl run as the latest for the account.
-    // If this was a full-history run, also reset crawl_all back to 0 so the
-    // next scheduled run does not re-scan the entire timeline.
-    if (crawlMode === 'all') {
+    // Record the result. Errors stay visible and must not clear a requested full scan.
+    if (crawlError) {
       await env.DB.prepare(
         `UPDATE crawl_accounts
          SET last_crawled_at = datetime('now'),
              last_crawl_type = ?,
              last_crawl_mode = ?,
              last_crawl_count = ?,
+             last_crawl_error = ?
+         WHERE username = ?`
+      )
+        .bind(runType, crawlMode, newImages, crawlError, username)
+        .run();
+    } else if (crawlMode === 'all') {
+      await env.DB.prepare(
+        `UPDATE crawl_accounts
+         SET last_crawled_at = datetime('now'),
+             last_crawl_type = ?,
+             last_crawl_mode = ?,
+             last_crawl_count = ?,
+             last_crawl_error = NULL,
              crawl_all = 0
          WHERE username = ?`
       )
@@ -62,7 +74,8 @@ export const POST: APIRoute = async ({ request }) => {
          SET last_crawled_at = datetime('now'),
              last_crawl_type = ?,
              last_crawl_mode = ?,
-             last_crawl_count = ?
+             last_crawl_count = ?,
+             last_crawl_error = NULL
          WHERE username = ?`
       )
         .bind(runType, crawlMode, newImages, username)

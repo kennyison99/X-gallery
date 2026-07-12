@@ -45,6 +45,7 @@ CREATE TABLE crawl_accounts (
   last_crawl_type TEXT,                  -- 上次爬取來源: 'auto' | 'manual'
   last_crawl_mode TEXT,                  -- 上次爬取模式: 'latest' | 'all'
   last_crawl_count INTEGER DEFAULT 0,    -- 上次爬取新增圖片數量
+  last_crawl_error TEXT,                 -- 上次爬取錯誤（不阻止其他帳號繼續）
   created_at TEXT DEFAULT (datetime('now'))
 );
 

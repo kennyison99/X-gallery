@@ -109,7 +109,7 @@ async function uploadImageGroup(filePaths, username, postUrl, description, creat
   return res;
 }
 
-async function reportCrawlComplete(username, crawlMode, newImages) {
+async function reportCrawlComplete(username, crawlMode, newImages, error = "") {
   try {
     const res = await fetch(`${SITE_URL}/api/crawl-complete`, {
       method: "POST",
@@ -120,6 +120,7 @@ async function reportCrawlComplete(username, crawlMode, newImages) {
         run_type: CRAWL_RUN_TYPE,
         crawl_mode: crawlMode,
         new_images: newImages,
+        error: error ? String(error).slice(0, 1000) : "",
       }),
     });
     if (!res.ok) {
@@ -377,7 +378,7 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
     }
   }
 
-  if (downloadedTasks.length === 0) return stats;
+  if (stats.failed > 0 || downloadedTasks.length === 0) return stats;
 
   // Use indexed assignment so file order matches the original tweet media order
   // (Promise.all resolves all promises but .push() would insert in completion order).
@@ -396,6 +397,8 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
       }
     }),
   );
+
+  if (stats.failed > 0) return stats;
 
   try {
     const isTweetId = /^\d+$/.test(key);
@@ -562,7 +565,7 @@ async function main() {
         }
       } catch (extErr) {
         console.error(`  ✗ xtractor failed for @${username}: ${extErr.message}`);
-        await reportCrawlComplete(username, crawlMode, 0);
+        await reportCrawlComplete(username, crawlMode, 0, extErr.message);
         continue;
       }
 
@@ -649,13 +652,21 @@ async function main() {
       totalImagesUploaded += pipelineStats.uploaded;
       accountImagesUploaded += pipelineStats.uploaded;
 
-      // 6) Report this account's crawl result ---------------------------
-      setAccountLatest(archive, username, latest);
-      saveArchive(archive);
-      await reportCrawlComplete(username, crawlMode, accountImagesUploaded);
+      // Only advance the checkpoint after every media group completed cleanly.
+      const accountError = pipelineStats.failed > 0
+        ? `${pipelineStats.failed} media task(s) failed; latest checkpoint was not advanced.`
+        : "";
+      if (pipelineStats.failed === 0) {
+        setAccountLatest(archive, username, latest);
+        saveArchive(archive);
+      } else {
+        console.warn(`  WARNING: ${accountError}`);
+      }
+      await reportCrawlComplete(username, crawlMode, accountImagesUploaded, accountError);
       console.log(`  Reported crawl-complete: ${crawlMode} mode, +${accountImagesUploaded} new image(s).`);
     } catch (err) {
       console.error(`ERROR processing @${username}: ${err.message}`);
+      await reportCrawlComplete(username, crawlMode, accountImagesUploaded, err.message);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
