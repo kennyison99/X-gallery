@@ -90,7 +90,36 @@ function parseCookieString(cookieStr) {
 
 
 
+async function uploadSingleFile(filePath, username) {
+  const formData = new FormData();
+  formData.append("author", username);
+  formData.append("api_key", CRAWL_API_KEY);
+
+  const fileBuffer = fs.readFileSync(filePath);
+  const fileName = path.basename(filePath);
+  const ext = path.extname(fileName).toLowerCase();
+  const mime = mimeForExt(ext);
+  formData.append("file", new Blob([fileBuffer], { type: mime }), fileName);
+
+  const res = await fetchWithTimeout(`${SITE_URL}/api/crawl-upload-file`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} – ${text}`);
+  }
+  const data = await res.json();
+  return data.key;
+}
+
 async function uploadImageGroup(filePaths, username, postUrl, description, createdAt, displayName = "") {
+  const r2Keys = [];
+  for (const filePath of filePaths) {
+    const key = await uploadSingleFile(filePath, username);
+    r2Keys.push(key);
+  }
+
   const formData = new FormData();
   formData.append("author", username);
   formData.append("author_url", `https://x.com/${username}`);
@@ -99,16 +128,7 @@ async function uploadImageGroup(filePaths, username, postUrl, description, creat
   if (postUrl) formData.append("post_url", postUrl);
   if (description) formData.append("description", description);
   if (createdAt) formData.append("created_at", createdAt);
-
-  for (const filePath of filePaths) {
-    const fileBuffer = fs.readFileSync(filePath);
-    const fileName = path.basename(filePath);
-    const ext = path.extname(fileName).toLowerCase();
-    const mime = mimeForExt(ext);
-    // Set the Blob type so the server stores a correct content-type even
-    // before its filename-based fallback runs.
-    formData.append("file", new Blob([fileBuffer], { type: mime }), fileName);
-  }
+  formData.append("r2_keys", r2Keys.join(","));
 
   const res = await fetchWithTimeout(`${SITE_URL}/api/crawl-upload`, {
     method: "POST",
@@ -412,17 +432,21 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
 
   if (stats.failed > 0) return stats;
 
-  // Calculate total size of final files to check against Cloudflare's 100MB upload limit
-  let totalBytes = 0;
+  // Check if any single file exceeds Cloudflare's 100MB upload limit
+  const MAX_SINGLE_FILE_SIZE = 95 * 1024 * 1024; // 95 MB safety cap
+  let hasTooLargeFile = false;
   for (const filePath of finalFiles) {
     if (filePath && fs.existsSync(filePath)) {
-      totalBytes += fs.statSync(filePath).size;
+      const size = fs.statSync(filePath).size;
+      if (size > MAX_SINGLE_FILE_SIZE) {
+        console.warn(`  ⚠️ Tweet ${key} skipped: contains a file that is too large (${(size / 1024 / 1024).toFixed(2)} MB), which exceeds Cloudflare 100MB limit.`);
+        hasTooLargeFile = true;
+        break;
+      }
     }
   }
 
-  const MAX_UPLOAD_SIZE = 95 * 1024 * 1024; // 95 MB safety cap
-  if (totalBytes > MAX_UPLOAD_SIZE) {
-    console.warn(`  ⚠️ Tweet ${key} upload skipped: total size (${(totalBytes / 1024 / 1024).toFixed(2)} MB) exceeds Cloudflare 100MB limit.`);
+  if (hasTooLargeFile) {
     stats.skipped += finalFiles.length;
     for (const task of downloadedTasks) {
       archive[task.mediaId] = 1;

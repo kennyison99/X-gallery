@@ -38,6 +38,7 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     const files = formData.getAll('file') as File[];
+    const existingR2KeysStr = formData.get('r2_keys') as string | null;
     const authorInput = normalizeAuthorInput(
       formData.get('author'),
       formData.get('author_display_name'),
@@ -48,14 +49,6 @@ export const POST: APIRoute = async ({ request }) => {
     const description = formData.get('description') as string | null;
     const createdAt = formData.get('created_at') as string | null;
 
-    const validFiles = files.filter(f => f && f.size > 0);
-    if (validFiles.length === 0) {
-      return new Response(JSON.stringify({ error: 'No valid image files provided' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
     if (!authorInput.handle) {
       return new Response(JSON.stringify({ error: 'Author is required' }), {
         status: 400,
@@ -63,9 +56,27 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    let firstFileName = '';
+    if (existingR2KeysStr) {
+      const keys = existingR2KeysStr.split(',').map(k => k.trim()).filter(Boolean);
+      if (keys.length > 0) {
+        firstFileName = keys[0];
+      }
+    } else {
+      const validFiles = files.filter(f => f && f.size > 0);
+      if (validFiles.length > 0) {
+        firstFileName = validFiles[0].name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      }
+    }
+
+    if (!firstFileName) {
+      return new Response(JSON.stringify({ error: 'No files or R2 keys provided' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     // Check for duplicate: same author + same original filename pattern
-    // Use the first file's name as a dedup key
-    const firstFileName = validFiles[0].name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const existingCheck = await env.DB.prepare(
       'SELECT id FROM images WHERE author = ? AND r2_keys LIKE ?'
     ).bind(authorInput.handle, `%${firstFileName}%`).first();
@@ -80,46 +91,55 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // Storage guard: reject if these files would push usage past the threshold
-    const incomingBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
-    if (await wouldExceedStorage(incomingBytes)) {
-      return new Response(JSON.stringify({
-        error: '儲存空間不足：R2 用量已接近 10GB 上限，請先刪除舊資料再上傳。',
-      }), {
-        status: 507,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Calculate photo and video bytes
+    let r2Keys: string[] = [];
     let photoBytes = 0;
     let videoBytes = 0;
-    for (const file of validFiles) {
-      if (isVideoKey(file.name)) {
-        videoBytes += file.size;
-      } else {
-        photoBytes += file.size;
+
+    if (existingR2KeysStr) {
+      r2Keys = existingR2KeysStr.split(',').map(k => k.trim()).filter(Boolean);
+      for (const key of r2Keys) {
+        const meta = await env.BUCKET.head(key);
+        const size = meta?.size || 0;
+        if (isVideoKey(key)) {
+          videoBytes += size;
+        } else {
+          photoBytes += size;
+        }
       }
+    } else {
+      const validFiles = files.filter(f => f && f.size > 0);
+      const incomingBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
+
+      // Storage guard
+      if (await wouldExceedStorage(incomingBytes)) {
+        return new Response(JSON.stringify({
+          error: '儲存空間不足：R2 用量已接近 10GB 上限，請先刪除舊資料再上傳。',
+        }), {
+          status: 507,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      for (const file of validFiles) {
+        if (isVideoKey(file.name)) {
+          videoBytes += file.size;
+        } else {
+          photoBytes += file.size;
+        }
+      }
+
+      // Upload all files to R2
+      for (const file of validFiles) {
+        const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const r2Key = `${authorInput.handle}_${cleanFileName}`;
+        const fileArrayBuffer = await file.arrayBuffer();
+        await env.BUCKET.put(r2Key, fileArrayBuffer, {
+          httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
+        });
+        r2Keys.push(r2Key);
+      }
+      await addStorageBytes(incomingBytes);
     }
-
-    // Upload all files to R2 (keep buffers for AI classification)
-    const r2Keys: string[] = [];
-    const fileBuffers: { name: string; buffer: ArrayBuffer }[] = [];
-    for (const file of validFiles) {
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      // Use author prefix for organized storage
-      const r2Key = `${authorInput.handle}_${cleanFileName}`;
-
-      const fileArrayBuffer = await file.arrayBuffer();
-      await env.BUCKET.put(r2Key, fileArrayBuffer, {
-        httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }
-      });
-      r2Keys.push(r2Key);
-      fileBuffers.push({ name: file.name, buffer: fileArrayBuffer });
-    }
-
-    // Increment the storage counter by the bytes actually written
-    await addStorageBytes(incomingBytes);
 
     // AI classification disabled: all uploads are published directly by default.
     const publishedValue = 1;
