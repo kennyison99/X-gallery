@@ -4,20 +4,10 @@ import type { APIRoute } from 'astro';
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 const isVideoKey = (k: string) => VIDEO_EXTS.has((k.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
 
-export const GET: APIRoute = async ({ url }) => {
+export const POST: APIRoute = async () => {
   if (!env || !env.DB || !env.BUCKET) {
     return new Response(JSON.stringify({ error: 'D1 or R2 binding not configured' }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Simple key protection using CRAWL_API_KEY
-  const expectedKey = (env as any).CRAWL_API_KEY;
-  const key = url.searchParams.get('key');
-  if (expectedKey && key !== expectedKey) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
       headers: { 'Content-Type': 'application/json' },
     });
   }

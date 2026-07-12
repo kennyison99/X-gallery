@@ -137,6 +137,7 @@ const totalMediaSum = totalPhotosSum + totalVideosSum;
     <a href="#posts" class="btn" data-post-status="pending">查看待審查</a>
     <a href="#crawler" class="btn">管理爬蟲帳號</a>
     <a href="#auto-tag" class="btn">執行 Auto-tag</a>
+    <button type="button" id="backfill-sizes-btn" class="btn">同步歷史容量</button>
   </div>
 </section>
 
@@ -304,6 +305,29 @@ const totalMediaSum = totalPhotosSum + totalVideosSum;
       });
     }
   }
+
+  // Add backfill button handler
+  const backfillBtn = document.getElementById('backfill-sizes-btn') as HTMLButtonElement | null;
+  backfillBtn?.addEventListener('click', async () => {
+    if (!confirm('確定要開始同步歷史檔案大小嗎？這將會從 R2 獲取容量資訊並更新所有歷史貼文記錄，大概需要 2 秒鐘。')) return;
+    
+    const originalText = backfillBtn.textContent;
+    backfillBtn.disabled = true;
+    backfillBtn.textContent = '同步中...';
+    
+    try {
+      const res = await fetch('/api/admin/backfill-sizes', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      alert(`同步完成！共從 R2 對齊並更新了 ${data.updatedCount} 筆貼文容量紀錄。`);
+      window.location.reload();
+    } catch (err: any) {
+      alert(`同步失敗：${err.message}`);
+    } finally {
+      backfillBtn.disabled = false;
+      backfillBtn.textContent = originalText;
+    }
+  });
 
   // Run on page load
   initTableSorting();
