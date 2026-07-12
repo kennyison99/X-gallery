@@ -412,6 +412,25 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
 
   if (stats.failed > 0) return stats;
 
+  // Calculate total size of final files to check against Cloudflare's 100MB upload limit
+  let totalBytes = 0;
+  for (const filePath of finalFiles) {
+    if (filePath && fs.existsSync(filePath)) {
+      totalBytes += fs.statSync(filePath).size;
+    }
+  }
+
+  const MAX_UPLOAD_SIZE = 95 * 1024 * 1024; // 95 MB safety cap
+  if (totalBytes > MAX_UPLOAD_SIZE) {
+    console.warn(`  ⚠️ Tweet ${key} upload skipped: total size (${(totalBytes / 1024 / 1024).toFixed(2)} MB) exceeds Cloudflare 100MB limit.`);
+    stats.skipped += finalFiles.length;
+    for (const task of downloadedTasks) {
+      archive[task.mediaId] = 1;
+    }
+    saveArchive(archive);
+    return stats;
+  }
+
   try {
     const isTweetId = /^\d+$/.test(key);
     const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
@@ -435,7 +454,16 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
     saveArchive(archive);
   } catch (err) {
     console.error(`  ✗ ${key} upload failed: ${err.message}`);
-    stats.failed++;
+    if (err.message.includes("413") || err.message.includes("Payload Too Large")) {
+      console.warn(`  ⚠️ Treating HTTP 413 Payload Too Large as skipped to prevent crawler lockup.`);
+      stats.skipped += finalFiles.length;
+      for (const task of downloadedTasks) {
+        archive[task.mediaId] = 1;
+      }
+      saveArchive(archive);
+    } else {
+      stats.failed++;
+    }
   }
 
   return stats;
