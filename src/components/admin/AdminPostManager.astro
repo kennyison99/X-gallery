@@ -54,6 +54,12 @@ const { publishedCount, pendingCount, authors, tags } = Astro.props;
             <option value="photo">僅相片</option>
             <option value="video">僅影片</option>
           </select>
+          <select id="sort-filter" style="flex: 1; min-width: 120px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background-color: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color var(--transition-speed) ease;" onfocus="this.style.borderColor='var(--text-primary)'" onblur="this.style.borderColor='var(--border-color)'">
+            <option value="newest">時間 (最新 → 最舊)</option>
+            <option value="oldest">時間 (最舊 → 最新)</option>
+            <option value="size_desc">大小 (檔案最大優先)</option>
+            <option value="size_asc">大小 (檔案最小優先)</option>
+          </select>
         </div>
 
         <!-- Bulk Actions Bar -->

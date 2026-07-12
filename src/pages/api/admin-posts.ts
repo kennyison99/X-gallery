@@ -19,7 +19,7 @@ function parseParams(url: URL) {
   const author = (url.searchParams.get('author') ?? '').trim().toLowerCase();
   const tag = (url.searchParams.get('tag') ?? '').trim();
   const media = url.searchParams.get('media') ?? '';
-  const sort = url.searchParams.get('sort') === 'oldest' ? 'oldest' : 'newest';
+  const sort = url.searchParams.get('sort') ?? 'newest';
   return { offset, limit, published, search, author, tag, media, sort };
 }
 
@@ -53,7 +53,6 @@ export const GET: APIRoute = async ({ url }) => {
   };
 
   const params = parseParams(url);
-  const direction = params.sort === 'oldest' ? 'ASC' : 'DESC';
 
   // Build WHERE clauses
   const conditions: string[] = ['i.published = ?'];
@@ -93,6 +92,16 @@ export const GET: APIRoute = async ({ url }) => {
 
   // Fetch the current page
   const pageBindings = [...bindings, params.limit, params.offset];
+
+  let orderBy = 'i.created_at DESC, i.id DESC';
+  if (params.sort === 'oldest') {
+    orderBy = 'i.created_at ASC, i.id ASC';
+  } else if (params.sort === 'size_desc') {
+    orderBy = '(COALESCE(i.photo_bytes, 0) + COALESCE(i.video_bytes, 0)) DESC, i.created_at DESC, i.id DESC';
+  } else if (params.sort === 'size_asc') {
+    orderBy = '(COALESCE(i.photo_bytes, 0) + COALESCE(i.video_bytes, 0)) ASC, i.created_at DESC, i.id DESC';
+  }
+
   const pageSql = `
     SELECT i.*, group_concat(t.name) AS tags_list
     FROM images i
@@ -100,7 +109,7 @@ export const GET: APIRoute = async ({ url }) => {
     LEFT JOIN tags t ON it.tag_id = t.id
     WHERE ${where}
     GROUP BY i.id
-    ORDER BY i.created_at ${direction}, i.id ${direction}
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?`;
   const { results = [] } = await env.DB.prepare(pageSql).bind(...pageBindings).all<any>();
 

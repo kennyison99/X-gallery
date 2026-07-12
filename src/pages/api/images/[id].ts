@@ -4,6 +4,7 @@ import {
   contentTypeForFilename,
   wouldExceedStorage,
   addStorageBytes,
+  isVideoKey,
 } from '../../../lib/storage';
 import { normalizeAuthorInput } from '../../../lib/admin-dashboard';
 
@@ -184,11 +185,29 @@ export const PUT: APIRoute = async ({ params, request }) => {
       });
     }
 
+    // Calculate final photo and video bytes from R2
+    let photoBytes = 0;
+    let videoBytes = 0;
+    for (const key of finalKeys) {
+      try {
+        const head = await env.BUCKET.head(key);
+        if (head) {
+          if (isVideoKey(key)) {
+            videoBytes += head.size;
+          } else {
+            photoBytes += head.size;
+          }
+        }
+      } catch (e) {
+        console.error(`Failed to head key ${key}:`, e);
+      }
+    }
+
     // Update image metadata including final R2 keys, setting published = 1 (approved) on manual edit, and updated_at timestamp
     await env.DB.prepare(
-      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, updated_at = datetime('now') WHERE id = ?"
+      "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, updated_at = datetime('now') WHERE id = ?"
     )
-      .bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', imageId)
+      .bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, imageId)
       .run();
 
     // 2. Clean current tags associations

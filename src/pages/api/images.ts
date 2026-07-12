@@ -4,6 +4,7 @@ import {
   contentTypeForFilename,
   wouldExceedStorage,
   addStorageBytes,
+  isVideoKey,
 } from '../../lib/storage';
 import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 
@@ -119,6 +120,17 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    // Calculate photo and video bytes
+    let photoBytes = 0;
+    let videoBytes = 0;
+    for (const file of validFiles) {
+      if (isVideoKey(file.name)) {
+        videoBytes += file.size;
+      } else {
+        photoBytes += file.size;
+      }
+    }
+
     // Upload all files to R2 and gather their keys
     const r2Keys: string[] = [];
     for (const file of validFiles) {
@@ -145,8 +157,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     // 1. Insert image/post metadata
     const insertImageQuery = `
-      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, photo_bytes, video_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING id
     `;
     const imageResult = await env.DB.prepare(insertImageQuery)
@@ -157,7 +169,9 @@ export const POST: APIRoute = async ({ request }) => {
         authorInput.displayName,
         authorUrl || '', 
         postUrl || '', 
-        description || ''
+        description || '',
+        photoBytes,
+        videoBytes
       )
       .first();
 

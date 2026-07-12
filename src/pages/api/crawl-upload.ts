@@ -5,6 +5,7 @@ import {
   contentTypeForFilename,
   wouldExceedStorage,
   addStorageBytes,
+  isVideoKey,
 } from '../../lib/storage';
 import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 
@@ -90,6 +91,17 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    // Calculate photo and video bytes
+    let photoBytes = 0;
+    let videoBytes = 0;
+    for (const file of validFiles) {
+      if (isVideoKey(file.name)) {
+        videoBytes += file.size;
+      } else {
+        photoBytes += file.size;
+      }
+    }
+
     // Upload all files to R2 (keep buffers for AI classification)
     const r2Keys: string[] = [];
     const fileBuffers: { name: string; buffer: ArrayBuffer }[] = [];
@@ -116,8 +128,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Insert into D1
     const insertQuery = `
-      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, published${createdAt ? ', created_at' : ''})
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, published, photo_bytes, video_bytes${createdAt ? ', created_at' : ''})
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
       RETURNING id
     `;
     const bindParams = [
@@ -128,7 +140,9 @@ export const POST: APIRoute = async ({ request }) => {
       authorUrl || `https://x.com/${authorInput.handle}`,
       postUrl || '',
       description || '',
-      publishedValue
+      publishedValue,
+      photoBytes,
+      videoBytes
     ];
     if (createdAt) {
       bindParams.push(createdAt);

@@ -952,6 +952,7 @@ try {
   const authorFilter = document.getElementById('author-filter') as HTMLSelectElement | null;
   const tagFilter = document.getElementById('tag-filter') as HTMLSelectElement | null;
   const mediaFilter = document.getElementById('media-filter') as HTMLSelectElement | null;
+  const sortFilter = document.getElementById('sort-filter') as HTMLSelectElement | null;
   const paginationInfo = document.getElementById('pagination-info');
   const firstPageBtn = document.getElementById('first-page-btn') as HTMLButtonElement | null;
   const prevPageBtn = document.getElementById('prev-page-btn') as HTMLButtonElement | null;
@@ -984,7 +985,7 @@ try {
       author: authorFilter?.value || '',
       tag: tagFilter?.value || '',
       media: mediaFilter?.value || '',
-      sort: 'newest' as const,
+      sort: sortFilter?.value || 'newest',
     };
   }
 
@@ -1165,6 +1166,10 @@ try {
     sessionStorage.setItem('admin-filter-media', mediaFilter.value);
     loadPosts(1);
   });
+  sortFilter?.addEventListener('change', () => {
+    sessionStorage.setItem('admin-filter-sort', sortFilter.value);
+    loadPosts(1);
+  });
 
   // Pagination buttons
   firstPageBtn?.addEventListener('click', () => { if (currentPage > 1) loadPosts(1); });
@@ -1176,6 +1181,31 @@ try {
   lastPageBtn?.addEventListener('click', () => {
     const totalPages = Math.ceil(totalItems / itemsPerPage()) || 1;
     if (currentPage < totalPages) loadPosts(totalPages);
+  });
+
+  // Keyboard navigation for pagination via Arrow Keys (<- / ->)
+  document.addEventListener('keydown', (e) => {
+    // Only switch pages if the active element is not an input or textarea
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+      return;
+    }
+
+    // Only switch if the post manager tab/panel is currently visible
+    const postsPanel = document.getElementById('panel-posts');
+    if (!postsPanel || postsPanel.hidden) {
+      return;
+    }
+
+    if (e.key === 'ArrowLeft') {
+      if (prevPageBtn && !prevPageBtn.disabled) {
+        prevPageBtn.click();
+      }
+    } else if (e.key === 'ArrowRight') {
+      if (nextPageBtn && !nextPageBtn.disabled) {
+        nextPageBtn.click();
+      }
+    }
   });
 
   // View toggle
@@ -1452,6 +1482,7 @@ try {
   if (authorFilter) authorFilter.value = sessionStorage.getItem('admin-filter-author') || '';
   if (tagFilter) tagFilter.value = sessionStorage.getItem('admin-filter-tag') || '';
   if (mediaFilter) mediaFilter.value = sessionStorage.getItem('admin-filter-media') || '';
+  if (sortFilter) sortFilter.value = sessionStorage.getItem('admin-filter-sort') || 'newest';
 
   // 同步初始化 View 模式的 DOM 狀態
   if (activeView === 'grid') {
