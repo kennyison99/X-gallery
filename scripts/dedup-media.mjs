@@ -20,6 +20,8 @@ async function scanScope(scope) {
 
   do {
     const params = new URLSearchParams({ scope, cursor: String(cursor), limit: String(PAGE_SIZE) });
+    // Keep query auth for deployments still running the legacy endpoint; the header is the preferred path.
+    params.set("api_key", CRAWL_API_KEY);
     const response = await fetch(`${SITE_URL}/api/dedup-scan?${params}`, {
       headers: { "X-API-Key": CRAWL_API_KEY },
     });
@@ -27,6 +29,9 @@ async function scanScope(scope) {
       throw new Error(`${scope} scan failed: HTTP ${response.status} - ${await response.text()}`);
     }
     const result = await response.json();
+    if (!Array.isArray(result.duplicates) || !Object.prototype.hasOwnProperty.call(result, "next_cursor")) {
+      throw new Error("dedup API is outdated; deploy the latest main branch before running this action");
+    }
     duplicates.push(...result.duplicates);
     cursor = result.next_cursor;
     page++;
