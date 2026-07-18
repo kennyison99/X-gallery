@@ -1,97 +1,106 @@
-// Scan for and repair duplicate R2 objects within image records.
-// Uses R2 etag (MD5) to detect identical content, then deletes duplicates
-// and updates D1 r2_keys so each card only shows unique files.
-//
-// Usage:
-//   node scripts/dedup-media.mjs           # dry-run: scan only, report duplicates
-//   node scripts/dedup-media.mjs --apply   # apply fixes: delete dup R2 + update D1
+// Find and optionally repair duplicate cards and duplicate files within cards.
+// Every candidate is verified by R2 etag before deletion.
 
 const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(/\/$/, "");
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? "";
+const APPLY = process.argv.includes("--apply");
+const SCOPES = ["cards", "media"];
+const PAGE_SIZE = 40;
+const BATCH_SIZE = 20;
 
 if (!CRAWL_API_KEY) {
   console.error("ERROR: CRAWL_API_KEY environment variable is not configured.");
   process.exit(1);
 }
 
-const APPLY = process.argv.includes("--apply");
+async function scanScope(scope) {
+  const duplicates = [];
+  let cursor = 0;
+  let page = 0;
 
-async function main() {
-  console.log("=== Duplicate Media Scan (R2 etag / MD5) ===");
-  console.log(`SITE_URL : ${SITE_URL}`);
-  console.log(`Mode     : ${APPLY ? "APPLY (will delete duplicates)" : "DRY-RUN (scan only)"}`);
-  console.log();
-
-  // 1. Scan
-  console.log("Scanning all multi-key records for duplicate R2 objects...");
-  const scanRes = await fetch(`${SITE_URL}/api/dedup-scan?api_key=${encodeURIComponent(CRAWL_API_KEY)}`);
-  if (!scanRes.ok) {
-    const text = await scanRes.text();
-    throw new Error(`Scan failed: HTTP ${scanRes.status} - ${text}`);
-  }
-  const { duplicates, count } = await scanRes.json();
-
-  if (count === 0) {
-    console.log("No duplicates found. All clean!");
-    return;
-  }
-
-  console.log(`Found ${count} duplicate group(s) across ${new Set(duplicates.map(d => d.image_id)).size} record(s):\n`);
-
-  let totalFreed = 0;
-  for (const dup of duplicates) {
-    const freedKb = (dup.size / 1024).toFixed(1);
-    totalFreed += dup.size * dup.delete_keys.length;
-    console.log(`  Image #${dup.image_id}: keep "${dup.keep_key}"`);
-    for (const dk of dup.delete_keys) {
-      console.log(`    └─ delete "${dk}" (etag=${dup.etag.slice(0, 16)}..., ${dup.size} bytes)`);
+  do {
+    const params = new URLSearchParams({ scope, cursor: String(cursor), limit: String(PAGE_SIZE) });
+    const response = await fetch(`${SITE_URL}/api/dedup-scan?${params}`, {
+      headers: { "X-API-Key": CRAWL_API_KEY },
+    });
+    if (!response.ok) {
+      throw new Error(`${scope} scan failed: HTTP ${response.status} - ${await response.text()}`);
     }
-    console.log(`    Freed if applied: ${(dup.size * dup.delete_keys.length / 1024).toFixed(1)} KB`);
+    const result = await response.json();
+    duplicates.push(...result.duplicates);
+    cursor = result.next_cursor;
+    page++;
+    console.log(`  ${scope}: page ${page}, +${result.count} duplicate group(s)`);
+  } while (cursor !== null);
+
+  return duplicates;
+}
+
+function printFix(fix) {
+  if (fix.kind === "card") {
+    console.log(`  Card ${fix.post_url}: keep #${fix.keep_id}, delete #${fix.delete_ids.join(", #")}`);
+  } else {
+    console.log(`  Image #${fix.image_id}: keep "${fix.keep_key}", delete ${fix.delete_keys.map((key) => `"${key}"`).join(", ")}`);
   }
+  console.log(`    Recoverable: ${(fix.freed_bytes / 1024).toFixed(1)} KB`);
+}
 
-  console.log(`\nTotal space recoverable: ${(totalFreed / 1024 / 1024).toFixed(2)} MB`);
+async function applyFixes(fixes) {
+  const totals = { fixed: 0, deletedCards: 0, deletedObjects: 0, freedBytes: 0 };
+  for (let i = 0; i < fixes.length; i += BATCH_SIZE) {
+    const batch = fixes.slice(i, i + BATCH_SIZE);
+    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(fixes.length / BATCH_SIZE);
+    console.log(`  Batch ${batchNumber}/${totalBatches} (${batch.length} fixes)...`);
 
-  if (!APPLY) {
-    console.log("\nDry-run complete. To apply fixes, re-run with --apply:");
-    console.log("  node scripts/dedup-media.mjs --apply");
-    return;
-  }
-
-  // 2. Apply fixes in batches to stay under Cloudflare Workers' 1000
-  //    subrequest limit (each fix ~6 subrequests: D1 select + R2 head +
-  //    R2 delete + D1 update). Batches of 50 = ~300 subrequests, safe margin.
-  const BATCH_SIZE = 50;
-  let totalDeleted = 0;
-  let totalFreedBytes = 0;
-  const allFixedIds = [];
-
-  console.log(`\nApplying fixes in batches of ${BATCH_SIZE}...`);
-  for (let i = 0; i < duplicates.length; i += BATCH_SIZE) {
-    const batch = duplicates.slice(i, i + BATCH_SIZE);
-    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(duplicates.length / BATCH_SIZE);
-    console.log(`  Batch ${batchNum}/${totalBatches} (${batch.length} fixes)...`);
-
-    const fixRes = await fetch(`${SITE_URL}/api/dedup-scan`, {
+    const response = await fetch(`${SITE_URL}/api/dedup-scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: CRAWL_API_KEY, fixes: batch }),
     });
-    if (!fixRes.ok) {
-      const text = await fixRes.text();
-      throw new Error(`Fix failed on batch ${batchNum}: HTTP ${fixRes.status} - ${text}`);
+    if (!response.ok) {
+      throw new Error(`Apply batch ${batchNumber} failed: HTTP ${response.status} - ${await response.text()}`);
     }
-    const result = await fixRes.json();
-    totalDeleted += result.count;
-    totalFreedBytes += result.freed_bytes;
-    if (result.fixed_ids) allFixedIds.push(...result.fixed_ids);
+    const result = await response.json();
+    totals.fixed += result.fixed;
+    totals.deletedCards += result.deleted_cards;
+    totals.deletedObjects += result.deleted_objects;
+    totals.freedBytes += result.freed_bytes;
   }
-
-  console.log(`\nDone! Deleted ${totalDeleted} duplicate R2 object(s) from ${allFixedIds.length} record(s).`);
-  console.log(`Freed ${(totalFreedBytes / 1024 / 1024).toFixed(2)} MB of R2 storage.`);
+  return totals;
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
+async function main() {
+  console.log("=== Duplicate Card / Media Scan ===");
+  console.log(`SITE_URL : ${SITE_URL}`);
+  console.log(`Mode     : ${APPLY ? "APPLY" : "DRY-RUN"}`);
+  console.log("Scanning in bounded pages...");
+
+  const duplicates = [];
+  for (const scope of SCOPES) duplicates.push(...await scanScope(scope));
+
+  if (duplicates.length === 0) {
+    console.log("No duplicates found. All clean!");
+    return;
+  }
+
+  console.log(`Found ${duplicates.length} verified duplicate group(s):`);
+  for (const fix of duplicates) printFix(fix);
+  const recoverable = duplicates.reduce((sum, fix) => sum + fix.freed_bytes, 0);
+  console.log(`Total recoverable: ${(recoverable / 1024 / 1024).toFixed(2)} MB`);
+
+  if (!APPLY) {
+    console.log("Dry-run complete. Re-run with --apply to remove these duplicates.");
+    return;
+  }
+
+  console.log(`Applying in batches of ${BATCH_SIZE}...`);
+  const totals = await applyFixes(duplicates);
+  console.log(`Done: fixed ${totals.fixed} group(s), deleted ${totals.deletedCards} card(s) and ${totals.deletedObjects} R2 object(s).`);
+  console.log(`Freed ${(totals.freedBytes / 1024 / 1024).toFixed(2)} MB.`);
+}
+
+main().catch((error) => {
+  console.error("Fatal error:", error);
   process.exit(1);
 });

@@ -113,7 +113,30 @@ async function uploadSingleFile(filePath, username) {
   return data.key;
 }
 
+async function checkUploadExists(username, postUrl) {
+  if (!postUrl) return null;
+  const formData = new FormData();
+  formData.append("author", username);
+  formData.append("post_url", postUrl);
+  formData.append("api_key", CRAWL_API_KEY);
+  formData.append("check_only", "true");
+
+  const res = await fetchWithTimeout(`${SITE_URL}/api/crawl-upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} – ${text}`);
+  }
+  const result = await res.json();
+  return result.skipped ? result : null;
+}
+
 async function uploadImageGroup(filePaths, username, postUrl, description, createdAt, displayName = "") {
+  const existing = await checkUploadExists(username, postUrl);
+  if (existing) return existing;
+
   const r2Keys = [];
   for (const filePath of filePaths) {
     const key = await uploadSingleFile(filePath, username);

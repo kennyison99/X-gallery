@@ -1,0 +1,45 @@
+name: Deduplicate Media
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Delete verified duplicate cards and R2 objects'
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: gallery-media-mutations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deduplicate:
+    runs-on: ubuntu-latest
+    environment: env
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Scan duplicate media
+        if: ${{ !inputs.apply }}
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        run: npm run dedup-media
+
+      - name: Scan and remove duplicate media
+        if: ${{ inputs.apply }}
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        run: npm run dedup-media -- --apply

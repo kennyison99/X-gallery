@@ -45,6 +45,7 @@ export const POST: APIRoute = async ({ request }) => {
     );
     const authorUrl = formData.get('author_url') as string | null;
     const postUrl = formData.get('post_url') as string | null;
+    const checkOnly = formData.get('check_only') === 'true';
     const title = formData.get('title') as string | null;
     const description = formData.get('description') as string | null;
     const createdAt = formData.get('created_at') as string | null;
@@ -52,6 +53,28 @@ export const POST: APIRoute = async ({ request }) => {
     if (!authorInput.handle) {
       return new Response(JSON.stringify({ error: 'Author is required' }), {
         status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const existingPost = postUrl
+      ? await env.DB.prepare('SELECT id FROM images WHERE post_url = ?').bind(postUrl).first()
+      : null;
+    if (checkOnly) {
+      return new Response(JSON.stringify({
+        success: !existingPost,
+        skipped: !!existingPost,
+        message: existingPost ? `Post "${postUrl}" already exists` : undefined,
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (existingPost) {
+      return new Response(JSON.stringify({
+        success: false,
+        skipped: true,
+        message: `Post "${postUrl}" already exists`
+      }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
