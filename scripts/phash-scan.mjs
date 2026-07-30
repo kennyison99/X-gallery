@@ -26,8 +26,8 @@ function getArgValue(prefix, fallback) {
 
 const THRESHOLD = Math.min(63, Math.max(0, getArgValue('--threshold=', 10)));
 const MAX_BACKFILL_IMAGES = getArgValue('--limit=', 50); // Max unhashed images to backfill per run
-const DEFAULT_CONCURRENCY = Math.max(12, os.cpus().length * 4);
-const CONCURRENCY = Math.min(128, Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || String(DEFAULT_CONCURRENCY), 10))));
+const DEFAULT_CONCURRENCY = Math.max(16, os.cpus().length * 4);
+const CONCURRENCY = Math.min(256, Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || String(DEFAULT_CONCURRENCY), 10))));
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -131,8 +131,8 @@ export async function runBackfillLoop({
   concurrency = CONCURRENCY,
   logger = console.log,
 } = {}) {
-  const clampedConcurrency = Math.min(128, Math.max(1, concurrency));
-  const fetchPageSize = clampedConcurrency > 50 || maxBackfill === 0 ? 100 : 50;
+  const clampedConcurrency = Math.min(256, Math.max(1, concurrency));
+  const fetchPageSize = clampedConcurrency > 50 || maxBackfill === 0 ? Math.min(500, Math.max(100, clampedConcurrency * 2)) : 50;
   let successfulTotal = 0;
   let cursor = 0;
   let pageCount = 0;
