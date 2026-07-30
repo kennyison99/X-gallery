@@ -12,16 +12,25 @@ function getArgValue(prefix, fallback) {
   const arg = process.argv.find((a) => a.startsWith(prefix));
   if (!arg) return fallback;
   const val = arg.split('=')[1];
-  return val ? parseInt(val, 10) : fallback;
+  if (!val) return fallback;
+  if (val.toLowerCase() === 'all') return 0;
+  const parsed = parseInt(val, 10);
+  return isNaN(parsed) ? fallback : parsed;
 }
 
 const THRESHOLD = getArgValue('--threshold=', 10);
+const MAX_IMAGES = getArgValue('--limit=', 50); // Default max 50 images to respect Cloudflare rate limits
+const REQUEST_DELAY_MS = getArgValue('--delay=', 100); // 100ms delay between image fetches to prevent rate limiting
 const PAGE_SIZE = 50;
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 
 if (!CRAWL_API_KEY) {
   console.error('ERROR: CRAWL_API_KEY environment variable is not configured.');
   process.exit(1);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isVideoKey(key) {
@@ -114,7 +123,6 @@ async function fetchPublishedPosts() {
     posts.push(...result.images);
     cursor = result.next_cursor;
     page++;
-    console.log(`  Page ${page}: fetched ${result.images.length} post(s)`);
   } while (cursor !== null);
 
   return posts;
@@ -131,29 +139,41 @@ async function fetchImageBuffer(r2Key) {
 
 async function main() {
   console.log('=== pHash Image Similarity Scan ===');
-  console.log(`SITE_URL  : ${SITE_URL}`);
-  console.log(`Mode      : ${APPLY ? 'APPLY (move to pending)' : 'DRY-RUN'}`);
-  console.log(`Threshold : ${THRESHOLD} bits (Hamming Distance <= ${THRESHOLD})`);
+  console.log(`SITE_URL    : ${SITE_URL}`);
+  console.log(`Mode        : ${APPLY ? 'APPLY (move to pending)' : 'DRY-RUN'}`);
+  console.log(`Threshold   : ${THRESHOLD} bits (Hamming Distance <= ${THRESHOLD})`);
+  console.log(`Max Images  : ${MAX_IMAGES > 0 ? MAX_IMAGES + ' (Rate-limit protection)' : 'Unlimited'}`);
+  console.log(`Delay/Fetch : ${REQUEST_DELAY_MS} ms`);
   console.log('Fetching published posts...');
 
   const posts = await fetchPublishedPosts();
-  console.log(`Total published posts: ${posts.length}`);
+  console.log(`Total published posts in DB: ${posts.length}`);
 
   if (posts.length === 0) {
     console.log('No published posts found. Exiting.');
     return;
   }
 
-  console.log('Computing pHashes for image assets...');
+  console.log('Computing pHashes for image assets (with rate limit protection)...');
   const imageHashes = [];
 
   for (let i = 0; i < posts.length; i++) {
+    if (MAX_IMAGES > 0 && imageHashes.length >= MAX_IMAGES) {
+      console.log(`Reached limit of ${MAX_IMAGES} images (CF free rate limit protection). Stopping image fetch.`);
+      break;
+    }
+
     const post = posts[i];
     const keys = (post.r2_keys || '').split(',').map((k) => k.trim()).filter(Boolean);
     const imageKeys = keys.filter((k) => !isVideoKey(k));
 
     for (const key of imageKeys) {
+      if (MAX_IMAGES > 0 && imageHashes.length >= MAX_IMAGES) break;
+
       try {
+        if (REQUEST_DELAY_MS > 0 && imageHashes.length > 0) {
+          await sleep(REQUEST_DELAY_MS);
+        }
         const buffer = await fetchImageBuffer(key);
         const hash = await computePHash(buffer);
         imageHashes.push({
@@ -171,8 +191,8 @@ async function main() {
       }
     }
 
-    if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
-      console.log(`  Processed ${i + 1}/${posts.length} posts (${imageHashes.length} image hashes generated)`);
+    if ((i + 1) % 10 === 0 || i + 1 === posts.length || (MAX_IMAGES > 0 && imageHashes.length >= MAX_IMAGES)) {
+      console.log(`  Processed ${imageHashes.length} image hash(es)...`);
     }
   }
 
@@ -189,8 +209,6 @@ async function main() {
 
       const dist = hammingDistance(a.hash, b.hash);
       if (dist <= THRESHOLD) {
-        // Determine which post to keep and which to flag for review.
-        // Keep the older post (smaller ID / earlier creation date) or post with more likes.
         let keep = a;
         let flag = b;
 
