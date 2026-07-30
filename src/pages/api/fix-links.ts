@@ -11,11 +11,22 @@ export const GET: APIRoute = async ({ url }) => {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 
+  const cursor = Math.max(0, parseInt(url.searchParams.get('cursor') ?? '0', 10) || 0);
+  const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') ?? '500', 10) || 500));
+
   try {
-    const query = "SELECT id, author, post_url FROM images WHERE post_url LIKE '%/status/%'";
-    const { results } = await env.DB.prepare(query).all();
-    return new Response(JSON.stringify(results || []), {
-      headers: { 'Content-Type': 'application/json' }
+    const query = "SELECT id, author, post_url FROM images WHERE id > ? AND post_url LIKE '%/status/%' ORDER BY id ASC LIMIT ?";
+    const { results = [] } = await env.DB.prepare(query).bind(cursor, limit + 1).all();
+    const hasMore = results.length > limit;
+    const pageRows = hasMore ? results.slice(0, limit) : results;
+    const nextCursor = hasMore ? pageRows.at(-1)?.id ?? null : null;
+
+    return new Response(JSON.stringify(pageRows || []), {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Has-More': String(hasMore),
+        'X-Next-Cursor': String(nextCursor ?? ''),
+      }
     });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });

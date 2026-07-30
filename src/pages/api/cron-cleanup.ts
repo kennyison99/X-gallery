@@ -28,10 +28,12 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    // Find pending posts older than 3 days
+    // Find pending posts older than 3 days (bounded batch of max 100 per run)
     const { results } = await env.DB.prepare(
       `SELECT id, r2_keys FROM images
-       WHERE published = 0 AND created_at < datetime('now', '-3 days')`
+       WHERE published = 0 AND created_at < strftime('%Y-%m-%d %H:%M:%S', 'now', '-3 days')
+       ORDER BY id ASC
+       LIMIT 100`
     ).all<{ id: number; r2_keys: string }>();
 
     if (!results || results.length === 0) {
@@ -61,6 +63,11 @@ export const POST: APIRoute = async ({ request }) => {
       await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(row.id).run();
       deletedCount++;
     }
+
+    // Clean up orphaned tags in bounded batch of 100
+    await env.DB.prepare(
+      `DELETE FROM tags WHERE id IN (SELECT t.id FROM tags t LEFT JOIN image_tags it ON t.id = it.tag_id WHERE it.tag_id IS NULL LIMIT 100)`
+    ).run();
 
     // Decrement storage counter
     if (freedBytes > 0) {
