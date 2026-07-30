@@ -91,7 +91,7 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
     sort: options.sort,
   });
 
-  const decodedCursor = options.cursorStr ? decodeCursor(options.cursorStr, filterKey) : null;
+  const decodedCursor = options.cursorStr ? decodeCursor(options.cursorStr, filterKey, options.sort) : null;
   const direction = options.sort === 'oldest' ? 'ASC' : 'DESC';
   const bindings: unknown[] = [];
   const whereClauses: string[] = [];

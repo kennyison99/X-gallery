@@ -2,6 +2,39 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  resolveAdminTab,
+  normalizeAuthorHandle,
+  formatAuthorName,
+  authorSearchText,
+  normalizeAuthorInput
+} from '../src/lib/admin-dashboard.ts';
+
+test('resolveAdminTab correctly maps hash values and defaults unknown hash to overview', () => {
+  assert.equal(resolveAdminTab('#overview'), 'overview');
+  assert.equal(resolveAdminTab('#posts'), 'posts');
+  assert.equal(resolveAdminTab('#upload'), 'upload');
+  assert.equal(resolveAdminTab('#crawler'), 'crawler');
+  assert.equal(resolveAdminTab('#auto-tag'), 'auto-tag');
+  assert.equal(resolveAdminTab('#unknown'), 'overview');
+  assert.equal(resolveAdminTab(''), 'overview');
+});
+
+test('normalizeAuthorHandle and author formatting handle empty values and @ prefixes', () => {
+  assert.equal(normalizeAuthorHandle('  @GenshinImpact  '), 'GenshinImpact');
+  assert.equal(normalizeAuthorHandle('@@@honkaistarrail'), 'honkaistarrail');
+  assert.equal(normalizeAuthorHandle(null), '');
+
+  assert.equal(formatAuthorName('原神官方', '@GenshinImpact'), '原神官方@GenshinImpact');
+  assert.equal(formatAuthorName('', 'GenshinImpact'), '@GenshinImpact');
+  assert.equal(formatAuthorName('原神官方', ''), '原神官方');
+
+  assert.equal(authorSearchText('原神官方', '@GenshinImpact'), '原神官方 genshinimpact');
+  assert.deepEqual(normalizeAuthorInput(' @GenshinImpact ', ' 原神官方 '), {
+    handle: 'GenshinImpact',
+    displayName: '原神官方'
+  });
+});
 
 test('admin index.astro retains full component structure and subcomponents', () => {
   const adminIndexPath = path.resolve('src/pages/admin/index.astro');
@@ -19,6 +52,29 @@ test('admin index.astro retains full component structure and subcomponents', () 
   // Check tab navigation script attributes
   assert.ok(content.includes('data-admin-panel'), 'Must include data-admin-panel attribute for tabs');
   assert.ok(content.includes('data-admin-tab'), 'Must include data-admin-tab attribute for tabs');
+});
+
+test('admin subcomponents retain element IDs and metadata inputs', () => {
+  const postManagerPath = path.resolve('src/components/admin/AdminPostManager.astro');
+  const uploadPanelPath = path.resolve('src/components/admin/AdminUploadPanel.astro');
+  
+  assert.ok(fs.existsSync(postManagerPath));
+  assert.ok(fs.existsSync(uploadPanelPath));
+
+  const postManagerContent = fs.readFileSync(postManagerPath, 'utf-8');
+  const uploadPanelContent = fs.readFileSync(uploadPanelPath, 'utf-8');
+
+  // Check PostManager IDs and tab buttons
+  assert.ok(postManagerContent.includes('id="tab-published"'), 'Must include tab-published');
+  assert.ok(postManagerContent.includes('id="tab-pending"'), 'Must include tab-pending');
+  assert.ok(postManagerContent.includes('id="bulk-actions-bar"'), 'Must include bulk-actions-bar');
+  assert.ok(postManagerContent.includes('id="select-all-checkbox"'), 'Must include select-all-checkbox');
+
+  // Check UploadPanel input fields
+  assert.ok(uploadPanelContent.includes('name="author"'), 'Must include author input');
+  assert.ok(uploadPanelContent.includes('name="author_display_name"'), 'Must include author_display_name input');
+  assert.ok(uploadPanelContent.includes('name="author_url"'), 'Must include author_url input');
+  assert.ok(uploadPanelContent.includes('name="post_url"'), 'Must include post_url input');
 });
 
 test('admin index.astro includes media_counts_ready rollout gate check and table aggregations', () => {

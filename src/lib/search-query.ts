@@ -68,7 +68,7 @@ export function buildSearchQuery(params: SearchParams) {
     sort: params.sort,
   });
 
-  const decodedCursor = params.cursorStr ? decodeCursor(params.cursorStr, filterKey) : null;
+  const decodedCursor = params.cursorStr ? decodeCursor(params.cursorStr, filterKey, params.sort) : null;
 
   const whereClauses: string[] = ['i.published = 1'];
   const bindings: any[] = [];

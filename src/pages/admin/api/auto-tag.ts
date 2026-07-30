@@ -30,36 +30,29 @@ export const POST: APIRoute = async ({ request }) => {
     const images = results.slice(0, limit);
     const { tagNames, links } = createAutoTagBatch(images);
 
-    if (tagNames.length > 0) {
-      await env.DB.batch(tagNames.map((tagName) =>
-        env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName)
-      ));
-    }
-
     let added = 0;
-    if (links.length > 0) {
-      const placeholders = tagNames.map(() => '?').join(',');
-      const tagRows = await env.DB.prepare(
-        `SELECT id, name FROM tags WHERE name IN (${placeholders})`
-      ).bind(...tagNames).all<{ id: number; name: string }>();
-      const tagIds = new Map(tagRows.results.map((tag) => [tag.name, tag.id]));
-      const statements = links.flatMap(({ imageId, tagName }) => {
-        const tagId = tagIds.get(tagName);
-        return tagId === undefined ? [] : [
+    if (tagNames.length > 0 && links.length > 0) {
+      // Execute tag creation, tag-image linking, and directory version bump in a SINGLE atomic D1 batch transaction
+      const batchStmts = [
+        ...tagNames.map((tagName) =>
+          env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName)
+        ),
+        ...links.map(({ imageId, tagName }) =>
           env.DB.prepare(
-            'INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)'
-          ).bind(imageId, tagId)
-        ];
-      });
+            'INSERT OR IGNORE INTO image_tags (image_id, tag_id) SELECT ?, id FROM tags WHERE name = ?'
+          ).bind(imageId, tagName)
+        ),
+        createBumpDirectoryVersionStmt(env.DB)
+      ];
 
-      if (statements.length > 0) {
-        statements.push(createBumpDirectoryVersionStmt(env.DB));
-        const linkResults = await env.DB.batch(statements);
-        added = linkResults.slice(0, -1).reduce(
-          (sum, result) => sum + Number(result.meta?.changes ?? 0),
-          0
-        );
-      }
+      const batchResults = await env.DB.batch(batchStmts);
+
+      // Sum changes from image_tags insertion statements (skipping tag inserts and final version bump)
+      const linkResults = batchResults.slice(tagNames.length, tagNames.length + links.length);
+      added = linkResults.reduce(
+        (sum, result) => sum + Number(result.meta?.changes ?? 0),
+        0
+      );
     }
 
     const nextCursor = images.at(-1)?.id ?? cursor;

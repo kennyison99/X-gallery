@@ -311,6 +311,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     return json({
       success: true,
+      fixed: deletedCards,
+      deleted_cards: deletedCards,
       fixed_cards: deletedCards,
       deleted_objects: deletedObjects,
       freed_bytes: freedBytes,

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-30T12:03:33.726Z",
+  "timestamp": "2026-07-30T12:33:11.760Z",
   "scenarios": [
     {
       "id": "gallery_page1_offset",
@@ -8,8 +8,8 @@
       "returned_rows": 49,
       "rows_read": 49,
       "rows_written": 0,
-      "duration_ms": 0.8216,
-      "sql_duration_ms": 0.8216
+      "duration_ms": 0.7386,
+      "sql_duration_ms": 0.7386
     },
     {
       "id": "gallery_deep_offset",
@@ -18,48 +18,48 @@
       "returned_rows": 49,
       "rows_read": 1049,
       "rows_written": 0,
-      "duration_ms": 0.9502,
-      "sql_duration_ms": 0.9502
+      "duration_ms": 0.7852,
+      "sql_duration_ms": 0.7852
     },
     {
       "id": "public_distinct_authors",
       "name": "Public Distinct Authors Directory Scan",
       "sql": "SELECT DISTINCT author FROM images WHERE published = 1;",
       "returned_rows": 85,
-      "rows_read": 18056,
+      "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 3.239,
-      "sql_duration_ms": 3.239
+      "duration_ms": 2.3379,
+      "sql_duration_ms": 2.3379
     },
     {
       "id": "admin_overview_full_scan",
       "name": "Admin Overview Media Keys Scan",
       "sql": "SELECT author, author_display_name, r2_keys FROM images;",
-      "returned_rows": 18056,
-      "rows_read": 18056,
+      "returned_rows": 18004,
+      "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 71.5706,
-      "sql_duration_ms": 71.5706
+      "duration_ms": 70.4509,
+      "sql_duration_ms": 70.4509
     },
     {
       "id": "admin_posts_count",
       "name": "Admin Posts Count Query",
       "sql": "SELECT COUNT(*) as total FROM images WHERE published = 1;",
       "returned_rows": 1,
-      "rows_read": 18056,
+      "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 1.5553,
-      "sql_duration_ms": 1.5553
+      "duration_ms": 2.0226,
+      "sql_duration_ms": 2.0226
     },
     {
       "id": "search_keyword_like",
       "name": "Keyword Search Substring Scan",
       "sql": "SELECT id, title, description, author FROM images WHERE published = 1 AND (title LIKE '%原神%' OR description LIKE '%原神%' OR author LIKE '%原神%') ORDER BY created_at DESC, id DESC LIMIT 49;",
       "returned_rows": 49,
-      "rows_read": 14901,
+      "rows_read": 14873,
       "rows_written": 0,
-      "duration_ms": 16.6826,
-      "sql_duration_ms": 16.6826
+      "duration_ms": 17.7004,
+      "sql_duration_ms": 17.7004
     }
   ]
 }

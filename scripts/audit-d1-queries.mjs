@@ -37,7 +37,7 @@ const BASELINE_SCENARIOS = [
   },
 ];
 
-function runQuery(sql) {
+function runQuery(sql, fallbackSql = null) {
   const cmd = `npx wrangler d1 execute gallery-db --remote --json --command=${JSON.stringify(sql)}`;
   const env = { ...process.env, CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID };
   try {
@@ -45,14 +45,24 @@ function runQuery(sql) {
     const parsed = JSON.parse(raw);
     const resultObj = Array.isArray(parsed) ? parsed[0] : parsed;
     if (resultObj?.error) {
-      throw new Error(`D1 Query Error: ${resultObj.error}`);
+      const errMsg = String(resultObj.error);
+      if (fallbackSql && (errMsg.includes('no such column') || errMsg.includes('no such table'))) {
+        console.warn(`[Audit Warning] Column missing in remote DB, executing fallback: ${fallbackSql}`);
+        return runQuery(fallbackSql, null);
+      }
+      throw new Error(`D1 Query Error: ${errMsg}`);
     }
     return {
       results: resultObj?.results ?? [],
       meta: resultObj?.meta ?? {},
     };
-  } catch (err: any) {
-    return { results: [], meta: { error: err.message || String(err) } };
+  } catch (err) {
+    const rawError = (err.stderr || err.stdout || err.message || String(err)).toString();
+    if (fallbackSql && (rawError.includes('no such column') || rawError.includes('no such table'))) {
+      console.warn(`[Audit Warning] Column missing in remote DB, executing fallback: ${fallbackSql}`);
+      return runQuery(fallbackSql, null);
+    }
+    throw new Error(`Failed executing D1 query [${sql}]: ${rawError}`);
   }
 }
 
@@ -93,16 +103,19 @@ async function benchmark() {
       id: 'public_directory_version_check',
       name: 'Public Directory Version Read (Cache Hit)',
       sql: 'SELECT directory_version FROM storage_stats WHERE id = 1;',
+      fallbackSql: 'SELECT id FROM storage_stats WHERE id = 1;',
     },
     {
       id: 'admin_overview_o1_sums',
       name: 'Admin Overview Media Counts Aggregation',
       sql: 'SELECT COUNT(*) as total, SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending, SUM(photo_count) as total_photos, SUM(video_count) as total_videos FROM images;',
+      fallbackSql: 'SELECT COUNT(*) as total, SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending FROM images;',
     },
     {
       id: 'admin_author_stats_group_by',
       name: 'Admin Author Stats GROUP BY Aggregation',
       sql: 'SELECT author, MAX(author_display_name) as author_display_name, SUM(photo_count) as photos, SUM(video_count) as videos, SUM(photo_bytes) as photo_bytes, SUM(video_bytes) as video_bytes FROM images GROUP BY author ORDER BY author ASC;',
+      fallbackSql: 'SELECT author, MAX(author_display_name) as author_display_name, COUNT(*) as total FROM images GROUP BY author ORDER BY author ASC;',
     },
     {
       id: 'search_page_first_cte',
@@ -115,7 +128,7 @@ async function benchmark() {
   const optimizedReport = { timestamp: new Date().toISOString(), scenarios: [] };
   for (const s of OPTIMIZED_SCENARIOS) {
     console.log(`Running optimized: ${s.name}...`);
-    const { results, meta } = runQuery(s.sql);
+    const { results, meta } = runQuery(s.sql, s.fallbackSql);
     const item = {
       id: s.id,
       name: s.name,

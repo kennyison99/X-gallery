@@ -33,6 +33,9 @@ test('cursor validation throws InvalidCursorError for mismatched filterKey, inva
   // Mismatched filterKey
   assert.throws(() => decodeCursor(encoded, filterKeyB), InvalidCursorError);
 
+  // Mismatched sort direction
+  assert.throws(() => decodeCursor(encoded, filterKeyA, 'oldest'), InvalidCursorError);
+
   // Bad Base64 / malformed JSON
   assert.throws(() => decodeCursor('!!!not_base64!!!', filterKeyA), InvalidCursorError);
   assert.throws(() => decodeCursor(btoa('{"v":999}'), filterKeyA), InvalidCursorError);

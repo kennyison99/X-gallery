@@ -79,7 +79,11 @@ export class InvalidCursorError extends Error {
  * Decodes and strictly validates a cursor payload string.
  * Throws InvalidCursorError if cursorStr is provided but invalid or mismatched.
  */
-export function decodeCursor(cursorStr: string, expectedFilterKey: string): CursorPayload | null {
+export function decodeCursor(
+  cursorStr: string,
+  expectedFilterKey: string,
+  expectedSort?: 'newest' | 'oldest'
+): CursorPayload | null {
   if (!cursorStr || typeof cursorStr !== 'string') return null;
 
   const jsonStr = base64UrlToUtf8(cursorStr);
@@ -101,6 +105,9 @@ export function decodeCursor(cursorStr: string, expectedFilterKey: string): Curs
       typeof parsed.filterKey === 'string' &&
       parsed.filterKey === expectedFilterKey
     ) {
+      if (expectedSort && parsed.sort !== expectedSort) {
+        throw new InvalidCursorError('Cursor sort direction mismatch');
+      }
       return parsed as CursorPayload;
     }
   } catch (e: any) {
