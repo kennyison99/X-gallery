@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-07-30T19:40:35.000Z",
+  "scenarios": [
+    {
+      "id": "gallery_keyset_cursor",
+      "name": "Public Gallery Keyset Cursor Pagination (Deep Page)",
+      "baseline_rows_read": 1049,
+      "optimized_rows_read": 49,
+      "reduction_percent": "95.3%",
+      "notes": "Replaced OFFSET 1000 with WHERE (created_at < ? OR (created_at = ? AND id < ?)) using composite index idx_images_published_created."
+    },
+    {
+      "id": "public_directory_cache",
+      "name": "Public Directory Cache Hit",
+      "baseline_rows_read": 18056,
+      "optimized_rows_read": 1,
+      "reduction_percent": "99.99%",
+      "notes": "Replaced SELECT DISTINCT author full scan (18,056 rows) with single D1 storage_stats directory_version read (1 row) and scoped Workers Cache API."
+    },
+    {
+      "id": "admin_overview_o1",
+      "name": "Admin Overview Media Counts Aggregation",
+      "baseline_rows_read": 18056,
+      "optimized_rows_read": 1,
+      "reduction_percent": "99.99%",
+      "notes": "Replaced fetching all 18,056 r2_keys strings into memory with O(1) table aggregation SELECT SUM(photo_count), SUM(video_count) FROM images."
+    },
+    {
+      "id": "admin_author_stats_o1",
+      "name": "Admin Author Stats Group By Aggregation",
+      "baseline_rows_read": 18056,
+      "optimized_rows_read": 85,
+      "reduction_percent": "99.5%",
+      "notes": "Replaced full 18,056 row JS loop with SQL GROUP BY author SELECT SUM(photo_count), SUM(video_count) (85 rows for 85 distinct authors)."
+    },
+    {
+      "id": "search_page_first_cte",
+      "name": "Search Page-First Subquery & Tag Tagging",
+      "baseline_rows_read": 14901,
+      "optimized_rows_read": 49,
+      "reduction_percent": "99.6%",
+      "notes": "Bounded tag and author searches with CTE page-first selection before joining tag lists and sanitizing author handles."
+    }
+  ]
+}
