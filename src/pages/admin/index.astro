@@ -1111,6 +1111,12 @@ try {
     }
   }
 
+  function resetDragUi() {
+    document.body.style.userSelect = '';
+    getCurrentPageItems().forEach((el) => el.classList.remove('is-drag-preview'));
+    removeDragSelectBox();
+  }
+
   function cancelActiveDrag() {
     if (dragFrame !== null) {
       cancelAnimationFrame(dragFrame);
@@ -1122,11 +1128,10 @@ try {
         dragState.targetElement.releasePointerCapture(dragState.pointerId);
       } catch {}
 
-      getCurrentPageItems().forEach((el) => el.classList.remove('is-drag-preview'));
       dragState = null;
     }
 
-    removeDragSelectBox();
+    resetDragUi();
   }
 
   function itemsPerPage() {
@@ -1563,10 +1568,8 @@ try {
         dragState.targetElement.releasePointerCapture(e.pointerId);
       } catch {}
 
-      document.body.style.userSelect = '';
-      getCurrentPageItems().forEach((el) => el.classList.remove('is-drag-preview'));
-      removeDragSelectBox();
       dragState = null;
+      resetDragUi();
 
       if (wasActive && e.type === 'pointerup') {
         armClickSuppression();

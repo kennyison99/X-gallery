@@ -144,6 +144,8 @@ test('admin index.astro client script contains complete Pointer Drag Engine wiri
 
   // Verify variables and cleanup definitions
   assert.ok(scriptContent.includes('let suppressNextClick'), 'Must declare suppressNextClick variable');
+  assert.ok(scriptContent.includes('function resetDragUi()'), 'Must define resetDragUi function');
+  assert.ok(scriptContent.includes("document.body.style.userSelect = ''"), 'resetDragUi must restore document.body.style.userSelect');
   assert.ok(scriptContent.includes('function cancelActiveDrag()'), 'Must define cancelActiveDrag function');
   assert.ok(scriptContent.includes('cancelActiveDrag();'), 'Must invoke cancelActiveDrag in view switch and loadPosts');
   assert.ok(scriptContent.includes('drag-select-box'), 'Must manage dynamic marquee drag-select-box');
