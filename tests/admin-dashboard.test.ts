@@ -68,11 +68,13 @@ test('admin subcomponents retain element IDs, metadata inputs, crawler controls,
   const uploadPanelContent = fs.readFileSync(uploadPanelPath, 'utf-8');
   const crawlerPanelContent = fs.readFileSync(crawlerPanelPath, 'utf-8');
 
-  // Check PostManager IDs, empty-state wording, and tab buttons
+  // Check PostManager IDs, empty-state wording, and selection toolbar buttons
   assert.ok(postManagerContent.includes('id="tab-published"'), 'Must include tab-published');
   assert.ok(postManagerContent.includes('id="tab-pending"'), 'Must include tab-pending');
   assert.ok(postManagerContent.includes('id="bulk-actions-bar"'), 'Must include bulk-actions-bar');
   assert.ok(postManagerContent.includes('id="select-all-checkbox"'), 'Must include select-all-checkbox');
+  assert.ok(postManagerContent.includes('id="select-page-btn"'), 'Must include select-page-btn');
+  assert.ok(postManagerContent.includes('id="clear-selection-btn"'), 'Must include clear-selection-btn');
   assert.ok(postManagerContent.includes('id="admin-empty-state"'), 'Must include admin-empty-state');
   assert.ok(postManagerContent.includes('資料庫目前無照片'), 'Must include empty state wording');
 
@@ -100,11 +102,51 @@ test('admin index.astro includes media_counts_ready rollout gate check and table
   assert.ok(content.includes('fallbackVideos'), 'Must accumulate fallbackVideos in unbackfilled state');
 });
 
-test('admin-posts.ts uses NOCASE collation for author index matching and directory cache', () => {
+test('admin-posts.ts uses NOCASE collation, renders drag select handles, and disables image dragging', () => {
   const adminPostsPath = path.resolve('src/pages/api/admin-posts.ts');
   assert.ok(fs.existsSync(adminPostsPath));
 
   const content = fs.readFileSync(adminPostsPath, 'utf-8');
   assert.ok(content.includes('COLLATE NOCASE'), 'Must use COLLATE NOCASE for author filter query');
   assert.ok(content.includes('getDirectoryData'), 'Must use getDirectoryData for tag sanitization');
+  assert.ok(content.includes('data-drag-select-handle'), 'Must render data-drag-select-handle for touch drag selection');
+  assert.ok(content.includes('draggable="false"'), 'Must set draggable="false" on thumbnail images');
+});
+
+test('admin index.astro client script contains complete Pointer Drag Engine wiring, primary button checks, and sync final frame computation', () => {
+  const adminIndexPath = path.resolve('src/pages/admin/index.astro');
+  assert.ok(fs.existsSync(adminIndexPath));
+
+  const content = fs.readFileSync(adminIndexPath, 'utf-8');
+  const scriptContent = content.split('<script>')[1] || '';
+
+  // Verify selection helpers are imported inside client <script>, NOT frontmatter
+  assert.ok(scriptContent.includes("from '../../lib/admin-selection'"), 'Must import admin-selection inside client <script>');
+  assert.ok(scriptContent.includes('computePageSelectionState'), 'Client script must reference computePageSelectionState');
+  assert.ok(scriptContent.includes('applySelectionMode'), 'Client script must reference applySelectionMode');
+  assert.ok(scriptContent.includes('rectOverlap'), 'Client script must reference rectOverlap');
+  assert.ok(scriptContent.includes('getSelectionRect'), 'Client script must reference getSelectionRect');
+
+  // Verify Pointer Events engine handlers and capture
+  assert.ok(scriptContent.includes("addEventListener('pointerdown'"), 'Must bind pointerdown listener');
+  assert.ok(scriptContent.includes("addEventListener('pointermove'"), 'Must bind pointermove listener');
+  assert.ok(scriptContent.includes("addEventListener('pointerup'"), 'Must bind pointerup listener');
+  assert.ok(scriptContent.includes("addEventListener('pointercancel'"), 'Must bind pointercancel listener');
+  assert.ok(scriptContent.includes("addEventListener('dragstart'"), 'Must bind dragstart listener to prevent native image drag');
+  assert.ok(scriptContent.includes('setPointerCapture'), 'Must call setPointerCapture');
+  assert.ok(scriptContent.includes('releasePointerCapture'), 'Must call releasePointerCapture');
+  assert.ok(scriptContent.includes('requestAnimationFrame'), 'Must use requestAnimationFrame for RAF throttling');
+
+  // Verify primary pointer checks and sync final frame calculation on pointerup
+  assert.ok(scriptContent.includes('isPrimary'), 'Must verify e.isPrimary on pointerdown');
+  assert.ok(scriptContent.includes('button !== 0'), 'Must verify e.button === 0 for mouse drag initiation');
+  assert.ok(scriptContent.includes('processDragFrame(latestPointerX, latestPointerY)'), 'Must execute processDragFrame synchronously on pointerup');
+
+  // Verify variables and cleanup definitions
+  assert.ok(scriptContent.includes('let suppressNextClick'), 'Must declare suppressNextClick variable');
+  assert.ok(scriptContent.includes('function resetDragUi()'), 'Must define resetDragUi function');
+  assert.ok(scriptContent.includes("document.body.style.userSelect = ''"), 'resetDragUi must restore document.body.style.userSelect');
+  assert.ok(scriptContent.includes('function cancelActiveDrag()'), 'Must define cancelActiveDrag function');
+  assert.ok(scriptContent.includes('cancelActiveDrag();'), 'Must invoke cancelActiveDrag in view switch and loadPosts');
+  assert.ok(scriptContent.includes('drag-select-box'), 'Must manage dynamic marquee drag-select-box');
 });

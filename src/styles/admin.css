@@ -132,35 +132,90 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
 
-  /* Bulk Actions Floating Bar Styles */
+  /* Bulk Actions Toolbar Styles */
   .bulk-actions {
-    position: fixed;
-    bottom: 2rem;
-    left: 50%;
-    transform: translate(-50%, 100px);
-    z-index: 1000;
+    position: sticky;
+    top: 3.5rem;
+    z-index: 15;
     display: flex;
     align-items: center;
-    gap: 1.25rem;
-    padding: 0.8rem 1.5rem;
-    border-radius: 9999px;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 8px;
     border: 1px solid var(--border-color);
     background-color: var(--bg-card);
-    box-shadow: var(--shadow-md);
-    backdrop-filter: blur(8px);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--transition-speed) ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .bulk-actions.visible {
-    opacity: 1;
-    transform: translate(-50%, 0);
-    pointer-events: auto;
+    box-shadow: var(--shadow-sm);
+    flex-wrap: wrap;
   }
   #selected-count-display {
     font-size: 0.85rem;
     color: var(--text-secondary);
     font-weight: 500;
+  }
+
+  /* Drag Select Handle & State Styling */
+  .drag-select-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.15rem 0.3rem;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    line-height: 1;
+    user-select: none;
+    touch-action: none;
+    cursor: grab;
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  .drag-select-handle:active {
+    cursor: grabbing;
+  }
+
+  .grid-card-select-overlay .drag-select-handle {
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  .grid-image-card {
+    touch-action: pan-y;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .image-row {
+    touch-action: auto;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .image-row.is-selected {
+    background-color: var(--accent-light) !important;
+  }
+
+  .grid-image-card.is-selected {
+    border-color: var(--text-primary) !important;
+    box-shadow: 0 0 0 2px var(--text-primary) !important;
+  }
+
+  .image-row.is-drag-preview {
+    outline: 2px dashed var(--text-primary) !important;
+    outline-offset: -2px;
+  }
+
+  .grid-image-card.is-drag-preview {
+    outline: 2px dashed var(--text-primary) !important;
+    outline-offset: 2px;
+  }
+
+  #drag-select-box {
+    position: fixed;
+    border: 1px dashed var(--text-primary);
+    background-color: rgba(255, 255, 255, 0.15);
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
   }
 
   /* Admin Grid View Styles */

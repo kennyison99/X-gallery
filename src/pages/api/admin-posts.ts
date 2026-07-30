@@ -179,13 +179,16 @@ export const GET: APIRoute = async ({ url }) => {
     // Table row
     tableRows += `<tr class="image-row" data-id="${image.id}" data-published="${image.published}" data-has-photo="${hasPhoto}" data-has-video="${hasVideo}" data-author="${escapeAttr(authorHandle)}" data-author-display-name="${escapeAttr(image.author_display_name || '')}" data-author-search="${escapeAttr(authorSearch)}">
   <td style="text-align: center; vertical-align: middle;">
-    <input type="checkbox" class="image-select-checkbox" data-id="${image.id}" style="cursor: pointer;" />
+    <div style="display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem;">
+      <span class="drag-select-handle" data-drag-select-handle aria-hidden="true" title="拖曳選取貼文" data-id="${image.id}">⋮⋮</span>
+      <input type="checkbox" class="image-select-checkbox" data-id="${image.id}" style="cursor: pointer;" />
+    </div>
   </td>
   <td>
     <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
       ${firstIsVideo
         ? `<video data-src="${r2Url}" class="admin-thumb" preload="metadata" muted playsinline></video>`
-        : `<img data-src="${previewUrl}" alt="${titleAttr}" class="admin-thumb" />`}
+        : `<img data-src="${previewUrl}" alt="${titleAttr}" class="admin-thumb" draggable="false" />`}
       ${totalCount > 1 ? `<span class="thumb-count-badge">+${totalCount - 1}</span>` : ''}
     </div>
   </td>
@@ -214,13 +217,14 @@ export const GET: APIRoute = async ({ url }) => {
 
     // Grid card
     gridCards += `<div class="grid-image-card" data-id="${image.id}" data-published="${image.published}" data-has-photo="${hasPhoto}" data-has-video="${hasVideo}" data-author="${escapeAttr(authorHandle)}" data-author-display-name="${escapeAttr(image.author_display_name || '')}" data-author-search="${escapeAttr(authorSearch)}">
-  <div class="grid-card-select-overlay">
+  <div class="grid-card-select-overlay" style="display: flex; align-items: center; gap: 0.25rem;">
+    <span class="drag-select-handle" data-drag-select-handle aria-hidden="true" title="拖曳選取貼文" data-id="${image.id}">⋮⋮</span>
     <input type="checkbox" class="image-select-checkbox grid-select-checkbox" data-id="${image.id}" style="cursor: pointer;" />
   </div>
   <div class="grid-card-media">
     ${firstIsVideo
       ? `<video data-src="${r2Url}" class="grid-thumb" preload="metadata" muted playsinline></video>`
-      : `<img data-src="${previewUrl}" alt="${titleAttr}" class="grid-thumb" />`}
+      : `<img data-src="${previewUrl}" alt="${titleAttr}" class="grid-thumb" draggable="false" />`}
     ${totalCount > 1 ? `<span class="grid-thumb-count-badge">+${totalCount - 1}</span>` : ''}
     <span class="grid-thumb-size-badge">💾 ${sizeStr}</span>
     <div class="grid-card-hover-overlay">
