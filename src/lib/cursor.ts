@@ -68,14 +68,24 @@ export function encodeCursor(payload: CursorPayload): string {
   return utf8ToBase64Url(JSON.stringify(payload));
 }
 
+export class InvalidCursorError extends Error {
+  constructor(message = 'Invalid cursor parameter') {
+    super(message);
+    this.name = 'InvalidCursorError';
+  }
+}
+
 /**
  * Decodes and strictly validates a cursor payload string.
+ * Throws InvalidCursorError if cursorStr is provided but invalid or mismatched.
  */
 export function decodeCursor(cursorStr: string, expectedFilterKey: string): CursorPayload | null {
   if (!cursorStr || typeof cursorStr !== 'string') return null;
 
   const jsonStr = base64UrlToUtf8(cursorStr);
-  if (!jsonStr) return null;
+  if (!jsonStr) {
+    throw new InvalidCursorError('Malformed Base64 cursor encoding');
+  }
 
   try {
     const parsed = JSON.parse(jsonStr) as Partial<CursorPayload>;
@@ -93,10 +103,12 @@ export function decodeCursor(cursorStr: string, expectedFilterKey: string): Curs
     ) {
       return parsed as CursorPayload;
     }
-  } catch {
-    return null;
+  } catch (e: any) {
+    if (e instanceof InvalidCursorError) throw e;
+    throw new InvalidCursorError('Invalid cursor payload JSON');
   }
-  return null;
+
+  throw new InvalidCursorError('Cursor filterKey mismatch or invalid fields');
 }
 
 /**

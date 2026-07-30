@@ -29,8 +29,8 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json().catch(() => ({}));
     const cursor = typeof body.cursor === 'number' && body.cursor >= 0 ? body.cursor : 0;
-    const requestedLimit = typeof body.limit === 'number' && body.limit > 0 ? body.limit : 100;
-    const limit = Math.min(requestedLimit, 200);
+    const requestedLimit = typeof body.limit === 'number' && body.limit > 0 ? body.limit : 40;
+    const limit = Math.min(requestedLimit, 40);
 
     // Query un-backfilled rows using index
     const { results = [] } = await env.DB.prepare(`

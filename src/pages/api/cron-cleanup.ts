@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { addStorageBytes } from '../../lib/storage';
+import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
 
 /**
  * POST /api/cron-cleanup
@@ -42,8 +43,8 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    const expiredIds = results.map((row) => row.id);
     let freedBytes = 0;
-    let deletedCount = 0;
 
     for (const row of results) {
       const keys = row.r2_keys.split(',').map((k) => k.trim()).filter(Boolean);
@@ -58,16 +59,15 @@ export const POST: APIRoute = async ({ request }) => {
           console.error(`Failed to delete R2 key ${key}:`, err);
         }
       }
-
-      // Delete from D1 (cascade handles image_tags)
-      await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(row.id).run();
-      deletedCount++;
     }
 
-    // Clean up orphaned tags in bounded batch of 100
-    await env.DB.prepare(
-      `DELETE FROM tags WHERE id IN (SELECT t.id FROM tags t LEFT JOIN image_tags it ON t.id = it.tag_id WHERE it.tag_id IS NULL LIMIT 100)`
-    ).run();
+    // Single atomic batch: delete expired images and orphaned tags, and bump directory version
+    const placeholders = expiredIds.map(() => '?').join(',');
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).bind(...expiredIds),
+      env.DB.prepare(`DELETE FROM tags WHERE id IN (SELECT t.id FROM tags t LEFT JOIN image_tags it ON t.id = it.tag_id WHERE it.tag_id IS NULL LIMIT 100)`),
+      createBumpDirectoryVersionStmt(env.DB),
+    ]);
 
     // Decrement storage counter
     if (freedBytes > 0) {

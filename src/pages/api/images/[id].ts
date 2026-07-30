@@ -206,13 +206,36 @@ export const PUT: APIRoute = async ({ params, request }) => {
       const finalKeysString = finalKeys.join(',');
       const { photoCount, videoCount } = classifyMediaKeys(finalKeysString);
 
+      // Process and ensure tags exist prior to single batch transaction
+      const tags = (tagsString || '')
+        .split(/[\s,]+/)
+        .map(t => t.trim().replace(/^#/, ''))
+        .filter(t => t.length > 0);
+
+      const tagIdMap = new Map<string, number>();
+      for (const tagName of tags) {
+        await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName).run();
+        const tagResult = await env.DB.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: number }>();
+        if (tagResult) {
+          tagIdMap.set(tagName, tagResult.id);
+        }
+      }
+
       const updateStmt = env.DB.prepare(
         "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, photo_count = ?, video_count = ?, media_count_version = 1, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id = ?"
       ).bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, photoCount, videoCount, imageId);
 
+      const deleteImageTagsStmt = env.DB.prepare('DELETE FROM image_tags WHERE image_id = ?').bind(imageId);
+      const linkTagStmts = Array.from(tagIdMap.values()).map((tagId) =>
+        env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)').bind(imageId, tagId)
+      );
+
+      // Atomic single transaction: update image, update tags, and bump version together
       await env.DB.batch([
-        createBumpDirectoryVersionStmt(env.DB),
         updateStmt,
+        deleteImageTagsStmt,
+        ...linkTagStmts,
+        createBumpDirectoryVersionStmt(env.DB),
       ]);
     } catch (error) {
       for (const key of newlyUploadedKeys) {
@@ -232,36 +255,6 @@ export const PUT: APIRoute = async ({ params, request }) => {
       }
     }
     await addStorageBytes(incomingBytes - deletedBytes);
-
-    // 2. Clean current tags associations
-    await env.DB.prepare('DELETE FROM image_tags WHERE image_id = ?')
-      .bind(imageId)
-      .run();
-
-    // 3. Process tags
-    const tags = (tagsString || '')
-      .split(/[\s,]+/)
-      .map(t => t.trim().replace(/^#/, ''))
-      .filter(t => t.length > 0);
-
-    for (const tagName of tags) {
-      // Insert tag if not exists
-      await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)')
-        .bind(tagName)
-        .run();
-
-      // Get tag ID
-      const tagResult = await env.DB.prepare('SELECT id FROM tags WHERE name = ?')
-        .bind(tagName)
-        .first();
-
-      if (tagResult) {
-        // Link image and tag
-        await env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)')
-          .bind(imageId, tagResult.id)
-          .run();
-      }
-    }
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' }

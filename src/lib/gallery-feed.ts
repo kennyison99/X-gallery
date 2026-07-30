@@ -114,7 +114,12 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
 
   const whereSql = whereClauses.join(' AND ');
 
-  bindings.push(options.limit + 1, options.offset);
+  bindings.push(options.limit + 1);
+  let offsetClause = '';
+  if (!decodedCursor && options.offset > 0) {
+    offsetClause = 'OFFSET ?';
+    bindings.push(options.offset);
+  }
 
   const tagJoin = options.tag
     ? `JOIN image_tags selected_it ON i.id = selected_it.image_id JOIN tags selected_tag ON selected_it.tag_id = selected_tag.id`
@@ -128,7 +133,7 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
         ${tagJoin}
         WHERE ${whereSql}
         ORDER BY i.created_at ${direction}, i.id ${direction}
-        LIMIT ? OFFSET ?
+        LIMIT ? ${offsetClause}
       )
       SELECT p.*, group_concat(t.name) AS tags_list
       FROM page_images p

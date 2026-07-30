@@ -64,12 +64,13 @@ export async function getDirectoryData(
   }
 
   // 3. Fail-open Cache API check if available
+  const cache = options.cache ?? (typeof caches !== 'undefined' ? (caches as any).default : undefined);
   const baseUrl = options.cacheBaseUrl ?? 'http://localhost';
   const cacheKey = `${baseUrl}/api/directory-cache-${scope}-v${version}`;
 
-  if (options.cache) {
+  if (cache) {
     try {
-      const match = await options.cache.match(cacheKey);
+      const match = await cache.match(cacheKey);
       if (match) {
         const raw = await match.json();
         const data: DirectoryData = {
@@ -119,7 +120,7 @@ export async function getDirectoryData(
   memoryCache[scope] = { version, data };
 
   // Fail-open Cache API write
-  if (options.cache) {
+  if (cache) {
     try {
       const responsePayload = {
         version,
@@ -133,7 +134,7 @@ export async function getDirectoryData(
           'Cache-Control': 'public, max-age=86400',
         },
       });
-      await options.cache.put(cacheKey, res);
+      await cache.put(cacheKey, res);
     } catch {
       // Fail open on Cache API put errors
     }

@@ -12,6 +12,7 @@ import {
 } from '../../lib/dedup-media';
 import { addStorageBytes } from '../../lib/storage';
 import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
+import { classifyMediaKeys } from '../../lib/media-classifier';
 
 const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 50;
@@ -179,8 +180,11 @@ async function applyMediaFix(requested: MediaDuplicateFix) {
 
   const deleteSet = new Set(current.delete_keys);
   const remaining = splitR2Keys(row.r2_keys).filter((key) => !deleteSet.has(key));
-  await env.DB.prepare('UPDATE images SET r2_keys = ? WHERE id = ?')
-    .bind(remaining.join(','), row.id)
+  const remainingStr = remaining.join(',');
+  const { photoCount, videoCount } = classifyMediaKeys(remainingStr);
+
+  await env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?')
+    .bind(remainingStr, photoCount, videoCount, row.id)
     .run();
   const deleted = await deleteObjects(current.delete_keys, objects);
   return { ...deleted, deletedCards: 0, fixedId: row.id };
@@ -208,13 +212,20 @@ async function applyCardFix(requested: CardDuplicateFix) {
     INSERT OR IGNORE INTO image_tags (image_id, tag_id)
     SELECT ?, tag_id FROM image_tags WHERE image_id = ?
   `).bind(current.keep_id, deleteId));
+
+  const keepRow = results.find((r) => r.id === current.keep_id);
+  const deleteSet = new Set(current.delete_keys);
+  const remainingKeys = splitR2Keys(keepRow?.r2_keys).filter((k) => !deleteSet.has(k)).join(',');
+  const { photoCount, videoCount } = classifyMediaKeys(remainingKeys);
+
   statements.push(
-    env.DB.prepare('UPDATE images SET likes = ?, published = ? WHERE id = ?')
-      .bind(maxLikes, maxPublished, current.keep_id),
+    env.DB.prepare('UPDATE images SET likes = ?, published = ?, r2_keys = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?')
+      .bind(maxLikes, maxPublished, remainingKeys, photoCount, videoCount, current.keep_id),
     env.DB.prepare(`DELETE FROM image_tags WHERE image_id IN (${deletePlaceholders})`)
       .bind(...current.delete_ids),
     env.DB.prepare(`DELETE FROM images WHERE id IN (${deletePlaceholders})`)
       .bind(...current.delete_ids),
+    createBumpDirectoryVersionStmt(env.DB),
   );
   await env.DB.batch(statements);
 

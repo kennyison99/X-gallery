@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { encodeCursor, decodeCursor, buildFilterKey, generateCursorWhereClause } from '../src/lib/cursor.ts';
+import { encodeCursor, decodeCursor, buildFilterKey, generateCursorWhereClause, InvalidCursorError } from '../src/lib/cursor.ts';
 
 test('cursor encoding and decoding with UTF-8 Chinese, Emojis, and URL safety', () => {
   const filterKey = buildFilterKey('search', { q: '崩壞：星穹鐵道 🎨', tag: '原神', author: '@GenshinImpact' });
@@ -24,18 +24,18 @@ test('cursor encoding and decoding with UTF-8 Chinese, Emojis, and URL safety', 
   assert.equal(decoded?.filterKey, filterKey);
 });
 
-test('cursor validation rejects mismatched filterKey, invalid timestamp format, or bad version', () => {
+test('cursor validation throws InvalidCursorError for mismatched filterKey, invalid timestamp format, or bad version', () => {
   const filterKeyA = buildFilterKey('gallery', { tag: '原神', sort: 'newest' });
   const filterKeyB = buildFilterKey('gallery', { tag: '崩壞', sort: 'newest' });
 
   const encoded = encodeCursor({ v: 1, sort: 'newest', createdAt: '2026-07-30 12:34:56', id: 100, filterKey: filterKeyA });
 
   // Mismatched filterKey
-  assert.equal(decodeCursor(encoded, filterKeyB), null, 'Must reject cursor if filterKey does not match');
+  assert.throws(() => decodeCursor(encoded, filterKeyB), InvalidCursorError);
 
   // Bad Base64 / malformed JSON
-  assert.equal(decodeCursor('!!!not_base64!!!', filterKeyA), null, 'Must reject invalid Base64');
-  assert.equal(decodeCursor(btoa('{"v":999}'), filterKeyA), null, 'Must reject invalid version');
+  assert.throws(() => decodeCursor('!!!not_base64!!!', filterKeyA), InvalidCursorError);
+  assert.throws(() => decodeCursor(btoa('{"v":999}'), filterKeyA), InvalidCursorError);
 });
 
 test('generateCursorWhereClause creates correct SQL predicate for newest and oldest sort', () => {

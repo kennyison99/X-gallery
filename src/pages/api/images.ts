@@ -16,6 +16,8 @@ import {
 import { getDirectoryData, createBumpDirectoryVersionStmt } from '../../lib/directory-data';
 import { classifyMediaKeys } from '../../lib/media-classifier';
 
+import { InvalidCursorError } from '../../lib/cursor';
+
 export const GET: APIRoute = async ({ url }) => {
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ error: 'D1 DB binding "DB" is not configured' }), {
@@ -35,7 +37,7 @@ export const GET: APIRoute = async ({ url }) => {
       });
     }
 
-    const { items, hasMore } = await fetchGalleryBatch(env.DB, batchParams);
+    const { items, hasMore, nextCursor } = await fetchGalleryBatch(env.DB, batchParams);
 
     // Fetch cached directory data to sanitize tag lists (1 D1 row read on cache hit)
     const directory = await getDirectoryData(env.DB, 'public');
@@ -47,17 +49,23 @@ export const GET: APIRoute = async ({ url }) => {
         : []
     }));
 
-    return new Response(JSON.stringify(formattedImages), {
+    return new Response(JSON.stringify({
+      items: formattedImages,
+      hasMore,
+      nextCursor,
+    }), {
       headers: {
         'Content-Type': 'application/json',
         'X-Has-More': String(hasMore),
+        'X-Next-Cursor': String(nextCursor ?? ''),
         'X-Offset': String(batchParams.offset),
         'X-Limit': String(batchParams.limit),
       }
     });
   } catch (error: any) {
+    const status = error instanceof InvalidCursorError ? 400 : 500;
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+      status,
       headers: { 'Content-Type': 'application/json' }
     });
   }

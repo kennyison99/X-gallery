@@ -114,6 +114,9 @@ try {
     // Fallback scan for unbackfilled state
     const authorRows = await env.DB.prepare('SELECT author, author_display_name, r2_keys FROM images').all();
     const authorMap = new Map<string, { display: string | null; photos: number; videos: number }>();
+    let fallbackPhotos = 0;
+    let fallbackVideos = 0;
+
     (authorRows.results || []).forEach((row: any) => {
       const author = row.author;
       const displayName = row.author_display_name || null;
@@ -128,6 +131,9 @@ try {
           photosCount++;
         }
       });
+      fallbackPhotos += photosCount;
+      fallbackVideos += videosCount;
+
       const current = authorMap.get(author) || { display: displayName, photos: 0, videos: 0 };
       authorMap.set(author, {
         display: displayName || current.display,
@@ -135,6 +141,10 @@ try {
         videos: current.videos + videosCount,
       });
     });
+
+    totalPhotos = fallbackPhotos;
+    totalVideos = fallbackVideos;
+
     authorStats = Array.from(authorMap.entries()).map(([author, data]) => ({
       author,
       author_display_name: data.display,
