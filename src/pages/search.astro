@@ -221,11 +221,14 @@ if (q || filterTag || filterWork || filterAuthor) {
   // Setup click listeners for like buttons on search page
   function setupLikes() {
     document.querySelectorAll('.image-card').forEach((card) => {
+      if ((card as HTMLElement).dataset.likeInitialized === 'true') return;
+
       const imgId = card.getAttribute('data-id');
       const likeBtn = card.querySelector('.like-button');
       const likeCountSpan = card.querySelector('.like-count');
 
       if (!likeBtn || !likeCountSpan || !imgId) return;
+      (card as HTMLElement).dataset.likeInitialized = 'true';
 
       // Restore likes
       const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');

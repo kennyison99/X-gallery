@@ -49,11 +49,7 @@ export const GET: APIRoute = async ({ url }) => {
         : []
     }));
 
-    return new Response(JSON.stringify({
-      items: formattedImages,
-      hasMore,
-      nextCursor,
-    }), {
+    return new Response(JSON.stringify(formattedImages), {
       headers: {
         'Content-Type': 'application/json',
         'X-Has-More': String(hasMore),

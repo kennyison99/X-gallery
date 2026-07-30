@@ -66,16 +66,22 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    // Check remaining un-backfilled rows
-    const remainingRow = await env.DB.prepare(
-      'SELECT COUNT(*) AS remaining FROM images WHERE media_count_version < 1'
-    ).first<{ remaining: number }>();
-    const remaining = Number(remainingRow?.remaining ?? 0);
-
+    // Check remaining un-backfilled rows efficiently
+    let remaining = 0;
     let mediaCountsReady = false;
-    if (remaining === 0) {
-      await env.DB.prepare('UPDATE storage_stats SET media_counts_ready = 1 WHERE id = 1').run();
-      mediaCountsReady = true;
+
+    if (hasMore) {
+      remaining = limit + 1; // Indicate remaining rows exist without full table scan
+    } else {
+      const remainingRow = await env.DB.prepare(
+        'SELECT COUNT(*) AS remaining FROM images WHERE media_count_version < 1'
+      ).first<{ remaining: number }>();
+      remaining = Number(remainingRow?.remaining ?? 0);
+
+      if (remaining === 0) {
+        await env.DB.prepare('UPDATE storage_stats SET media_counts_ready = 1 WHERE id = 1').run();
+        mediaCountsReady = true;
+      }
     }
 
     return json({

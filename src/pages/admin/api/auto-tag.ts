@@ -53,15 +53,12 @@ export const POST: APIRoute = async ({ request }) => {
       });
 
       if (statements.length > 0) {
+        statements.push(createBumpDirectoryVersionStmt(env.DB));
         const linkResults = await env.DB.batch(statements);
-        added = linkResults.reduce(
+        added = linkResults.slice(0, -1).reduce(
           (sum, result) => sum + Number(result.meta?.changes ?? 0),
           0
         );
-
-        if (added > 0) {
-          await createBumpDirectoryVersionStmt(env.DB).run();
-        }
       }
     }
 

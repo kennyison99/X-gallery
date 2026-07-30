@@ -183,9 +183,19 @@ async function applyMediaFix(requested: MediaDuplicateFix) {
   const remainingStr = remaining.join(',');
   const { photoCount, videoCount } = classifyMediaKeys(remainingStr);
 
-  await env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?')
-    .bind(remainingStr, photoCount, videoCount, row.id)
-    .run();
+  let photoBytes = 0;
+  let videoBytes = 0;
+  remaining.forEach((k) => {
+    const size = objects.get(k)?.size ?? 0;
+    if (k.toLowerCase().match(/\.(mp4|webm|mov|m4v)$/)) videoBytes += size;
+    else photoBytes += size;
+  });
+
+  await env.DB.batch([
+    env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
+      .bind(remainingStr, photoCount, videoCount, photoBytes, videoBytes, row.id),
+    createBumpDirectoryVersionStmt(env.DB),
+  ]);
   const deleted = await deleteObjects(current.delete_keys, objects);
   return { ...deleted, deletedCards: 0, fixedId: row.id };
 }
@@ -215,12 +225,21 @@ async function applyCardFix(requested: CardDuplicateFix) {
 
   const keepRow = results.find((r) => r.id === current.keep_id);
   const deleteSet = new Set(current.delete_keys);
-  const remainingKeys = splitR2Keys(keepRow?.r2_keys).filter((k) => !deleteSet.has(k)).join(',');
-  const { photoCount, videoCount } = classifyMediaKeys(remainingKeys);
+  const remainingKeys = splitR2Keys(keepRow?.r2_keys).filter((k) => !deleteSet.has(k));
+  const remainingStr = remainingKeys.join(',');
+  const { photoCount, videoCount } = classifyMediaKeys(remainingStr);
+
+  let photoBytes = 0;
+  let videoBytes = 0;
+  remainingKeys.forEach((k) => {
+    const size = objects.get(k)?.size ?? 0;
+    if (k.toLowerCase().match(/\.(mp4|webm|mov|m4v)$/)) videoBytes += size;
+    else photoBytes += size;
+  });
 
   statements.push(
-    env.DB.prepare('UPDATE images SET likes = ?, published = ?, r2_keys = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?')
-      .bind(maxLikes, maxPublished, remainingKeys, photoCount, videoCount, current.keep_id),
+    env.DB.prepare('UPDATE images SET likes = ?, published = ?, r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
+      .bind(maxLikes, maxPublished, remainingStr, photoCount, videoCount, photoBytes, videoBytes, current.keep_id),
     env.DB.prepare(`DELETE FROM image_tags WHERE image_id IN (${deletePlaceholders})`)
       .bind(...current.delete_ids),
     env.DB.prepare(`DELETE FROM images WHERE id IN (${deletePlaceholders})`)
@@ -286,14 +305,13 @@ export const POST: APIRoute = async ({ request }) => {
       fixedIds.push(result.fixedId);
     }
 
-    await addStorageBytes(-freedBytes);
-    if (deletedCards > 0) {
-      await createBumpDirectoryVersionStmt(env.DB).run();
+    if (freedBytes > 0) {
+      await addStorageBytes(-freedBytes);
     }
+
     return json({
       success: true,
-      fixed: fixedIds.length,
-      deleted_cards: deletedCards,
+      fixed_cards: deletedCards,
       deleted_objects: deletedObjects,
       freed_bytes: freedBytes,
       fixed_ids: fixedIds,

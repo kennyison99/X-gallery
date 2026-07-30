@@ -41,16 +41,18 @@ function runQuery(sql) {
   const cmd = `npx wrangler d1 execute gallery-db --remote --json --command=${JSON.stringify(sql)}`;
   const env = { ...process.env, CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID };
   try {
-    const raw = execSync(cmd, { env, encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] });
+    const raw = execSync(cmd, { env, encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
     const parsed = JSON.parse(raw);
     const resultObj = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (resultObj?.error) {
+      throw new Error(`D1 Query Error: ${resultObj.error}`);
+    }
     return {
       results: resultObj?.results ?? [],
       meta: resultObj?.meta ?? {},
     };
-  } catch (err) {
-    console.error('Error running D1 query benchmark:', err.message);
-    return { results: [], meta: { error: err.message } };
+  } catch (err: any) {
+    return { results: [], meta: { error: err.message || String(err) } };
   }
 }
 

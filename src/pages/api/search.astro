@@ -3,18 +3,22 @@ import { env } from 'cloudflare:workers';
 import ImageCard from '../../components/ImageCard.astro';
 import { parseSearchParams, fetchSearchBatch } from '../../lib/search-query';
 
+import { InvalidCursorError } from '../../lib/cursor';
+
 if (!env?.DB) {
   return new Response('D1 DB binding is not configured', { status: 500 });
 }
 
-let params;
+let batchResult;
 try {
-  params = parseSearchParams(Astro.url.searchParams);
+  const params = parseSearchParams(Astro.url.searchParams);
+  batchResult = await fetchSearchBatch(env.DB, params);
 } catch (error) {
-  return new Response(error instanceof Error ? error.message : 'Invalid request', { status: 400 });
+  const status = error instanceof InvalidCursorError ? 400 : (error instanceof Error && error.message.startsWith('Invalid') ? 400 : 500);
+  return new Response(error instanceof Error ? error.message : 'Invalid request', { status });
 }
 
-const { items, hasMore, nextCursor } = await fetchSearchBatch(env.DB, params);
+const { items, hasMore, nextCursor } = batchResult;
 
 Astro.response.headers.set('Cache-Control', 'no-store');
 ---
