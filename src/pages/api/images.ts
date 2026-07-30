@@ -22,7 +22,16 @@ export const GET: APIRoute = async ({ url }) => {
   }
 
   try {
-    const batchParams = parseGalleryBatchParams(url.searchParams);
+    let batchParams;
+    try {
+      batchParams = parseGalleryBatchParams(url.searchParams);
+    } catch (paramErr: any) {
+      return new Response(JSON.stringify({ error: paramErr.message }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     const { items, hasMore } = await fetchGalleryBatch(env.DB, batchParams);
 
     // Fetch distinct authors for active posts to sanitize tag lists
@@ -36,8 +45,13 @@ export const GET: APIRoute = async ({ url }) => {
         : []
     }));
 
-    return new Response(JSON.stringify({ images: formattedImages, hasMore, offset: batchParams.offset, limit: batchParams.limit }), {
-      headers: { 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify(formattedImages), {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Has-More': String(hasMore),
+        'X-Offset': String(batchParams.offset),
+        'X-Limit': String(batchParams.limit),
+      }
     });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), {

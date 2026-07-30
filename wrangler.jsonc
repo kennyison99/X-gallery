@@ -3,6 +3,7 @@
 	"compatibility_date": "2026-06-18",
 	"compatibility_flags": ["global_fetch_strictly_public"],
 	"name": "x-gallery",
+	"account_id": "42262e62f0ff1107d0eb78d92a94d873",
 	"main": "./src/worker-entry.ts",
 	"assets": {
 		"directory": "./dist",

@@ -30,12 +30,14 @@ const mm = getVal('minute');
 
 const versionString = `v${YYYY}.${MM}.${DD}(${HH}${mm})-${commitHash}`;
 
+const isCI = process.env.CI === 'true';
+
 // https://astro.build/config
 export default defineConfig({
   output: 'server',
   adapter: cloudflare({
     platformProxy: {
-      enabled: true
+      enabled: !isCI && process.env.NODE_ENV !== 'production'
     }
   }),
   security: {

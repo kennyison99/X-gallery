@@ -189,15 +189,15 @@ async function main() {
   }));
 
   console.log(`  Running Union-Find clustering across ${items.length} images (Threshold: ${THRESHOLD} bits)...`);
-  const { keeperIds, pendingIds, matches } = buildDuplicateClusters(items, THRESHOLD);
+  const { keeperIds, pendingIds, matches, totalMatchPairsCount } = buildDuplicateClusters(items, THRESHOLD);
 
-  console.log(`\nFound ${matches.length} high-similarity image pair match(es) across ${items.length} assets.`);
-  console.log(`Unique duplicate posts flagged for review: ${pendingIds.length}`);
+  console.log(`\nFound ${totalMatchPairsCount} high-similarity image pair match(es) across ${items.length} assets.`);
+  console.log(`Unique duplicate posts flagged for pending review: ${pendingIds.length}`);
 
   if (matches.length > 0) {
-    console.log('\nSample Similarity Matches (up to 10):');
+    console.log('\nSample Pair-level Candidate Matches (up to 10):');
     for (const m of matches.slice(0, 10)) {
-      console.log(`  Distance ${m.distance} (${m.similarity}): Keep Post #${m.keeperPostId} ("${m.keeperTitle || 'Untitled'}"), Flag Post #${m.flagPostId} ("${m.flagTitle || 'Untitled'}")`);
+      console.log(`  Distance ${m.distance} (${m.similarity}): Preferred Candidate Post #${m.preferredPostId} ("${m.preferredTitle || 'Untitled'}"), Compare Candidate Post #${m.candidatePostId} ("${m.candidateTitle || 'Untitled'}")`);
     }
   }
 

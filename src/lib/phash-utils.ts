@@ -9,10 +9,10 @@ export interface ImageHashItem {
 }
 
 export interface ClusterMatch {
-  keeperPostId: number;
-  keeperTitle?: string | null;
-  flagPostId: number;
-  flagTitle?: string | null;
+  preferredPostId: number;
+  preferredTitle?: string | null;
+  candidatePostId: number;
+  candidateTitle?: string | null;
   distance: number;
   similarity: string;
 }
@@ -21,6 +21,7 @@ export interface ClusterResult {
   keeperIds: number[];
   pendingIds: number[];
   matches: ClusterMatch[];
+  totalMatchPairsCount: number;
 }
 
 /**
@@ -108,17 +109,18 @@ export class UnionFind {
   }
 }
 
+const MAX_SAMPLE_MATCHES = 100;
+
 /**
   * Build connected duplicate clusters from image pHashes and pick canonical winners.
-  * Correctness Rule: A post that loses in ANY cluster comparison is marked as pending.
-  * Winner status in one cluster cannot override a loser status in another cluster.
+  * Bounded memory protection: caps sample matches array size to max 100 items.
   */
 export function buildDuplicateClusters(
   items: ImageHashItem[],
   threshold: number,
 ): ClusterResult {
   if (items.length === 0) {
-    return { keeperIds: [], pendingIds: [], matches: [] };
+    return { keeperIds: [], pendingIds: [], matches: [], totalMatchPairsCount: 0 };
   }
 
   // Pre-parse hex pHashes into BigInts to optimize O(N^2) bitwise comparisons
@@ -134,6 +136,7 @@ export function buildDuplicateClusters(
 
   const uf = new UnionFind(parsedItems.length);
   const matches: ClusterMatch[] = [];
+  let totalMatchPairsCount = 0;
 
   for (let i = 0; i < parsedItems.length; i++) {
     for (let j = i + 1; j < parsedItems.length; j++) {
@@ -151,22 +154,25 @@ export function buildDuplicateClusters(
 
       if (dist <= threshold) {
         uf.union(i, j);
+        totalMatchPairsCount++;
 
-        let keep = a;
-        let flag = b;
-        if (b.likes > a.likes || (b.likes === a.likes && b.imageId < a.imageId)) {
-          keep = b;
-          flag = a;
+        if (matches.length < MAX_SAMPLE_MATCHES) {
+          let pref = a;
+          let cand = b;
+          if (b.likes > a.likes || (b.likes === a.likes && b.imageId < a.imageId)) {
+            pref = b;
+            cand = a;
+          }
+
+          matches.push({
+            preferredPostId: pref.imageId,
+            preferredTitle: pref.title,
+            candidatePostId: cand.imageId,
+            candidateTitle: cand.title,
+            distance: dist,
+            similarity: `${(((64 - dist) / 64) * 100).toFixed(1)}%`,
+          });
         }
-
-        matches.push({
-          keeperPostId: keep.imageId,
-          keeperTitle: keep.title,
-          flagPostId: flag.imageId,
-          flagTitle: flag.title,
-          distance: dist,
-          similarity: `${(((64 - dist) / 64) * 100).toFixed(1)}%`,
-        });
       }
     }
   }
@@ -184,7 +190,6 @@ export function buildDuplicateClusters(
   const pendingIdsSet = new Set<number>();
 
   for (const group of clustersMap.values()) {
-    // Unique posts in this cluster
     const uniquePostsMap = new Map<number, (typeof parsedItems)[0]>();
     for (const item of group) {
       if (!uniquePostsMap.has(item.imageId)) {
@@ -213,9 +218,7 @@ export function buildDuplicateClusters(
     }
   }
 
-  // Correctness Rule (Blocker 2):
-  // If a post lost in ANY cluster (present in pendingIdsSet), it MUST go to pending review!
-  // It can NEVER remain a keeper just because it won in another separate cluster.
+  // Correctness Rule: If a post lost in ANY cluster, it MUST go to pending review!
   for (const pId of pendingIdsSet) {
     keeperIdsSet.delete(pId);
   }
@@ -224,6 +227,7 @@ export function buildDuplicateClusters(
     keeperIds: [...keeperIdsSet],
     pendingIds: [...pendingIdsSet],
     matches,
+    totalMatchPairsCount,
   };
 }
 
