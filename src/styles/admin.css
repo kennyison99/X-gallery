@@ -180,9 +180,13 @@
     background: rgba(0, 0, 0, 0.55);
   }
 
-  .image-row,
   .grid-image-card {
     touch-action: pan-y;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .image-row {
+    touch-action: auto;
     transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
   }
 

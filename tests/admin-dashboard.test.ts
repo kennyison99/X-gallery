@@ -111,3 +111,33 @@ test('admin-posts.ts uses NOCASE collation for author index matching and renders
   assert.ok(content.includes('getDirectoryData'), 'Must use getDirectoryData for tag sanitization');
   assert.ok(content.includes('data-drag-select-handle'), 'Must render data-drag-select-handle for touch drag selection');
 });
+
+test('admin index.astro client script contains complete Pointer Drag Engine wiring and client-side helper imports', () => {
+  const adminIndexPath = path.resolve('src/pages/admin/index.astro');
+  assert.ok(fs.existsSync(adminIndexPath));
+
+  const content = fs.readFileSync(adminIndexPath, 'utf-8');
+  const scriptContent = content.split('<script>')[1] || '';
+
+  // Verify selection helpers are imported inside client <script>, NOT frontmatter
+  assert.ok(scriptContent.includes("from '../../lib/admin-selection'"), 'Must import admin-selection inside client <script>');
+  assert.ok(scriptContent.includes('computePageSelectionState'), 'Client script must reference computePageSelectionState');
+  assert.ok(scriptContent.includes('applySelectionMode'), 'Client script must reference applySelectionMode');
+  assert.ok(scriptContent.includes('rectOverlap'), 'Client script must reference rectOverlap');
+  assert.ok(scriptContent.includes('getSelectionRect'), 'Client script must reference getSelectionRect');
+
+  // Verify Pointer Events engine handlers and capture
+  assert.ok(scriptContent.includes("addEventListener('pointerdown'"), 'Must bind pointerdown listener');
+  assert.ok(scriptContent.includes("addEventListener('pointermove'"), 'Must bind pointermove listener');
+  assert.ok(scriptContent.includes("addEventListener('pointerup'"), 'Must bind pointerup listener');
+  assert.ok(scriptContent.includes("addEventListener('pointercancel'"), 'Must bind pointercancel listener');
+  assert.ok(scriptContent.includes('setPointerCapture'), 'Must call setPointerCapture');
+  assert.ok(scriptContent.includes('releasePointerCapture'), 'Must call releasePointerCapture');
+  assert.ok(scriptContent.includes('requestAnimationFrame'), 'Must use requestAnimationFrame for RAF throttling');
+
+  // Verify variables and cleanup definitions
+  assert.ok(scriptContent.includes('let suppressNextClick'), 'Must declare suppressNextClick variable');
+  assert.ok(scriptContent.includes('function cancelActiveDrag()'), 'Must define cancelActiveDrag function');
+  assert.ok(scriptContent.includes('cancelActiveDrag();'), 'Must invoke cancelActiveDrag in view switch and loadPosts');
+  assert.ok(scriptContent.includes('drag-select-box'), 'Must manage dynamic marquee drag-select-box');
+});

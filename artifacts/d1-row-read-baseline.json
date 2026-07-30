@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-07-30T13:24:13.108Z",
-  "schema_validated": true,
+  "timestamp": "2026-07-30T12:57:42.619Z",
+  "schema_validated": false,
   "scenarios": [
     {
       "id": "gallery_page1_offset",
@@ -11,8 +11,8 @@
       "returned_rows": 49,
       "rows_read": 49,
       "rows_written": 0,
-      "duration_ms": 0.8776,
-      "sql_duration_ms": 0.8776
+      "duration_ms": 0.6761,
+      "sql_duration_ms": 0.6761
     },
     {
       "id": "gallery_deep_offset",
@@ -23,8 +23,8 @@
       "returned_rows": 49,
       "rows_read": 1049,
       "rows_written": 0,
-      "duration_ms": 0.8262,
-      "sql_duration_ms": 0.8262
+      "duration_ms": 1.3142,
+      "sql_duration_ms": 1.3142
     },
     {
       "id": "public_distinct_authors",
@@ -33,10 +33,10 @@
       "executed_sql": "SELECT DISTINCT author FROM images WHERE published = 1;",
       "fallback_used": false,
       "returned_rows": 85,
-      "rows_read": 86,
+      "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 0.6908,
-      "sql_duration_ms": 0.6908
+      "duration_ms": 2.592,
+      "sql_duration_ms": 2.592
     },
     {
       "id": "admin_overview_full_scan",
@@ -47,8 +47,8 @@
       "returned_rows": 18004,
       "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 79.4236,
-      "sql_duration_ms": 79.4236
+      "duration_ms": 70.9007,
+      "sql_duration_ms": 70.9007
     },
     {
       "id": "admin_posts_count",
@@ -59,8 +59,8 @@
       "returned_rows": 1,
       "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 2.5412,
-      "sql_duration_ms": 2.5412
+      "duration_ms": 4.9925,
+      "sql_duration_ms": 4.9925
     },
     {
       "id": "search_keyword_like",
@@ -71,8 +71,8 @@
       "returned_rows": 49,
       "rows_read": 14873,
       "rows_written": 0,
-      "duration_ms": 23.9051,
-      "sql_duration_ms": 23.9051
+      "duration_ms": 12.7998,
+      "sql_duration_ms": 12.7998
     }
   ]
 }

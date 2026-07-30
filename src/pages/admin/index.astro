@@ -9,12 +9,6 @@ import AdminPostManager from '../../components/admin/AdminPostManager.astro';
 import AdminCrawlerPanel from '../../components/admin/AdminCrawlerPanel.astro';
 import AdminAutoTagPanel from '../../components/admin/AdminAutoTagPanel.astro';
 import { getDirectoryData } from '../../lib/directory-data';
-import {
-  rectOverlap,
-  getSelectionRect,
-  computePageSelectionState,
-  applySelectionMode,
-} from '../../lib/admin-selection';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
@@ -204,6 +198,12 @@ try {
 
 <script>
   import { resolveAdminTab } from '../../lib/admin-dashboard';
+  import {
+    rectOverlap,
+    getSelectionRect,
+    computePageSelectionState,
+    applySelectionMode,
+  } from '../../lib/admin-selection';
 
   // Lazily load post manager thumbnails only when the posts tab is active,
   // so hidden panels don't trigger R2 fetches on page load.
@@ -1060,6 +1060,75 @@ try {
   let postsLoading = false;
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
+  let suppressNextClick = false;
+  let suppressClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function armClickSuppression() {
+    suppressNextClick = true;
+    if (suppressClickTimer) clearTimeout(suppressClickTimer);
+    suppressClickTimer = setTimeout(() => {
+      suppressNextClick = false;
+    }, 300);
+  }
+
+  interface CachedItemRect {
+    id: number;
+    element: HTMLElement;
+    rect: { left: number; top: number; right: number; bottom: number };
+  }
+
+  interface DragState {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+    mode: 'add' | 'remove';
+    baseSelection: Set<number>;
+    candidateIds: Set<number>;
+    itemRects: CachedItemRect[];
+    targetElement: HTMLElement;
+  }
+
+  let dragState: DragState | null = null;
+  let dragFrame: number | null = null;
+  let latestPointerX = 0;
+  let latestPointerY = 0;
+  let dragBoxEl: HTMLElement | null = null;
+
+  function ensureDragSelectBox(): HTMLElement {
+    if (!dragBoxEl) {
+      dragBoxEl = document.createElement('div');
+      dragBoxEl.id = 'drag-select-box';
+      document.body.appendChild(dragBoxEl);
+    }
+    dragBoxEl.style.display = 'block';
+    return dragBoxEl;
+  }
+
+  function removeDragSelectBox() {
+    if (dragBoxEl) {
+      dragBoxEl.style.display = 'none';
+    }
+  }
+
+  function cancelActiveDrag() {
+    if (dragFrame !== null) {
+      cancelAnimationFrame(dragFrame);
+      dragFrame = null;
+    }
+
+    if (dragState) {
+      try {
+        dragState.targetElement.releasePointerCapture(dragState.pointerId);
+      } catch {}
+
+      getCurrentPageItems().forEach((el) => el.classList.remove('is-drag-preview'));
+      dragState = null;
+    }
+
+    removeDragSelectBox();
+  }
+
   function itemsPerPage() {
     return activeView === 'grid' ? 25 : 10;
   }
@@ -1076,6 +1145,7 @@ try {
   }
 
   async function loadPosts(page: number = 1) {
+    cancelActiveDrag();
     if (postsLoading) return;
     postsLoading = true;
     currentPage = page;
@@ -1349,6 +1419,137 @@ try {
       }
     }
   });
+
+  // Pointer Event Drag-to-Select Engine
+  const panelPostsEl = document.getElementById('panel-posts');
+  if (panelPostsEl) {
+    panelPostsEl.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (postsLoading) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      const isTouch = e.pointerType === 'touch';
+
+      if (isTouch) {
+        if (!target.closest('[data-drag-select-handle]')) return;
+      } else {
+        if (!target.closest('.image-row, .grid-image-card')) return;
+        if (target.closest('button, a, input, select, textarea, [contenteditable]')) return;
+      }
+
+      const startItemEl = target.closest<HTMLElement>('.image-row, .grid-image-card');
+      if (!startItemEl) return;
+
+      const startId = parseInt(startItemEl.getAttribute('data-id') || '', 10);
+      if (isNaN(startId)) return;
+
+      const mode: 'add' | 'remove' = selectedIds.has(startId) ? 'remove' : 'add';
+
+      const visibleItems = getCurrentPageItems();
+      const itemRects: CachedItemRect[] = visibleItems
+        .map((el) => {
+          const b = el.getBoundingClientRect();
+          return {
+            id: parseInt(el.getAttribute('data-id') || '', 10),
+            element: el,
+            rect: { left: b.left, top: b.top, right: b.right, bottom: b.bottom },
+          };
+        })
+        .filter((item) => !isNaN(item.id));
+
+      dragState = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+        mode,
+        baseSelection: new Set<number>(selectedIds),
+        candidateIds: new Set<number>(),
+        itemRects,
+        targetElement: target,
+      };
+
+      try {
+        target.setPointerCapture(e.pointerId);
+      } catch {}
+    });
+
+    panelPostsEl.addEventListener('pointermove', (e: PointerEvent) => {
+      if (!dragState || dragState.pointerId !== e.pointerId) return;
+
+      latestPointerX = e.clientX;
+      latestPointerY = e.clientY;
+
+      const dist = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY);
+      if (!dragState.active && dist >= 6) {
+        dragState.active = true;
+        ensureDragSelectBox();
+      }
+
+      if (!dragState.active) return;
+
+      if (dragFrame === null) {
+        dragFrame = requestAnimationFrame(() => {
+          dragFrame = null;
+          if (!dragState) return;
+
+          const boxRect = getSelectionRect(
+            dragState.startX,
+            dragState.startY,
+            latestPointerX,
+            latestPointerY
+          );
+
+          if (dragBoxEl) {
+            dragBoxEl.style.left = `${boxRect.left}px`;
+            dragBoxEl.style.top = `${boxRect.top}px`;
+            dragBoxEl.style.width = `${boxRect.width}px`;
+            dragBoxEl.style.height = `${boxRect.height}px`;
+          }
+
+          const newCandidates = new Set<number>();
+          dragState.itemRects.forEach((item) => {
+            const isOverlapping = rectOverlap(boxRect, item.rect);
+            item.element.classList.toggle('is-drag-preview', isOverlapping);
+            if (isOverlapping) {
+              newCandidates.add(item.id);
+            }
+          });
+
+          dragState.candidateIds = newCandidates;
+        });
+      }
+    });
+
+    const handlePointerUpOrCancel = (e: PointerEvent) => {
+      if (!dragState || dragState.pointerId !== e.pointerId) return;
+
+      if (dragFrame !== null) {
+        cancelAnimationFrame(dragFrame);
+        dragFrame = null;
+      }
+
+      const wasActive = dragState.active;
+      const { baseSelection, candidateIds, mode } = dragState;
+
+      try {
+        dragState.targetElement.releasePointerCapture(e.pointerId);
+      } catch {}
+
+      getCurrentPageItems().forEach((el) => el.classList.remove('is-drag-preview'));
+      removeDragSelectBox();
+      dragState = null;
+
+      if (wasActive && e.type === 'pointerup') {
+        armClickSuppression();
+        selectedIds = applySelectionMode(baseSelection, candidateIds, mode);
+        renderSelectionState();
+      }
+    };
+
+    panelPostsEl.addEventListener('pointerup', handlePointerUpOrCancel);
+    panelPostsEl.addEventListener('pointercancel', handlePointerUpOrCancel);
+  }
 
   autoTagBtn?.addEventListener('click', async () => {
     const confirmed = confirm('確定要重新掃描所有圖片嗎？\n只會新增缺少的 Auto-tags，不會移除人工標籤。');
