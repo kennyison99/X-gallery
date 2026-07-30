@@ -431,6 +431,48 @@ describe('Backfill Loop Failure Recovery & Starvation Prevention', () => {
     assert.equal(savedHashes[0].r2_key, 'valid_51.jpg');
     assert.equal(savedHashes[9].r2_key, 'valid_60.jpg');
   });
+
+  it('processes sub-batches within the SAME page when early items fail, continuing until maxBackfill is reached (Intra-Page Starvation Prevention)', async () => {
+    // Single page with 50 items:
+    // Items 1..10 (corrupt_1 to corrupt_10): FAIL
+    // Items 11..50 (valid_11 to valid_50): SUCCESS
+    const pageItems = Array.from({ length: 50 }, (_, i) => {
+      const id = i + 1;
+      return { image_id: id, r2_key: id <= 10 ? `corrupt_${id}.jpg` : `valid_${id}.jpg` };
+    });
+
+    const mockFetchUnhashed = async (cursor: number) => {
+      if (cursor === 0) return { unhashed: pageItems, next_cursor: null };
+      return { unhashed: [], next_cursor: null };
+    };
+
+    const mockFetchBuffer = async (key: string) => {
+      if (key.startsWith('corrupt_')) {
+        throw new Error(`R2 Object Not Found / Corrupt File for ${key}`);
+      }
+      return Buffer.from('valid_bytes');
+    };
+
+    const savedHashes: any[] = [];
+    const successfulTotal = await runBackfillLoop({
+      fetchFn: mockFetchUnhashed,
+      hashFn: async () => 'cccc4444dddd5555',
+      saveFn: async (items: any[]) => {
+        savedHashes.push(...items);
+        return { saved_count: items.length };
+      },
+      fetchBufferFn: mockFetchBuffer,
+      maxBackfill: 10,
+      concurrency: 4,
+      logger: () => {},
+    });
+
+    // Verify: items 1..10 failed, so inner sub-batch loop continued on the same page to items 11..20
+    assert.equal(successfulTotal, 10, 'successfulTotal must equal 10 valid saved hashes');
+    assert.equal(savedHashes.length, 10, 'Exactly 10 hashes must be persisted');
+    assert.equal(savedHashes[0].r2_key, 'valid_11.jpg');
+    assert.equal(savedHashes[9].r2_key, 'valid_20.jpg');
+  });
 });
 
 describe('D1 Query Bound Parameter Chunking', () => {

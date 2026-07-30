@@ -141,37 +141,42 @@ export async function runBackfillLoop({
     const { unhashed = [], next_cursor = null } = await fetchFn(cursor, 50);
 
     if (unhashed.length > 0) {
-      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Computing pHashes (Concurrency: ${clampedConcurrency})...`);
+      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Processing in sub-batches (Concurrency: ${clampedConcurrency})...`);
 
-      const itemsToProcess = [];
-      for (const item of unhashed) {
-        if (maxBackfill > 0 && (successfulTotal + itemsToProcess.length) >= maxBackfill) {
-          break;
+      let pageIndex = 0;
+      while (pageIndex < unhashed.length) {
+        if (maxBackfill > 0 && successfulTotal >= maxBackfill) break;
+
+        const remainingQuota = maxBackfill > 0 ? (maxBackfill - successfulTotal) : unhashed.length;
+        const batchSize = Math.min(clampedConcurrency, remainingQuota, unhashed.length - pageIndex);
+        if (batchSize <= 0) break;
+
+        const batch = unhashed.slice(pageIndex, pageIndex + batchSize);
+        pageIndex += batch.length;
+
+        const poolResults = await mapConcurrent(batch, clampedConcurrency, async (item) => {
+          try {
+            const buffer = await fetchBufferFn(item.r2_key);
+            const hashHex = await hashFn(buffer);
+            return {
+              image_id: item.image_id,
+              r2_key: item.r2_key,
+              phash: hashHex,
+            };
+          } catch (err) {
+            logger(`  [Warning] Failed to hash "${item.r2_key}" (Image #${item.image_id}): ${err.message}`);
+            return null;
+          }
+        });
+
+        const newHashes = poolResults.filter(Boolean);
+
+        if (newHashes.length > 0) {
+          const saveResult = await saveFn(newHashes);
+          const savedCount = (saveResult && typeof saveResult.saved_count === 'number') ? saveResult.saved_count : newHashes.length;
+          successfulTotal += savedCount;
+          logger(`  Persisted ${savedCount} pHash(es) to D1 database. Total saved this run: ${successfulTotal}/${maxBackfill > 0 ? maxBackfill : 'Unlimited'}`);
         }
-        itemsToProcess.push(item);
-      }
-
-      const poolResults = await mapConcurrent(itemsToProcess, clampedConcurrency, async (item) => {
-        try {
-          const buffer = await fetchBufferFn(item.r2_key);
-          const hashHex = await hashFn(buffer);
-          return {
-            image_id: item.image_id,
-            r2_key: item.r2_key,
-            phash: hashHex,
-          };
-        } catch (err) {
-          logger(`  [Warning] Failed to hash "${item.r2_key}" (Image #${item.image_id}): ${err.message}`);
-          return null;
-        }
-      });
-
-      const newHashes = poolResults.filter(Boolean);
-
-      if (newHashes.length > 0) {
-        await saveFn(newHashes);
-        successfulTotal += newHashes.length;
-        logger(`  Persisted ${newHashes.length} pHash(es) to D1 database. Total saved this run: ${successfulTotal}/${maxBackfill > 0 ? maxBackfill : 'Unlimited'}`);
       }
     } else {
       logger(`  [Page ${pageCount}] 0 unhashed images on this page. Next cursor: ${next_cursor}`);
