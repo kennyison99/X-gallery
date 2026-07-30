@@ -1,0 +1,54 @@
+name: pHash Scan Duplicate Media
+
+on:
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: 'Max Hamming distance threshold (0-64, default 10)'
+        required: false
+        type: string
+        default: '10'
+      apply:
+        description: 'Move high-similarity images to pending review'
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: gallery-media-mutations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  phash-scan:
+    runs-on: ubuntu-latest
+    environment: env
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run pHash scan (Dry-run)
+        if: ${{ !inputs.apply }}
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        run: npm run phash-scan -- --threshold=${{ inputs.threshold || 10 }}
+
+      - name: Run pHash scan and move duplicates to pending review
+        if: ${{ inputs.apply }}
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        run: npm run phash-scan -- --threshold=${{ inputs.threshold || 10 }} --apply

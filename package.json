@@ -12,13 +12,15 @@
     "astro": "astro",
     "generate-types": "wrangler types",
     "fix-links": "node scripts/fix-db-links.mjs",
-    "dedup-media": "node scripts/dedup-media.mjs"
+    "dedup-media": "node scripts/dedup-media.mjs",
+    "phash-scan": "node scripts/phash-scan.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.7.0",
     "@fontsource/lxgw-wenkai-tc": "^5.2.9",
     "astro": "^6.4.7",
     "photoswipe": "^5.4.4",
+    "sharp": "^0.33.5",
     "wrangler": "^4.101.0"
   },
   "overrides": {
