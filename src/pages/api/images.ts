@@ -21,30 +21,40 @@ export const GET: APIRoute = async ({ url }) => {
   try {
     let images;
     if (tagFilter) {
-      // Get images that have the specific tag, but also fetch ALL tags for each matching image
+      // Get images that have the specific tag using indexes first, then fetch tags
       const query = `
-        SELECT i.*, group_concat(t2.name) as tags_list 
-        FROM images i
-        JOIN image_tags it ON i.id = it.image_id
-        JOIN tags t ON it.tag_id = t.id
-        LEFT JOIN image_tags it2 ON i.id = it2.image_id
+        WITH matching_images AS (
+          SELECT i.*
+          FROM images i
+          JOIN image_tags it ON i.id = it.image_id
+          JOIN tags t ON it.tag_id = t.id
+          WHERE t.name = ? AND i.published = 1
+          ORDER BY i.created_at DESC, i.id DESC
+        )
+        SELECT m.*, group_concat(t2.name) AS tags_list
+        FROM matching_images m
+        LEFT JOIN image_tags it2 ON m.id = it2.image_id
         LEFT JOIN tags t2 ON it2.tag_id = t2.id
-        WHERE t.name = ? AND i.published = 1
-        GROUP BY i.id
-        ORDER BY i.created_at DESC
+        GROUP BY m.id
+        ORDER BY m.created_at DESC, m.id DESC
       `;
       const { results } = await env.DB.prepare(query).bind(tagFilter).all();
       images = results || [];
     } else {
-      // Get all images and their associated tags
+      // Get all published images using index first, then fetch tags
       const query = `
-        SELECT i.*, group_concat(t.name) as tags_list
-        FROM images i
-        LEFT JOIN image_tags it ON i.id = it.image_id
+        WITH published_images AS (
+          SELECT i.*
+          FROM images i
+          WHERE i.published = 1
+          ORDER BY i.created_at DESC, i.id DESC
+        )
+        SELECT p.*, group_concat(t.name) AS tags_list
+        FROM published_images p
+        LEFT JOIN image_tags it ON p.id = it.image_id
         LEFT JOIN tags t ON it.tag_id = t.id
-        WHERE i.published = 1
-        GROUP BY i.id
-        ORDER BY i.created_at DESC
+        GROUP BY p.id
+        ORDER BY p.created_at DESC, p.id DESC
       `;
       const { results } = await env.DB.prepare(query).all();
       images = results || [];
