@@ -1,0 +1,29 @@
+---
+import { env } from 'cloudflare:workers';
+import ImageCard from '../../components/ImageCard.astro';
+import { parseSearchParams, fetchSearchBatch } from '../../lib/search-query';
+
+if (!env?.DB) {
+  return new Response('D1 DB binding is not configured', { status: 500 });
+}
+
+let params;
+try {
+  params = parseSearchParams(Astro.url.searchParams);
+} catch (error) {
+  return new Response(error instanceof Error ? error.message : 'Invalid request', { status: 400 });
+}
+
+const { items, hasMore, nextCursor } = await fetchSearchBatch(env.DB, params);
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+---
+
+<div
+  class="search-batch"
+  data-count={items.length}
+  data-has-more={hasMore ? 'true' : 'false'}
+  data-next-cursor={nextCursor ?? ''}
+>
+  {items.map((image) => <ImageCard image={image} />)}
+</div>

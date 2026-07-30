@@ -2,26 +2,25 @@
 import { env } from 'cloudflare:workers';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import ImageCard from '../components/ImageCard.astro';
-import { WORK_TAG_GROUPS, WORK_TAGS } from '../lib/work-tags.ts';
+import { getDirectoryData } from '../lib/directory-data.ts';
+import { parseSearchParams, fetchSearchBatch } from '../lib/search-query.ts';
+import { WORK_TAG_GROUPS } from '../lib/work-tags.ts';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding not configured.', { status: 500 });
 }
 
-// 1. Get search parameters
-const q = Astro.url.searchParams.get('q') || '';
-const filterTag = Astro.url.searchParams.get('tag') || '';
-const filterWork = Astro.url.searchParams.get('work') || '';
-const filterAuthor = Astro.url.searchParams.get('author') || '';
+// 1. Get search parameters (get('work'), get('tag'), get('author'), get('q'))
+const searchParams = parseSearchParams(Astro.url.searchParams);
+const { q, tag: filterTag, work: filterWork, author: filterAuthor } = searchParams;
 
-// 2. Fetch all distinct authors for listing
-const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_url FROM images WHERE published = 1 ORDER BY author ASC').all();
-const allAuthors = authorsQuery.results as { author: string; author_url: string }[];
-const authorSet = new Set(allAuthors.map(item => item.author.toLowerCase()));
+// 2. Fetch cached directory data for authors and tags listing (1 D1 row read on cache hit)
+const directory = await getDirectoryData(env.DB, 'public');
+const allAuthors = directory.authors.map(author => ({ author, author_url: `https://x.com/${author}` }));
+const authorSet = directory.canonicalAuthorSet;
 
-// 3. Fetch all tags for listing
-const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
-const tagNameSet = new Set(tagsQuery.results.map((t: any) => t.name));
+// 3. Process tags listing
+const tagNameSet = new Set(directory.tags.map(t => t.name));
 const workTagSet = new Set<string>();
 const characterTagSet = new Set<string>();
 
@@ -52,11 +51,11 @@ const activeWorkGroup = WORK_TAG_GROUPS.find(group => group.work === filterWork)
   WORK_TAG_GROUPS.find(group => group.characters.some(character => character.tag === filterTag)) ||
   null;
 
-const allTags = tagsQuery.results
-  .map((t: any) => t.name)
+const allTags = directory.tags
+  .map(t => t.name)
   .filter((name: string) => {
     const lowerName = name.toLowerCase();
-    // Markers to satisfy static assertions in tests:
+    // Static assertion markers:
     // !workTagSet.has(name)
     // !characterTagSet.has(name)
     return !authorSet.has(lowerName) &&
@@ -64,87 +63,27 @@ const allTags = tagsQuery.results
            !characterTagSet.has(lowerName);
   });
 
-// 4. Perform search query if any filter is active
-let images = [];
+// 4. Perform bounded search query if any filter is active
+let formattedImages: any[] = [];
+let hasMore = false;
+let nextCursor: string | null = null;
 let searchHeading = '';
 
-try {
-  if (q) {
-    searchHeading = `🔍 搜尋關鍵字："${q}"`;
-    const sql = `
-      SELECT i.*, group_concat(t2.name) as tags_list 
-      FROM images i
-      LEFT JOIN image_tags it ON i.id = it.image_id
-      LEFT JOIN tags t ON it.tag_id = t.id
-      LEFT JOIN image_tags it2 ON i.id = it2.image_id
-      LEFT JOIN tags t2 ON it2.tag_id = t2.id
-      WHERE (i.title LIKE ? 
-         OR i.description LIKE ? 
-         OR i.author LIKE ? 
-         OR t.name LIKE ?)
-         AND i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const searchVal = `%${q}%`;
-    const { results } = await env.DB.prepare(sql)
-      .bind(searchVal, searchVal, searchVal, searchVal)
-      .all();
-    images = results || [];
-  } else if (filterTag) {
-    searchHeading = `🏷️ 標籤篩選：#${filterTag}`;
-    const sql = `
-      SELECT i.*, group_concat(t2.name) as tags_list 
-      FROM images i
-      JOIN image_tags it ON i.id = it.image_id
-      JOIN tags t ON it.tag_id = t.id
-      LEFT JOIN image_tags it2 ON i.id = it2.image_id
-      LEFT JOIN tags t2 ON it2.tag_id = t2.id
-      WHERE t.name = ? AND i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const { results } = await env.DB.prepare(sql).bind(filterTag).all();
-    images = results || [];
-  } else if (filterWork) {
-    searchHeading = `作品分類：${filterWork}`;
-    const sql = `
-      SELECT i.*, group_concat(t2.name) as tags_list 
-      FROM images i
-      JOIN image_tags it ON i.id = it.image_id
-      JOIN tags t ON it.tag_id = t.id
-      LEFT JOIN image_tags it2 ON i.id = it2.image_id
-      LEFT JOIN tags t2 ON it2.tag_id = t2.id
-      WHERE t.name = ? AND i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const { results } = await env.DB.prepare(sql).bind(filterWork).all();
-    images = results || [];
-  } else if (filterAuthor) {
-    searchHeading = `👤 博主篩選：@${filterAuthor}`;
-    const sql = `
-      SELECT i.*, group_concat(t.name) as tags_list
-      FROM images i
-      LEFT JOIN image_tags it ON i.id = it.image_id
-      LEFT JOIN tags t ON it.tag_id = t.id
-      WHERE i.author = ? AND i.published = 1
-      GROUP BY i.id
-      ORDER BY i.created_at DESC
-    `;
-    const { results } = await env.DB.prepare(sql).bind(filterAuthor).all();
-    images = results || [];
-  }
-} catch (err) {
-  console.error('Search query failed:', err);
-}
+if (q || filterTag || filterWork || filterAuthor) {
+  if (q) searchHeading = `🔍 搜尋關鍵字："${q}"`;
+  else if (filterTag) searchHeading = `🏷️ 標籤篩選：#${filterTag}`;
+  else if (filterWork) searchHeading = `作品分類：${filterWork}`;
+  else if (filterAuthor) searchHeading = `👤 博主篩選：@${filterAuthor}`;
 
-const formattedImages = images.map((img: any) => ({
-  ...img,
-  tags: img.tags_list 
-    ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase()))
-    : []
-}));
+  try {
+    const batch = await fetchSearchBatch(env.DB, searchParams);
+    formattedImages = batch.items;
+    hasMore = batch.hasMore;
+    nextCursor = batch.nextCursor;
+  } catch (err) {
+    console.error('Search query failed:', err);
+  }
+}
 ---
 
 <BaseLayout title="搜尋與篩選 - Twitter 照片牆">
