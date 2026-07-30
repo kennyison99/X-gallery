@@ -40,15 +40,32 @@ export const POST: APIRoute = async ({ request }) => {
       keys.forEach((k) => batchKeys.add(k));
     }
 
-    // Fetch head metadata for keys in batch
+    // Fetch head metadata for keys in batch with fail-closed error handling
     const r2Sizes = new Map<string, number>();
+    const failedKeys: string[] = [];
+
     for (const key of batchKeys) {
       try {
         const head = await env.BUCKET.head(key);
-        if (head) r2Sizes.set(key, head.size);
+        if (!head) {
+          failedKeys.push(key);
+          continue;
+        }
+        r2Sizes.set(key, head.size);
       } catch (err) {
         console.error(`R2 head failed for key ${key}:`, err);
+        failedKeys.push(key);
       }
+    }
+
+    if (failedKeys.length > 0) {
+      return new Response(JSON.stringify({
+        error: 'Failed to read R2 object metadata',
+        failedKeys,
+      }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const statements = [];

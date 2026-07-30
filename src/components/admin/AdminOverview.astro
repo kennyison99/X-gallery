@@ -309,7 +309,7 @@ const totalMediaSum = totalPhotosSum + totalVideosSum;
   // Add backfill button handler
   const backfillBtn = document.getElementById('backfill-sizes-btn') as HTMLButtonElement | null;
   backfillBtn?.addEventListener('click', async () => {
-    if (!confirm('確定要開始同步歷史檔案大小嗎？這將會從 R2 獲取容量資訊並更新所有歷史貼文記錄，大概需要 2 秒鐘。')) return;
+    if (!confirm('確定要開始同步歷史檔案大小嗎？這將會從 R2 獲取容量資訊並更新所有歷史貼文記錄。處理時間視乎貼文及媒體數量，請保持頁面開啟。')) return;
     
     const originalText = backfillBtn.textContent;
     backfillBtn.disabled = true;
@@ -319,6 +319,7 @@ const totalMediaSum = totalPhotosSum + totalVideosSum;
       let cursor = 0;
       let processed = 0;
       while (true) {
+        backfillBtn.textContent = `同步中 (${processed})...`;
         const res = await fetch('/admin/api/backfill-sizes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
