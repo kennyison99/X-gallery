@@ -8,54 +8,70 @@ import AdminUploadPanel from '../../components/admin/AdminUploadPanel.astro';
 import AdminPostManager from '../../components/admin/AdminPostManager.astro';
 import AdminCrawlerPanel from '../../components/admin/AdminCrawlerPanel.astro';
 import AdminAutoTagPanel from '../../components/admin/AdminAutoTagPanel.astro';
+import { getDirectoryData } from '../../lib/directory-data';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
 }
 
-// 1. Fetch all distinct authors first
-let authorSet = new Set<string>();
+// 1. Fetch cached directory data for admin scope (1 D1 row read on cache hit)
+const directory = await getDirectoryData(env.DB, 'admin');
+const authorSet = directory.canonicalAuthorSet;
+
+// 2. Prepare tags and authors for filter dropdown
+const allTags = directory.tags.filter((tag) => !authorSet.has(tag.name.toLowerCase()));
+const authorsForFilter = (directory.adminAuthors || []).map((r) => ({
+  handle: r.author,
+  label: r.author_display_name ? `${r.author_display_name}@${r.author}` : `@${r.author}`,
+}));
+
+// 3. Fetch storage stats & check media_counts_ready rollout gate
+let storageStats = { total_bytes: 0, media_counts_ready: 0 };
 try {
-  const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images').all();
-  const authorsList = (authorsQuery.results || []).map((r: any) => r.author);
-  authorSet = new Set(authorsList.map((a: string) => a.toLowerCase()));
+  const statsRow = await env.DB.prepare('SELECT total_bytes, media_counts_ready FROM storage_stats WHERE id = 1').first<any>();
+  if (statsRow) storageStats = statsRow;
 } catch (err) {
-  console.error('Error fetching authors for admin:', err);
+  console.error('Error fetching storage stats:', err);
 }
 
-// 2. Fetch all existing tags for reusable selection and filter out author handles
-let allTags = [];
-let authorsForFilter: { handle: string; label: string }[] = [];
-try {
-  const tagsQuery = await env.DB.prepare('SELECT * FROM tags ORDER BY name ASC').all();
-  allTags = (tagsQuery.results || []).filter((tag: any) => !authorSet.has(tag.name.toLowerCase()));
+const mediaCountsReady = storageStats.media_counts_ready === 1;
 
-  // Fetch distinct authors with display names for the filter dropdown
-  const authorsQuery = await env.DB.prepare('SELECT DISTINCT author, author_display_name FROM images ORDER BY author ASC').all();
-  authorsForFilter = (authorsQuery.results || []).map((r: any) => ({
-    handle: r.author,
-    label: r.author_display_name ? `${r.author_display_name}@${r.author}` : `@${r.author}`,
-  }));
-} catch (err) {
-  console.error('Error fetching tags/authors for admin:', err);
-}
-
-// 3. Fetch counts for overview and tab labels (no full row fetch — pagination is server-side)
+// 4. Fetch aggregated counts for overview and tab labels
 let totalPosts = 0;
 let publishedCount = 0;
 let pendingCount = 0;
 let totalPhotos = 0;
 let totalVideos = 0;
+
 try {
-  const countRow = await env.DB.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending FROM images').first<any>();
-  totalPosts = countRow?.total ?? 0;
-  publishedCount = countRow?.published ?? 0;
-  pendingCount = countRow?.pending ?? 0;
+  if (mediaCountsReady) {
+    // Fast O(1) table aggregation using pre-calculated photo_count & video_count
+    const countsRow = await env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total, 
+        SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, 
+        SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(photo_count) as total_photos,
+        SUM(video_count) as total_videos
+      FROM images
+    `).first<any>();
+    totalPosts = countsRow?.total ?? 0;
+    publishedCount = countsRow?.published ?? 0;
+    pendingCount = countsRow?.pending ?? 0;
+    totalPhotos = countsRow?.total_photos ?? 0;
+    totalVideos = countsRow?.total_videos ?? 0;
+  } else {
+    // Fallback until backfill completes
+    const countRow = await env.DB.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending FROM images').first<any>();
+    totalPosts = countRow?.total ?? 0;
+    publishedCount = countRow?.published ?? 0;
+    pendingCount = countRow?.pending ?? 0;
+  }
 } catch (err) {
   console.error('Error fetching image counts for admin:', err);
 }
 
-// 3. Fetch crawl accounts
+// 5. Fetch crawl accounts
 let crawlAccounts = [];
 try {
   const { results } = await env.DB.prepare('SELECT * FROM crawl_accounts ORDER BY created_at DESC').all();
@@ -77,56 +93,57 @@ try {
   console.error('Error fetching crawl accounts:', err);
 }
 
-// 4. Fetch author image/video counts (bytes will be lazy-loaded client-side)
+// 6. Fetch author stats (O(N_authors) when mediaCountsReady = true)
 let authorStats: { author: string; author_display_name: string | null; photos: number; videos: number; photo_bytes: number; video_bytes: number }[] = [];
 try {
-  const authorRows = await env.DB.prepare('SELECT author, author_display_name, r2_keys FROM images').all();
-  const authorMap = new Map<string, { display: string | null; photos: number; videos: number }>();
-  
-  let calculatedPhotos = 0;
-  let calculatedVideos = 0;
-
-  (authorRows.results || []).forEach((row: any) => {
-    const author = row.author;
-    const displayName = row.author_display_name || null;
-    const keys = (row.r2_keys || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
-    
-    let photosCount = 0;
-    let videosCount = 0;
-    keys.forEach((key: string) => {
-      const lowerKey = key.toLowerCase();
-      if (lowerKey.endsWith('.mp4') || lowerKey.endsWith('.webm') || lowerKey.endsWith('.mov') || lowerKey.endsWith('.m4v')) {
-        videosCount++;
-      } else {
-        photosCount++;
-      }
+  if (mediaCountsReady) {
+    const { results = [] } = await env.DB.prepare(`
+      SELECT 
+        author, 
+        MAX(author_display_name) as author_display_name, 
+        SUM(photo_count) as photos, 
+        SUM(video_count) as videos, 
+        SUM(photo_bytes) as photo_bytes, 
+        SUM(video_bytes) as video_bytes
+      FROM images
+      GROUP BY author
+      ORDER BY author ASC
+    `).all<any>();
+    authorStats = results;
+  } else {
+    // Fallback scan for unbackfilled state
+    const authorRows = await env.DB.prepare('SELECT author, author_display_name, r2_keys FROM images').all();
+    const authorMap = new Map<string, { display: string | null; photos: number; videos: number }>();
+    (authorRows.results || []).forEach((row: any) => {
+      const author = row.author;
+      const displayName = row.author_display_name || null;
+      const keys = (row.r2_keys || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+      let photosCount = 0;
+      let videosCount = 0;
+      keys.forEach((key: string) => {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.endsWith('.mp4') || lowerKey.endsWith('.webm') || lowerKey.endsWith('.mov') || lowerKey.endsWith('.m4v')) {
+          videosCount++;
+        } else {
+          photosCount++;
+        }
+      });
+      const current = authorMap.get(author) || { display: displayName, photos: 0, videos: 0 };
+      authorMap.set(author, {
+        display: displayName || current.display,
+        photos: current.photos + photosCount,
+        videos: current.videos + videosCount,
+      });
     });
-
-    if (!authorMap.has(author)) {
-      authorMap.set(author, { display: displayName, photos: 0, videos: 0 });
-    }
-    const current = authorMap.get(author)!;
-    current.photos += photosCount;
-    current.videos += videosCount;
-    if (displayName && !current.display) {
-      current.display = displayName;
-    }
-
-    calculatedPhotos += photosCount;
-    calculatedVideos += videosCount;
-  });
-
-  totalPhotos = calculatedPhotos;
-  totalVideos = calculatedVideos;
-
-  authorStats = Array.from(authorMap.entries()).map(([author, stats]) => ({
-    author,
-    author_display_name: stats.display,
-    photos: stats.photos,
-    videos: stats.videos,
-    photo_bytes: 0,
-    video_bytes: 0
-  })).sort((a, b) => (b.photos + b.videos) - (a.photos + a.videos));
+    authorStats = Array.from(authorMap.entries()).map(([author, data]) => ({
+      author,
+      author_display_name: data.display,
+      photos: data.photos,
+      videos: data.videos,
+      photo_bytes: 0,
+      video_bytes: 0,
+    }));
+  }
 } catch (err) {
   console.error('Error fetching author stats:', err);
 }
