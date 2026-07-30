@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: 'Max images to scan per run (Cloudflare rate limit protection, default 50, enter 0 for unlimited)'
+        description: 'Max unhashed images to backfill per run (default 50, enter 0 for unlimited)'
         required: false
         type: string
         default: '50'
       threshold:
-        description: 'Max Hamming distance threshold (0-64, default 10)'
+        description: 'Max Hamming distance threshold (0-63, default 10)'
         required: false
         type: string
         default: '10'
       apply:
-        description: 'Move high-similarity images to pending review'
+        description: 'Move high-similarity duplicate images to pending review'
         required: true
         type: boolean
         default: false
@@ -49,11 +49,15 @@ jobs:
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
-        run: npm run phash-scan -- --limit=${{ inputs.limit || 50 }} --threshold=${{ inputs.threshold || 10 }}
+          ENV_LIMIT: ${{ inputs.limit }}
+          ENV_THRESHOLD: ${{ inputs.threshold }}
+        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}"
 
       - name: Run pHash scan and move duplicates to pending review
         if: ${{ inputs.apply }}
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
-        run: npm run phash-scan -- --limit=${{ inputs.limit || 50 }} --threshold=${{ inputs.threshold || 10 }} --apply
+          ENV_LIMIT: ${{ inputs.limit }}
+          ENV_THRESHOLD: ${{ inputs.threshold }}
+        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --apply

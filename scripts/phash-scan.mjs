@@ -1,8 +1,9 @@
 // Perceptual Hash (pHash) similarity scan script for X-gallery images.
-// Scans published images, computes 64-bit DCT pHash, finds highly similar pairs,
-// and moves duplicate/similar posts into pending review (published = 0).
+// Phase 1: Incrementally backfill & persist 64-bit pHash into DB.
+// Phase 2: Graph Union-Find clustering across stored pHashes.
+// Phase 3: Move duplicate non-winners into pending review (published = 0).
 
-import sharp from 'sharp';
+import { computePHash, buildDuplicateClusters } from '../src/lib/phash.ts';
 
 const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:4321').replace(/\/$/, '');
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? '';
@@ -18,11 +19,9 @@ function getArgValue(prefix, fallback) {
   return isNaN(parsed) ? fallback : parsed;
 }
 
-const THRESHOLD = getArgValue('--threshold=', 10);
-const MAX_IMAGES = getArgValue('--limit=', 50); // Default max 50 images to respect Cloudflare rate limits
-const REQUEST_DELAY_MS = getArgValue('--delay=', 100); // 100ms delay between image fetches to prevent rate limiting
-const PAGE_SIZE = 50;
-const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
+const THRESHOLD = Math.min(63, Math.max(0, getArgValue('--threshold=', 10)));
+const MAX_BACKFILL_IMAGES = getArgValue('--limit=', 50); // Max unhashed images to backfill per run
+const REQUEST_DELAY_MS = getArgValue('--delay=', 100); // Delay between fetches
 
 if (!CRAWL_API_KEY) {
   console.error('ERROR: CRAWL_API_KEY environment variable is not configured.');
@@ -33,99 +32,15 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isVideoKey(key) {
-  const ext = key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? '';
-  return VIDEO_EXTS.has(ext);
-}
-
-function compute2DDCT(pixels, N = 32) {
-  const dct = new Float64Array(N * N);
-  const c = new Float64Array(N);
-  c[0] = 1 / Math.sqrt(2);
-  for (let i = 1; i < N; i++) c[i] = 1;
-
-  for (let u = 0; u < N; u++) {
-    for (let v = 0; v < N; v++) {
-      let sum = 0;
-      for (let x = 0; x < N; x++) {
-        for (let y = 0; y < N; y++) {
-          sum += pixels[x * N + y]
-            * Math.cos(((2 * x + 1) * u * Math.PI) / (2 * N))
-            * Math.cos(((2 * y + 1) * v * Math.PI) / (2 * N));
-        }
-      }
-      dct[u * N + v] = 0.25 * c[u] * c[v] * sum;
-    }
+async function fetchUnhashedMedia(cursor = 0, limit = 50) {
+  const params = new URLSearchParams({ action: 'unhashed', cursor: String(cursor), limit: String(limit) });
+  const response = await fetch(`${SITE_URL}/api/phash-scan?${params}`, {
+    headers: { 'X-API-Key': CRAWL_API_KEY },
+  });
+  if (!response.ok) {
+    throw new Error(`Fetch unhashed media failed: HTTP ${response.status} - ${await response.text()}`);
   }
-  return dct;
-}
-
-async function computePHash(imageBuffer) {
-  const rawPixels = await sharp(imageBuffer)
-    .resize(32, 32, { fit: 'fill' })
-    .grayscale()
-    .raw()
-    .toBuffer();
-
-  const dct = compute2DDCT(rawPixels, 32);
-
-  // Extract top-left 8x8 AC coefficients (excluding DC at [0,0])
-  const vals = [];
-  for (let u = 0; u < 8; u++) {
-    for (let v = 0; v < 8; v++) {
-      if (u === 0 && v === 0) continue;
-      vals.push(dct[u * 32 + v]);
-    }
-  }
-
-  const sorted = [...vals].sort((a, b) => a - b);
-  const median = sorted.length % 2 === 0
-    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
-    : sorted[Math.floor(sorted.length / 2)];
-
-  let hash = 0n;
-  for (let i = 0; i < vals.length; i++) {
-    if (vals[i] > median) {
-      hash |= 1n << BigInt(i);
-    }
-  }
-
-  return hash;
-}
-
-function hammingDistance(hashA, hashB) {
-  let diff = hashA ^ hashB;
-  let count = 0n;
-  while (diff > 0n) {
-    diff &= diff - 1n;
-    count++;
-  }
-  return Number(count);
-}
-
-async function fetchPublishedPosts() {
-  const posts = [];
-  let cursor = 0;
-  let page = 0;
-
-  do {
-    const params = new URLSearchParams({ cursor: String(cursor), limit: String(PAGE_SIZE), api_key: CRAWL_API_KEY });
-    const response = await fetch(`${SITE_URL}/api/phash-scan?${params}`, {
-      headers: { 'X-API-Key': CRAWL_API_KEY },
-    });
-    if (!response.ok) {
-      throw new Error(`Fetch published posts failed: HTTP ${response.status} - ${await response.text()}`);
-    }
-    const result = await response.json();
-    if (!Array.isArray(result.images)) {
-      throw new Error('Invalid response structure from /api/phash-scan');
-    }
-    posts.push(...result.images);
-    cursor = result.next_cursor;
-    page++;
-  } while (cursor !== null);
-
-  return posts;
+  return response.json();
 }
 
 async function fetchImageBuffer(r2Key) {
@@ -137,138 +52,151 @@ async function fetchImageBuffer(r2Key) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function main() {
-  console.log('=== pHash Image Similarity Scan ===');
-  console.log(`SITE_URL    : ${SITE_URL}`);
-  console.log(`Mode        : ${APPLY ? 'APPLY (move to pending)' : 'DRY-RUN'}`);
-  console.log(`Threshold   : ${THRESHOLD} bits (Hamming Distance <= ${THRESHOLD})`);
-  console.log(`Max Images  : ${MAX_IMAGES > 0 ? MAX_IMAGES + ' (Rate-limit protection)' : 'Unlimited'}`);
-  console.log(`Delay/Fetch : ${REQUEST_DELAY_MS} ms`);
-  console.log('Fetching published posts...');
-
-  const posts = await fetchPublishedPosts();
-  console.log(`Total published posts in DB: ${posts.length}`);
-
-  if (posts.length === 0) {
-    console.log('No published posts found. Exiting.');
-    return;
-  }
-
-  console.log('Computing pHashes for image assets (with rate limit protection)...');
-  const imageHashes = [];
-
-  for (let i = 0; i < posts.length; i++) {
-    if (MAX_IMAGES > 0 && imageHashes.length >= MAX_IMAGES) {
-      console.log(`Reached limit of ${MAX_IMAGES} images (CF free rate limit protection). Stopping image fetch.`);
-      break;
-    }
-
-    const post = posts[i];
-    const keys = (post.r2_keys || '').split(',').map((k) => k.trim()).filter(Boolean);
-    const imageKeys = keys.filter((k) => !isVideoKey(k));
-
-    for (const key of imageKeys) {
-      if (MAX_IMAGES > 0 && imageHashes.length >= MAX_IMAGES) break;
-
-      try {
-        if (REQUEST_DELAY_MS > 0 && imageHashes.length > 0) {
-          await sleep(REQUEST_DELAY_MS);
-        }
-        const buffer = await fetchImageBuffer(key);
-        const hash = await computePHash(buffer);
-        imageHashes.push({
-          postId: post.id,
-          postUrl: post.post_url,
-          title: post.title,
-          author: post.author,
-          createdAt: post.created_at,
-          likes: post.likes || 0,
-          r2Key: key,
-          hash,
-        });
-      } catch (err) {
-        console.warn(`  [Warning] Failed to hash key "${key}" (Post #${post.id}): ${err.message}`);
-      }
-    }
-
-    if ((i + 1) % 10 === 0 || i + 1 === posts.length || (MAX_IMAGES > 0 && imageHashes.length >= MAX_IMAGES)) {
-      console.log(`  Processed ${imageHashes.length} image hash(es)...`);
-    }
-  }
-
-  console.log(`Comparing ${imageHashes.length} images for pHash similarity...`);
-  const flaggedPostIds = new Set();
-  const matches = [];
-
-  for (let i = 0; i < imageHashes.length; i++) {
-    for (let j = i + 1; j < imageHashes.length; j++) {
-      const a = imageHashes[i];
-      const b = imageHashes[j];
-
-      if (a.postId === b.postId) continue; // Skip images within same post
-
-      const dist = hammingDistance(a.hash, b.hash);
-      if (dist <= THRESHOLD) {
-        let keep = a;
-        let flag = b;
-
-        if (b.likes > a.likes || (b.likes === a.likes && b.postId < a.postId)) {
-          keep = b;
-          flag = a;
-        }
-
-        flaggedPostIds.add(flag.postId);
-        matches.push({
-          keepPostId: keep.postId,
-          keepTitle: keep.title,
-          flagPostId: flag.postId,
-          flagTitle: flag.title,
-          distance: dist,
-          similarity: `${(((63 - dist) / 63) * 100).toFixed(1)}%`,
-        });
-      }
-    }
-  }
-
-  if (matches.length === 0) {
-    console.log('No high pHash similarity images found. All clean!');
-    return;
-  }
-
-  console.log(`\nFound ${matches.length} high pHash similarity match(es):`);
-  for (const m of matches) {
-    console.log(`  Match: Distance ${m.distance} (${m.similarity} similarity)`);
-    console.log(`    Keep published : Post #${m.keepPostId} ("${m.keepTitle || 'Untitled'}")`);
-    console.log(`    Move to pending: Post #${m.flagPostId} ("${m.flagTitle || 'Untitled'}")`);
-  }
-
-  const pendingList = [...flaggedPostIds];
-  console.log(`\nTotal unique posts to move to pending review: ${pendingList.length} (IDs: ${pendingList.join(', ')})`);
-
-  if (!APPLY) {
-    console.log('\nDry-run complete. Re-run with --apply to move these posts to pending review.');
-    return;
-  }
-
-  console.log(`\nApplying changes: Moving ${pendingList.length} post(s) to pending review...`);
-  const response = await fetch(`${SITE_URL}/api/phash-scan`, {
+async function saveHashesToDB(hashItems) {
+  const response = await fetch(`${SITE_URL}/api/phash-scan?action=save_hashes`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-API-Key': CRAWL_API_KEY,
     },
-    body: JSON.stringify({
-      api_key: CRAWL_API_KEY,
-      pending_ids: pendingList,
-    }),
+    body: JSON.stringify({ hashes: hashItems }),
   });
-
   if (!response.ok) {
-    throw new Error(`Apply failed: HTTP ${response.status} - ${await response.text()}`);
+    throw new Error(`Save hashes failed: HTTP ${response.status} - ${await response.text()}`);
+  }
+  return response.json();
+}
+
+async function fetchAllStoredHashes() {
+  const response = await fetch(`${SITE_URL}/api/phash-scan?action=hashes`, {
+    headers: { 'X-API-Key': CRAWL_API_KEY },
+  });
+  if (!response.ok) {
+    throw new Error(`Fetch stored hashes failed: HTTP ${response.status} - ${await response.text()}`);
+  }
+  const result = await response.json();
+  return result.hashes || [];
+}
+
+async function applyPendingPosts(pendingIds) {
+  const response = await fetch(`${SITE_URL}/api/phash-scan?action=apply_pending`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': CRAWL_API_KEY,
+    },
+    body: JSON.stringify({ pending_ids: pendingIds }),
+  });
+  if (!response.ok) {
+    throw new Error(`Apply pending failed: HTTP ${response.status} - ${await response.text()}`);
+  }
+  return response.json();
+}
+
+async function main() {
+  console.log('=== Persistent pHash Image Similarity Scan ===');
+  console.log(`SITE_URL    : ${SITE_URL}`);
+  console.log(`Mode        : ${APPLY ? 'APPLY (move duplicates to pending)' : 'DRY-RUN'}`);
+  console.log(`Threshold   : ${THRESHOLD} bits (Hamming Distance <= ${THRESHOLD})`);
+  console.log(`Max Backfill: ${MAX_BACKFILL_IMAGES > 0 ? MAX_BACKFILL_IMAGES + ' images/run' : 'Unlimited'}`);
+  console.log(`Fetch Delay : ${REQUEST_DELAY_MS} ms`);
+
+  // --- Phase 1: Incremental Backfill of Missing pHashes ---
+  console.log('\n[Phase 1] Checking unhashed media assets...');
+  let backfilledTotal = 0;
+  let cursor = 0;
+
+  while (true) {
+    if (MAX_BACKFILL_IMAGES > 0 && backfilledTotal >= MAX_BACKFILL_IMAGES) {
+      console.log(`  Reached backfill limit of ${MAX_BACKFILL_IMAGES} images for this run.`);
+      break;
+    }
+
+    const { unhashed = [], next_cursor } = await fetchUnhashedMedia(cursor, 50);
+    if (unhashed.length === 0) {
+      console.log('  All published media assets are hashed and up-to-date!');
+      break;
+    }
+
+    console.log(`  Found ${unhashed.length} unhashed image(s). Computing pHashes...`);
+    const newHashes = [];
+
+    for (const item of unhashed) {
+      if (MAX_BACKFILL_IMAGES > 0 && backfilledTotal >= MAX_BACKFILL_IMAGES) break;
+
+      try {
+        if (REQUEST_DELAY_MS > 0 && backfilledTotal > 0) {
+          await sleep(REQUEST_DELAY_MS);
+        }
+        const buffer = await fetchImageBuffer(item.r2_key);
+        const hashHex = await computePHash(buffer);
+        newHashes.push({
+          image_id: item.image_id,
+          r2_key: item.r2_key,
+          phash: hashHex,
+        });
+        backfilledTotal++;
+      } catch (err) {
+        console.warn(`  [Warning] Failed to hash "${item.r2_key}" (Image #${item.image_id}): ${err.message}`);
+      }
+    }
+
+    if (newHashes.length > 0) {
+      await saveHashesToDB(newHashes);
+      console.log(`  Persisted ${newHashes.length} pHash(es) to D1 database.`);
+    }
+
+    if (next_cursor === null) break;
+    cursor = next_cursor;
   }
 
-  const result = await response.json();
-  console.log(`Successfully moved ${result.updated_count} post(s) to pending review!`);
+  // --- Phase 2: Cluster Comparison & Canonical Winner Selection ---
+  console.log('\n[Phase 2] Fetching stored pHash corpus for similarity clustering...');
+  const storedHashes = await fetchAllStoredHashes();
+  console.log(`  Loaded ${storedHashes.length} stored pHash(es) from DB.`);
+
+  if (storedHashes.length === 0) {
+    console.log('No hashed images available for comparison. Exiting.');
+    return;
+  }
+
+  const items = storedHashes.map((r) => ({
+    imageId: r.image_id,
+    r2Key: r.r2_key,
+    phash: r.phash,
+    likes: r.likes || 0,
+    title: r.title,
+    createdAt: r.created_at,
+  }));
+
+  console.log(`  Running Union-Find clustering across ${items.length} images (Threshold: ${THRESHOLD} bits)...`);
+  const { keeperIds, pendingIds, matches } = buildDuplicateClusters(items, THRESHOLD);
+
+  console.log(`\nFound ${matches.length} high-similarity image pair match(es) across ${items.length} assets.`);
+  console.log(`Unique duplicate posts flagged for review: ${pendingIds.length}`);
+
+  if (matches.length > 0) {
+    console.log('\nSample Similarity Matches (up to 10):');
+    for (const m of matches.slice(0, 10)) {
+      console.log(`  Distance ${m.distance} (${m.similarity}): Keep Post #${m.keeperPostId} ("${m.keeperTitle || 'Untitled'}"), Flag Post #${m.flagPostId} ("${m.flagTitle || 'Untitled'}")`);
+    }
+  }
+
+  if (pendingIds.length === 0) {
+    console.log('\nNo duplicate clusters found. Gallery is clean!');
+    return;
+  }
+
+  // --- Phase 3: Apply pending status in batches ---
+  if (!APPLY) {
+    console.log(`\nDry-run complete. Found ${pendingIds.length} duplicate post(s) (IDs: ${pendingIds.join(', ')}).`);
+    console.log('Re-run with --apply to move these posts to pending review.');
+    return;
+  }
+
+  console.log(`\n[Phase 3] Applying changes: Moving ${pendingIds.length} post(s) to pending review...`);
+  const result = await applyPendingPosts(pendingIds);
+  console.log(`Successfully updated ${result.updated_count} post(s) to pending review!`);
 }
 
 main().catch((error) => {
