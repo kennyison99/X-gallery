@@ -3,7 +3,8 @@
 // Phase 2: Graph Union-Find clustering across stored pHashes.
 // Phase 3: Move duplicate non-winners into pending review (published = 0).
 
-import { computePHash, buildDuplicateClusters } from '../src/lib/phash.ts';
+import { computePHash } from '../src/lib/phash-sharp.ts';
+import { buildDuplicateClusters } from '../src/lib/phash-utils.ts';
 
 const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:4321').replace(/\/$/, '');
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? '';
@@ -23,10 +24,7 @@ const THRESHOLD = Math.min(63, Math.max(0, getArgValue('--threshold=', 10)));
 const MAX_BACKFILL_IMAGES = getArgValue('--limit=', 50); // Max unhashed images to backfill per run
 const REQUEST_DELAY_MS = getArgValue('--delay=', 100); // Delay between fetches
 
-if (!CRAWL_API_KEY) {
-  console.error('ERROR: CRAWL_API_KEY environment variable is not configured.');
-  process.exit(1);
-}
+// CRAWL_API_KEY check is performed inside main() when run via CLI
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -93,7 +91,72 @@ async function applyPendingPosts(pendingIds) {
   return response.json();
 }
 
+export async function runBackfillLoop({
+  fetchFn = fetchUnhashedMedia,
+  hashFn = computePHash,
+  saveFn = saveHashesToDB,
+  fetchBufferFn = fetchImageBuffer,
+  maxBackfill = MAX_BACKFILL_IMAGES,
+  delayMs = REQUEST_DELAY_MS,
+  logger = console.log,
+} = {}) {
+  let backfilledTotal = 0;
+  let cursor = 0;
+  let pageCount = 0;
+
+  while (cursor !== null) {
+    if (maxBackfill > 0 && backfilledTotal >= maxBackfill) {
+      logger(`  Reached backfill limit of ${maxBackfill} images for this run.`);
+      break;
+    }
+
+    pageCount++;
+    const { unhashed = [], next_cursor = null } = await fetchFn(cursor, 50);
+
+    if (unhashed.length > 0) {
+      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Computing pHashes...`);
+      const newHashes = [];
+
+      for (const item of unhashed) {
+        if (maxBackfill > 0 && backfilledTotal >= maxBackfill) break;
+
+        try {
+          if (delayMs > 0 && backfilledTotal > 0) {
+            await sleep(delayMs);
+          }
+          const buffer = await fetchBufferFn(item.r2_key);
+          const hashHex = await hashFn(buffer);
+          newHashes.push({
+            image_id: item.image_id,
+            r2_key: item.r2_key,
+            phash: hashHex,
+          });
+          backfilledTotal++;
+        } catch (err) {
+          logger(`  [Warning] Failed to hash "${item.r2_key}" (Image #${item.image_id}): ${err.message}`);
+        }
+      }
+
+      if (newHashes.length > 0) {
+        await saveFn(newHashes);
+        logger(`  Persisted ${newHashes.length} pHash(es) to D1 database.`);
+      }
+    } else {
+      logger(`  [Page ${pageCount}] 0 unhashed images on this page. Next cursor: ${next_cursor}`);
+    }
+
+    cursor = next_cursor;
+  }
+
+  return backfilledTotal;
+}
+
 async function main() {
+  if (!CRAWL_API_KEY) {
+    console.error('ERROR: CRAWL_API_KEY environment variable is not configured.');
+    process.exit(1);
+  }
+
   console.log('=== Persistent pHash Image Similarity Scan ===');
   console.log(`SITE_URL    : ${SITE_URL}`);
   console.log(`Mode        : ${APPLY ? 'APPLY (move duplicates to pending)' : 'DRY-RUN'}`);
@@ -102,53 +165,9 @@ async function main() {
   console.log(`Fetch Delay : ${REQUEST_DELAY_MS} ms`);
 
   // --- Phase 1: Incremental Backfill of Missing pHashes ---
-  console.log('\n[Phase 1] Checking unhashed media assets...');
-  let backfilledTotal = 0;
-  let cursor = 0;
-
-  while (true) {
-    if (MAX_BACKFILL_IMAGES > 0 && backfilledTotal >= MAX_BACKFILL_IMAGES) {
-      console.log(`  Reached backfill limit of ${MAX_BACKFILL_IMAGES} images for this run.`);
-      break;
-    }
-
-    const { unhashed = [], next_cursor } = await fetchUnhashedMedia(cursor, 50);
-    if (unhashed.length === 0) {
-      console.log('  All published media assets are hashed and up-to-date!');
-      break;
-    }
-
-    console.log(`  Found ${unhashed.length} unhashed image(s). Computing pHashes...`);
-    const newHashes = [];
-
-    for (const item of unhashed) {
-      if (MAX_BACKFILL_IMAGES > 0 && backfilledTotal >= MAX_BACKFILL_IMAGES) break;
-
-      try {
-        if (REQUEST_DELAY_MS > 0 && backfilledTotal > 0) {
-          await sleep(REQUEST_DELAY_MS);
-        }
-        const buffer = await fetchImageBuffer(item.r2_key);
-        const hashHex = await computePHash(buffer);
-        newHashes.push({
-          image_id: item.image_id,
-          r2_key: item.r2_key,
-          phash: hashHex,
-        });
-        backfilledTotal++;
-      } catch (err) {
-        console.warn(`  [Warning] Failed to hash "${item.r2_key}" (Image #${item.image_id}): ${err.message}`);
-      }
-    }
-
-    if (newHashes.length > 0) {
-      await saveHashesToDB(newHashes);
-      console.log(`  Persisted ${newHashes.length} pHash(es) to D1 database.`);
-    }
-
-    if (next_cursor === null) break;
-    cursor = next_cursor;
-  }
+  console.log('\n[Phase 1] Checking unhashed media assets across all pages...');
+  const backfilledTotal = await runBackfillLoop();
+  console.log(`[Phase 1 Complete] Backfilled ${backfilledTotal} image(s) in this run.`);
 
   // --- Phase 2: Cluster Comparison & Canonical Winner Selection ---
   console.log('\n[Phase 2] Fetching stored pHash corpus for similarity clustering...');
@@ -199,7 +218,10 @@ async function main() {
   console.log(`Successfully updated ${result.updated_count} post(s) to pending review!`);
 }
 
-main().catch((error) => {
-  console.error('Fatal error during pHash scan:', error);
-  process.exit(1);
-});
+// Only execute main when invoked directly via node CLI
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error('Fatal error during pHash scan:', error);
+    process.exit(1);
+  });
+}

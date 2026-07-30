@@ -9,6 +9,7 @@ import {
   chunkArray,
   type ImageHashItem,
 } from '../src/lib/phash.ts';
+import { runBackfillLoop } from '../scripts/phash-scan.mjs';
 
 describe('pHash Algorithm & Image Buffer Processing', () => {
   it('computes valid 16-character hex pHash for standard JPEG image', async () => {
@@ -138,9 +139,8 @@ describe('Hamming Distance Calculation', () => {
   });
 });
 
-describe('Union-Find & Cluster Canonical Winner Selection', () => {
+describe('Union-Find & Multi-Image Cluster Winner Selection', () => {
   it('handles transitive cluster A-B, B-C and picks single canonical keeper', () => {
-    // Hashes where A <-> B (dist 2) and B <-> C (dist 2)
     const items: ImageHashItem[] = [
       { imageId: 10, r2Key: 'keyA', phash: '0000000000000000', likes: 5, title: 'Post A' },
       { imageId: 20, r2Key: 'keyB', phash: '0000000000000003', likes: 12, title: 'Post B' }, // Highest likes -> Winner
@@ -151,20 +151,67 @@ describe('Union-Find & Cluster Canonical Winner Selection', () => {
 
     assert.equal(keeperIds.length, 1);
     assert.equal(keeperIds[0], 20, 'Post B with 12 likes should be the canonical keeper');
-
     assert.deepEqual(pendingIds.sort((a, b) => a - b), [10, 30], 'Posts A and C should be marked pending');
   });
 
-  it('breaks tie in likes by selecting smaller imageId (earliest post)', () => {
+  it('marks post as pending if it loses in ANY cluster, even if it wins in another cluster (Blocker 2 Fix)', () => {
+    // Multi-image post scenario:
+    // Post 100 has 2 images: key100_1 and key100_2
+    // Post 200 (50 likes) vs key100_1 (10 likes) -> Post 200 wins, Post 100 loses (added to pending)
+    // Post 300 (2 likes) vs key100_2 (10 likes) -> Post 100 wins, Post 300 loses
     const items: ImageHashItem[] = [
-      { imageId: 105, r2Key: 'key1', phash: 'aaaaaaaaaaaaaaaa', likes: 10, title: 'Later Post' },
-      { imageId: 42, r2Key: 'key2', phash: 'aaaaaaaaaaaaaaab', likes: 10, title: 'Earlier Post' },
+      { imageId: 200, r2Key: 'key200', phash: '0000000000000000', likes: 50, title: 'Popular Post' },
+      { imageId: 100, r2Key: 'key100_1', phash: '0000000000000001', likes: 10, title: 'Multi Image Post' },
+      { imageId: 100, r2Key: 'key100_2', phash: 'ffffffffffffffff', likes: 10, title: 'Multi Image Post' },
+      { imageId: 300, r2Key: 'key300', phash: 'fffffffffffffffe', likes: 2, title: 'Unpopular Post' },
     ];
 
     const { keeperIds, pendingIds } = buildDuplicateClusters(items, 5);
 
-    assert.equal(keeperIds[0], 42, 'Post #42 should win tie due to earlier ID');
-    assert.deepEqual(pendingIds, [105]);
+    assert.ok(pendingIds.includes(100), 'Post 100 MUST be marked pending because it lost to Post 200');
+    assert.ok(!keeperIds.includes(100), 'Post 100 CANNOT remain in keeperIds');
+    assert.deepEqual(keeperIds, [200], 'Only Post 200 should be keeper');
+    assert.deepEqual(pendingIds.sort((a, b) => a - b), [100, 300]);
+  });
+});
+
+describe('Backfill Loop Pagination through Empty Intermediate Pages (Blocker 1 Fix)', () => {
+  it('continues requesting next_cursor through pages with 0 unhashed images until next_cursor is null', async () => {
+    const pages = [
+      { unhashed: [], next_cursor: 50 }, // Page 1: 0 unhashed items, next_cursor 50
+      { unhashed: [{ image_id: 60, r2_key: 'img60.jpg' }], next_cursor: 100 }, // Page 2: 1 unhashed item
+      { unhashed: [], next_cursor: null }, // Page 3: 0 unhashed items, end
+    ];
+
+    let pageCallCount = 0;
+    const mockFetchUnhashedMedia = async (cursor: number) => {
+      pageCallCount++;
+      if (cursor === 0) return pages[0];
+      if (cursor === 50) return pages[1];
+      return pages[2];
+    };
+
+    const mockHashFn = async () => '0123456789abcdef';
+    const mockFetchBuffer = async () => Buffer.from('fake');
+    const savedHashes: any[] = [];
+    const mockSaveFn = async (items: any[]) => {
+      savedHashes.push(...items);
+    };
+
+    const backfilledTotal = await runBackfillLoop({
+      fetchFn: mockFetchUnhashedMedia,
+      hashFn: mockHashFn,
+      saveFn: mockSaveFn,
+      fetchBufferFn: mockFetchBuffer,
+      maxBackfill: 0,
+      delayMs: 0,
+      logger: () => {},
+    });
+
+    assert.equal(pageCallCount, 3, 'Should have processed all 3 pages');
+    assert.equal(backfilledTotal, 1);
+    assert.equal(savedHashes.length, 1);
+    assert.equal(savedHashes[0].r2_key, 'img60.jpg');
   });
 });
 

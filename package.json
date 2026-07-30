@@ -13,7 +13,8 @@
     "generate-types": "wrangler types",
     "fix-links": "node scripts/fix-db-links.mjs",
     "dedup-media": "node scripts/dedup-media.mjs",
-    "phash-scan": "node scripts/phash-scan.mjs"
+    "phash-scan": "node scripts/phash-scan.mjs",
+    "test": "node --test tests/*.test.ts tests/*.test.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.7.0",

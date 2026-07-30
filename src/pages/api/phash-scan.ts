@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
-import { chunkArray } from '../../lib/phash';
+import { chunkArray, isValidPHashHex } from '../../lib/phash-utils';
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
@@ -50,7 +50,7 @@ export const GET: APIRoute = async ({ request, url }) => {
 
   try {
     if (action === 'hashes') {
-      // Fast retrieval of all stored pHashes for published images
+      // Fast retrieval of all stored 16-hex pHashes for published images
       const { results = [] } = await env.DB.prepare(`
         SELECT m.image_id, m.r2_key, m.phash, i.likes, i.title, i.created_at
         FROM media_assets m
@@ -62,7 +62,7 @@ export const GET: APIRoute = async ({ request, url }) => {
       return json({
         success: true,
         count: results.length,
-        hashes: results,
+        hashes: results.filter((r) => isValidPHashHex(r.phash)),
       });
     }
 
@@ -76,7 +76,7 @@ export const GET: APIRoute = async ({ request, url }) => {
 
     const limit = Math.min(requestedLimit, MAX_PAGE_SIZE);
 
-    // Query images that need hashing
+    // Optimized Single-query lookup eliminating N+1 queries
     const { results = [] } = await env.DB.prepare(`
       SELECT i.id AS image_id, i.r2_keys, i.title, i.likes
       FROM images i
@@ -89,10 +89,11 @@ export const GET: APIRoute = async ({ request, url }) => {
     const pageRows = hasMore ? results.slice(0, limit) : results;
     const nextCursor = hasMore ? pageRows.at(-1)?.image_id ?? null : null;
 
-    // Check which specific R2 keys are missing in media_assets
     const unhashedList: UnhashedMediaRow[] = [];
     const videoExts = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 
+    // Gather keys and batch check media_assets in D1
+    const keysToCheck: { image_id: number; key: string; title: string | null; likes: number }[] = [];
     for (const post of pageRows) {
       const keys = (post.r2_keys || '')
         .split(',')
@@ -100,16 +101,34 @@ export const GET: APIRoute = async ({ request, url }) => {
         .filter((k) => k.length > 0 && !videoExts.has(k.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
 
       for (const key of keys) {
-        const existing = await env.DB.prepare(
-          'SELECT phash FROM media_assets WHERE r2_key = ?'
-        ).bind(key).first<{ phash: string | null }>();
+        keysToCheck.push({ image_id: post.image_id, key, title: post.title, likes: post.likes || 0 });
+      }
+    }
 
-        if (!existing || !existing.phash) {
+    if (keysToCheck.length > 0) {
+      const keySet = new Set(keysToCheck.map((k) => k.key));
+      const keyArray = [...keySet];
+      const keyBatches = chunkArray(keyArray, 80);
+      const hashedKeysSet = new Set<string>();
+
+      for (const batch of keyBatches) {
+        const placeholders = batch.map(() => '?').join(',');
+        const { results: storedRows = [] } = await env.DB.prepare(
+          `SELECT r2_key FROM media_assets WHERE phash IS NOT NULL AND r2_key IN (${placeholders})`
+        ).bind(...batch).all<{ r2_key: string }>();
+
+        for (const row of storedRows) {
+          hashedKeysSet.add(row.r2_key);
+        }
+      }
+
+      for (const item of keysToCheck) {
+        if (!hashedKeysSet.has(item.key)) {
           unhashedList.push({
-            image_id: post.image_id,
-            r2_key: key,
-            title: post.title,
-            likes: post.likes || 0,
+            image_id: item.image_id,
+            r2_key: item.key,
+            title: item.title,
+            likes: item.likes,
           });
         }
       }
@@ -148,14 +167,16 @@ export const POST: APIRoute = async ({ request, url }) => {
         const h = item as Record<string, unknown>;
         const imageId = Number(h.image_id);
         const r2Key = String(h.r2_key || '');
-        const phash = String(h.phash || '');
+        const phash = String(h.phash || '').toLowerCase();
 
-        if (!Number.isInteger(imageId) || imageId <= 0 || !r2Key || !phash) continue;
+        // Strict 16-hex pHash format validation
+        if (!Number.isInteger(imageId) || imageId <= 0 || !r2Key || !isValidPHashHex(phash)) continue;
 
         await env.DB.prepare(`
           INSERT INTO media_assets (image_id, r2_key, phash, hashed_at)
           VALUES (?, ?, ?, datetime('now'))
           ON CONFLICT(r2_key) DO UPDATE SET
+            image_id = excluded.image_id,
             phash = excluded.phash,
             hashed_at = datetime('now')
         `).bind(imageId, r2Key, phash).run();
