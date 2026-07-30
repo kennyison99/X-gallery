@@ -8,6 +8,11 @@ import {
 } from '../../lib/storage';
 import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 
+import {
+  parseGalleryBatchParams,
+  fetchGalleryBatch,
+} from '../../lib/gallery-feed';
+
 export const GET: APIRoute = async ({ url }) => {
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ error: 'D1 DB binding "DB" is not configured' }), {
@@ -16,46 +21,24 @@ export const GET: APIRoute = async ({ url }) => {
     });
   }
 
-  const tagFilter = url.searchParams.get('tag');
-
   try {
-    let images;
-    if (tagFilter) {
-      // Get images that have the specific tag, but also fetch ALL tags for each matching image
-      const query = `
-        SELECT i.*, group_concat(t2.name) as tags_list 
-        FROM images i
-        JOIN image_tags it ON i.id = it.image_id
-        JOIN tags t ON it.tag_id = t.id
-        LEFT JOIN image_tags it2 ON i.id = it2.image_id
-        LEFT JOIN tags t2 ON it2.tag_id = t2.id
-        WHERE t.name = ? AND i.published = 1
-        GROUP BY i.id
-        ORDER BY i.created_at DESC
-      `;
-      const { results } = await env.DB.prepare(query).bind(tagFilter).all();
-      images = results || [];
-    } else {
-      // Get all images and their associated tags
-      const query = `
-        SELECT i.*, group_concat(t.name) as tags_list
-        FROM images i
-        LEFT JOIN image_tags it ON i.id = it.image_id
-        LEFT JOIN tags t ON it.tag_id = t.id
-        WHERE i.published = 1
-        GROUP BY i.id
-        ORDER BY i.created_at DESC
-      `;
-      const { results } = await env.DB.prepare(query).all();
-      images = results || [];
+    let batchParams;
+    try {
+      batchParams = parseGalleryBatchParams(url.searchParams);
+    } catch (paramErr: any) {
+      return new Response(JSON.stringify({ error: paramErr.message }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
-    // Fetch all distinct authors first to filter out author handles from image tags list
+    const { items, hasMore } = await fetchGalleryBatch(env.DB, batchParams);
+
+    // Fetch distinct authors for active posts to sanitize tag lists
     const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1').all();
     const authorSet = new Set((authorsQuery.results || []).map((r: any) => r.author.toLowerCase()));
 
-    // Format tags_list from string to array and filter out author handles
-    const formattedImages = images.map((img: any) => ({
+    const formattedImages = items.map((img: any) => ({
       ...img,
       tags: img.tags_list 
         ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase())) 
@@ -63,7 +46,12 @@ export const GET: APIRoute = async ({ url }) => {
     }));
 
     return new Response(JSON.stringify(formattedImages), {
-      headers: { 'Content-Type': 'application/json' }
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Has-More': String(hasMore),
+        'X-Offset': String(batchParams.offset),
+        'X-Limit': String(batchParams.limit),
+      }
     });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), {

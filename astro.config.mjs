@@ -30,13 +30,13 @@ const mm = getVal('minute');
 
 const versionString = `v${YYYY}.${MM}.${DD}(${HH}${mm})-${commitHash}`;
 
+const useRemoteBindings = process.env.CLOUDFLARE_REMOTE_BINDINGS === 'true';
+
 // https://astro.build/config
 export default defineConfig({
   output: 'server',
   adapter: cloudflare({
-    platformProxy: {
-      enabled: true
-    }
+    remoteBindings: useRemoteBindings,
   }),
   security: {
     checkOrigin: false
