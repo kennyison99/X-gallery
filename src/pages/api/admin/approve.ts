@@ -1,11 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { createConditionalBumpDirectoryVersionStmt } from '../../../lib/directory-data';
 
-/**
- * POST /api/admin/approve
- * Approve a pending post (published=0 → 1).
- * Body: { id: number }
- */
 export const POST: APIRoute = async ({ request }) => {
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ error: 'D1 DB binding is not configured' }), {
@@ -24,11 +20,13 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    const result = await env.DB.prepare(
-      'UPDATE images SET published = 1 WHERE id = ? AND published = 0'
-    ).bind(id).run();
+    const batchResults = await env.DB.batch([
+      createConditionalBumpDirectoryVersionStmt(env.DB, 'SELECT 1 FROM images WHERE id = ? AND published = 0', [id]),
+      env.DB.prepare('UPDATE images SET published = 1 WHERE id = ? AND published = 0').bind(id),
+    ]);
 
-    if (result.meta.changes === 0) {
+    const approveResult = batchResults[1];
+    if (approveResult.meta.changes === 0) {
       return new Response(JSON.stringify({ error: 'Post not found or already published' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },

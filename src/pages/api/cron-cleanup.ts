@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { addStorageBytes } from '../../lib/storage';
+import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
 
 /**
  * POST /api/cron-cleanup
@@ -28,10 +29,12 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    // Find pending posts older than 3 days
+    // Find pending posts older than 3 days (bounded batch of max 100 per run)
     const { results } = await env.DB.prepare(
       `SELECT id, r2_keys FROM images
-       WHERE published = 0 AND created_at < datetime('now', '-3 days')`
+       WHERE published = 0 AND created_at < strftime('%Y-%m-%d %H:%M:%S', 'now', '-3 days')
+       ORDER BY id ASC
+       LIMIT 100`
     ).all<{ id: number; r2_keys: string }>();
 
     if (!results || results.length === 0) {
@@ -40,8 +43,8 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    const expiredIds = results.map((row) => row.id);
     let freedBytes = 0;
-    let deletedCount = 0;
 
     for (const row of results) {
       const keys = row.r2_keys.split(',').map((k) => k.trim()).filter(Boolean);
@@ -56,11 +59,15 @@ export const POST: APIRoute = async ({ request }) => {
           console.error(`Failed to delete R2 key ${key}:`, err);
         }
       }
-
-      // Delete from D1 (cascade handles image_tags)
-      await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(row.id).run();
-      deletedCount++;
     }
+
+    // Single atomic batch: delete expired images and orphaned tags, and bump directory version
+    const placeholders = expiredIds.map(() => '?').join(',');
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).bind(...expiredIds),
+      env.DB.prepare(`DELETE FROM tags WHERE id IN (SELECT t.id FROM tags t LEFT JOIN image_tags it ON t.id = it.tag_id WHERE it.tag_id IS NULL LIMIT 100)`),
+      createBumpDirectoryVersionStmt(env.DB),
+    ]);
 
     // Decrement storage counter
     if (freedBytes > 0) {
@@ -69,7 +76,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     return new Response(JSON.stringify({
       success: true,
-      deleted: deletedCount,
+      deleted: expiredIds.length,
       freed_bytes: freedBytes,
     }), {
       headers: { 'Content-Type': 'application/json' },

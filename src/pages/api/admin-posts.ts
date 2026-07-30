@@ -2,6 +2,8 @@ import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { authorSearchText, formatAuthorName, normalizeAuthorHandle } from '../../lib/admin-dashboard';
 
+import { getDirectoryData } from '../../lib/directory-data';
+
 // Admin post list with server-side pagination, filtering, and sorting.
 // Returns HTML fragments (table rows + grid cards) for AJAX insertion.
 //
@@ -24,7 +26,7 @@ function parseParams(url: URL) {
   const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') ?? '10', 10) || 10));
   const published = url.searchParams.get('published') === '0' ? 0 : 1;
   const search = (url.searchParams.get('search') ?? '').trim().toLowerCase();
-  const author = (url.searchParams.get('author') ?? '').trim().toLowerCase();
+  const author = (url.searchParams.get('author') ?? '').trim();
   const tag = (url.searchParams.get('tag') ?? '').trim();
   const media = url.searchParams.get('media') ?? '';
   const sort = url.searchParams.get('sort') ?? 'newest';
@@ -73,8 +75,8 @@ export const GET: APIRoute = async ({ url }) => {
   }
 
   if (params.author) {
-    conditions.push('LOWER(i.author) = ?');
-    bindings.push(params.author);
+    conditions.push('i.author = ? COLLATE NOCASE');
+    bindings.push(params.author.replace(/^@/, ''));
   }
 
   if (params.tag) {
@@ -83,7 +85,6 @@ export const GET: APIRoute = async ({ url }) => {
   }
 
   if (params.media === 'photo' || params.media === 'video') {
-    // R2 keys are comma-separated in a TEXT column; use LIKE for a rough filter.
     if (params.media === 'video') {
       conditions.push(`i.r2_keys LIKE '%.mp4%' OR i.r2_keys LIKE '%.webm%' OR i.r2_keys LIKE '%.mov%' OR i.r2_keys LIKE '%.m4v%'`);
     } else {
@@ -121,9 +122,9 @@ export const GET: APIRoute = async ({ url }) => {
     LIMIT ? OFFSET ?`;
   const { results = [] } = await env.DB.prepare(pageSql).bind(...pageBindings).all<any>();
 
-  // Fetch author set to filter author handles from tags
-  const authorsQuery = await env.DB.prepare('SELECT DISTINCT LOWER(author) as author FROM images').all<{ author: string }>();
-  const authorSet = new Set((authorsQuery.results ?? []).map((r) => r.author));
+  // Fetch cached directory data to sanitize author handles from tags
+  const directory = await getDirectoryData(env.DB, 'admin');
+  const authorSet = directory.canonicalAuthorSet;
 
   // Build HTML
   let tableRows = '';

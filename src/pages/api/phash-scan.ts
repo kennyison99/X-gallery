@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { createConditionalBumpDirectoryVersionStmt } from '../../lib/directory-data';
 import { chunkArray, isValidPHashHex } from '../../lib/phash-utils';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -202,12 +203,16 @@ export const POST: APIRoute = async ({ request, url }) => {
 
     for (const batch of batches) {
       const placeholders = batch.map(() => '?').join(',');
-      const statement = env.DB.prepare(
-        `UPDATE images SET published = 0, updated_at = datetime('now') WHERE id IN (${placeholders}) AND published = 1`
+      const conditionSql = `SELECT 1 FROM images WHERE id IN (${placeholders}) AND published = 1`;
+      const updateStmt = env.DB.prepare(
+        `UPDATE images SET published = 0, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id IN (${placeholders}) AND published = 1`
       ).bind(...batch);
 
-      const result = await statement.run();
-      totalUpdated += result.meta.changes ?? 0;
+      const batchResults = await env.DB.batch([
+        createConditionalBumpDirectoryVersionStmt(env.DB, conditionSql, batch),
+        updateStmt,
+      ]);
+      totalUpdated += batchResults[1].meta.changes ?? 0;
     }
 
     return json({

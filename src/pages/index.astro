@@ -4,6 +4,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import TagFilter from '../components/TagFilter.astro';
 import ImageCard from '../components/ImageCard.astro';
 import { fetchGalleryBatch, parseGalleryBatchParams } from '../lib/gallery-feed';
+import { getDirectoryData } from '../lib/directory-data';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding "DB" is not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
@@ -12,21 +13,18 @@ if (!env || !env.DB) {
 const activeTag = Astro.url.searchParams.get('tag');
 const activeAuthor = Astro.url.searchParams.get('author');
 
-// Fetch all distinct authors for listing
-const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1 ORDER BY author ASC').all();
-const authorsList = authorsQuery.results.map((r: any) => r.author);
-const authorSet = new Set(authorsList.map((a: string) => a.toLowerCase()));
-
-// 1. Fetch tags for TagFilter component (and filter out author handles)
-const tagsQuery = await env.DB.prepare('SELECT name FROM tags ORDER BY name ASC').all();
-const tagsList = tagsQuery.results.map((t: any) => t.name).filter((name: string) => !authorSet.has(name.toLowerCase()));
+// Fetch cached directory data for public scope (1 D1 row read on cache hit)
+const directory = await getDirectoryData(env.DB, 'public');
+const authorsList = directory.authors;
+const authorSet = directory.canonicalAuthorSet;
+const tagsList = directory.tags.map((t) => t.name).filter((name) => !authorSet.has(name.toLowerCase()));
 
 // Fetch a bounded first batch. URL-supplied offsets and limits never alter the initial page.
 const initialParams = new URLSearchParams();
 if (activeTag) initialParams.set('tag', activeTag);
 if (activeAuthor) initialParams.set('author', activeAuthor);
 const batchOptions = parseGalleryBatchParams(initialParams);
-const { items: images, hasMore } = await fetchGalleryBatch(env.DB, batchOptions);
+const { items: images, hasMore, nextCursor } = await fetchGalleryBatch(env.DB, batchOptions);
 
 const formattedImages = images.map((img: any) => ({
   ...img,
@@ -96,6 +94,7 @@ const pageTitle = activeTag
         class="image-grid"
         data-offset={formattedImages.length}
         data-has-more={hasMore ? 'true' : 'false'}
+        data-next-cursor={nextCursor ?? ''}
       >
         {formattedImages.map((image, index) => (
           <ImageCard image={image} index={index} />
@@ -248,6 +247,7 @@ const pageTitle = activeTag
     const activeTag = pageParams.get('tag');
     const activeAuthor = pageParams.get('author');
     let offset = Number(grid.dataset.offset ?? 0);
+    let nextCursor = grid.dataset.nextCursor || '';
     let hasMore = grid.dataset.hasMore === 'true';
     let loading = false;
     let pendingReset = false;
@@ -268,10 +268,14 @@ const pageTitle = activeTag
 
       try {
         const params = new URLSearchParams({
-          offset: String(reset ? 0 : offset),
           limit: String(reset ? INITIAL_GALLERY_LIMIT : GALLERY_BATCH_LIMIT),
           sort,
         });
+        if (!reset && nextCursor) {
+          params.set('cursor', nextCursor);
+        } else {
+          params.set('offset', String(reset ? 0 : offset));
+        }
         if (activeTag) params.set('tag', activeTag);
         if (activeAuthor) params.set('author', activeAuthor);
 
@@ -289,8 +293,10 @@ const pageTitle = activeTag
         const count = Number(batch.dataset.count ?? cards.length);
         offset = (reset ? 0 : offset) + count;
         hasMore = batch.dataset.hasMore === 'true';
+        nextCursor = batch.dataset.nextCursor || '';
         grid.dataset.offset = String(offset);
         grid.dataset.hasMore = String(hasMore);
+        grid.dataset.nextCursor = nextCursor;
         retryReset = false;
         restoreLikes();
         setupLikes();

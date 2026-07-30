@@ -1,3 +1,5 @@
+import { buildFilterKey, decodeCursor, encodeCursor, generateCursorWhereClause } from './cursor.ts';
+
 export const INITIAL_GALLERY_LIMIT = 48;
 export const GALLERY_BATCH_LIMIT = 24;
 export const MAX_GALLERY_LIMIT = 48;
@@ -6,6 +8,7 @@ export type GallerySort = 'newest' | 'oldest';
 
 export interface GalleryBatchParams {
   sort: GallerySort;
+  cursorStr?: string;
   offset: number;
   limit: number;
   tag: string | null;
@@ -45,6 +48,7 @@ export function parseGalleryBatchParams(params: URLSearchParams): GalleryBatchPa
   const sort = params.get('sort') ?? 'newest';
   if (sort !== 'newest' && sort !== 'oldest') throw new Error('Invalid sort');
 
+  const cursorStr = params.get('cursor')?.trim() || undefined;
   const offset = integerParam(params.get('offset'), 0, 'offset');
   const requestedLimit = integerParam(
     params.get('limit'),
@@ -53,13 +57,17 @@ export function parseGalleryBatchParams(params: URLSearchParams): GalleryBatchPa
   );
   if (requestedLimit < 1) throw new Error('Invalid limit');
 
-  return {
-    sort,
+  const res: GalleryBatchParams = {
+    sort: sort as GallerySort,
     offset,
     limit: Math.min(requestedLimit, MAX_GALLERY_LIMIT),
     tag: params.get('tag'),
     author: params.get('author'),
   };
+  if (cursorStr) {
+    res.cursorStr = cursorStr;
+  }
+  return res;
 }
 
 export function takeGalleryBatch<T>(rows: T[], limit: number): {
@@ -72,71 +80,60 @@ export function takeGalleryBatch<T>(rows: T[], limit: number): {
   };
 }
 
-/**
-  * Builds an optimized D1 query using Subquery Index Scan First.
-  * Filters and paginates using composite indexes BEFORE performing LEFT JOIN on tags,
-  * reducing D1 row reads by over 99%.
-  */
 export function buildGalleryQuery(options: GalleryBatchParams): {
   sql: string;
   bindings: unknown[];
+  filterKey: string;
 } {
+  const filterKey = buildFilterKey('gallery', {
+    tag: options.tag,
+    author: options.author,
+    sort: options.sort,
+  });
+
+  const decodedCursor = options.cursorStr ? decodeCursor(options.cursorStr, filterKey, options.sort) : null;
   const direction = options.sort === 'oldest' ? 'ASC' : 'DESC';
   const bindings: unknown[] = [];
+  const whereClauses: string[] = [];
 
   if (options.tag) {
-    bindings.push(options.tag, options.limit + 1, options.offset);
-    return {
-      sql: `
-        WITH page_images AS (
-          SELECT i.*
-          FROM images i
-          JOIN image_tags selected_it ON i.id = selected_it.image_id
-          JOIN tags selected_tag ON selected_it.tag_id = selected_tag.id
-          WHERE selected_tag.name = ? AND i.published = 1
-          ORDER BY i.created_at ${direction}, i.id ${direction}
-          LIMIT ? OFFSET ?
-        )
-        SELECT p.*, group_concat(t.name) AS tags_list
-        FROM page_images p
-        LEFT JOIN image_tags it ON p.id = it.image_id
-        LEFT JOIN tags t ON it.tag_id = t.id
-        GROUP BY p.id
-        ORDER BY p.created_at ${direction}, p.id ${direction}`,
-      bindings,
-    };
+    whereClauses.push('selected_tag.name = ? AND i.published = 1');
+    bindings.push(options.tag);
+  } else if (options.author) {
+    whereClauses.push('i.author = ? AND i.published = 1');
+    bindings.push(options.author);
+  } else {
+    whereClauses.push('i.published = 1');
   }
 
-  if (options.author) {
-    bindings.push(options.author, options.limit + 1, options.offset);
-    return {
-      sql: `
-        WITH page_images AS (
-          SELECT i.*
-          FROM images i
-          WHERE i.author = ? AND i.published = 1
-          ORDER BY i.created_at ${direction}, i.id ${direction}
-          LIMIT ? OFFSET ?
-        )
-        SELECT p.*, group_concat(t.name) AS tags_list
-        FROM page_images p
-        LEFT JOIN image_tags it ON p.id = it.image_id
-        LEFT JOIN tags t ON it.tag_id = t.id
-        GROUP BY p.id
-        ORDER BY p.created_at ${direction}, p.id ${direction}`,
-      bindings,
-    };
+  if (decodedCursor) {
+    const clause = generateCursorWhereClause(decodedCursor.sort);
+    whereClauses.push(clause.sql);
+    bindings.push(...clause.bindings(decodedCursor.createdAt, decodedCursor.id));
   }
 
-  bindings.push(options.limit + 1, options.offset);
+  const whereSql = whereClauses.join(' AND ');
+
+  bindings.push(options.limit + 1);
+  let offsetClause = '';
+  if (!decodedCursor && options.offset > 0) {
+    offsetClause = 'OFFSET ?';
+    bindings.push(options.offset);
+  }
+
+  const tagJoin = options.tag
+    ? `JOIN image_tags selected_it ON i.id = selected_it.image_id JOIN tags selected_tag ON selected_it.tag_id = selected_tag.id`
+    : '';
+
   return {
     sql: `
       WITH page_images AS (
         SELECT i.*
         FROM images i
-        WHERE i.published = 1
+        ${tagJoin}
+        WHERE ${whereSql}
         ORDER BY i.created_at ${direction}, i.id ${direction}
-        LIMIT ? OFFSET ?
+        LIMIT ? ${offsetClause}
       )
       SELECT p.*, group_concat(t.name) AS tags_list
       FROM page_images p
@@ -145,18 +142,34 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
       GROUP BY p.id
       ORDER BY p.created_at ${direction}, p.id ${direction}`,
     bindings,
+    filterKey,
   };
 }
 
 export async function fetchGalleryBatch(
   db: GalleryDatabase,
   options: GalleryBatchParams,
-): Promise<{ items: GalleryRow[]; hasMore: boolean }> {
-  const { sql, bindings } = buildGalleryQuery(options);
+): Promise<{ items: GalleryRow[]; hasMore: boolean; nextCursor: string | null }> {
+  const { sql, bindings, filterKey } = buildGalleryQuery(options);
   const { results = [] } = await db
     .prepare(sql)
     .bind(...bindings)
     .all<GalleryRow>();
 
-  return takeGalleryBatch(results, options.limit);
+  const { items, hasMore } = takeGalleryBatch(results, options.limit);
+  let nextCursor: string | null = null;
+  if (hasMore && items.length > 0) {
+    const last = items.at(-1)!;
+    if (last.created_at) {
+      nextCursor = encodeCursor({
+        v: 1,
+        sort: options.sort,
+        createdAt: last.created_at,
+        id: last.id,
+        filterKey,
+      });
+    }
+  }
+
+  return { items, hasMore, nextCursor };
 }

@@ -3,30 +3,36 @@ import { env } from 'cloudflare:workers';
 import ImageCard from '../../components/ImageCard.astro';
 import { fetchGalleryBatch, parseGalleryBatchParams } from '../../lib/gallery-feed';
 
+import { getDirectoryData } from '../../lib/directory-data';
+
+import { InvalidCursorError } from '../../lib/cursor';
+
 if (!env?.DB) {
   return new Response('D1 DB binding is not configured', { status: 500 });
 }
 
 let options;
+let batchResult;
+let directory;
 try {
   options = parseGalleryBatchParams(Astro.url.searchParams);
+  [batchResult, directory] = await Promise.all([
+    fetchGalleryBatch(env.DB, options),
+    getDirectoryData(env.DB, 'public'),
+  ]);
 } catch (error) {
-  return new Response(error instanceof Error ? error.message : 'Invalid request', { status: 400 });
+  const status = error instanceof InvalidCursorError ? 400 : (error instanceof Error && error.message.startsWith('Invalid') ? 400 : 500);
+  return new Response(error instanceof Error ? error.message : 'Invalid request', { status });
 }
 
-const [{ items: images, hasMore }, authorsQuery] = await Promise.all([
-  fetchGalleryBatch(env.DB, options),
-  env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1').all(),
-]);
-const authorSet = new Set(
-  (authorsQuery.results ?? []).map((row: any) => String(row.author).toLowerCase()),
-);
+const { items: images, hasMore, nextCursor } = batchResult;
+
 const formattedImages = images.map((image) => ({
   ...image,
   tags: image.tags_list
     ? image.tags_list
         .split(',')
-        .filter((tag) => !authorSet.has(tag.trim().toLowerCase()))
+        .filter((tag) => !directory.canonicalAuthorSet.has(tag.trim().toLowerCase()))
     : [],
 }));
 
@@ -37,6 +43,7 @@ Astro.response.headers.set('Cache-Control', 'no-store');
   class="gallery-batch"
   data-count={formattedImages.length}
   data-has-more={hasMore ? 'true' : 'false'}
+  data-next-cursor={nextCursor ?? ''}
 >
   {formattedImages.map((image) => <ImageCard image={image} />)}
 </div>

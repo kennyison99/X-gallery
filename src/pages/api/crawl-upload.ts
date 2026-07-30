@@ -8,6 +8,8 @@ import {
   isVideoKey,
 } from '../../lib/storage';
 import { normalizeAuthorInput } from '../../lib/admin-dashboard';
+import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
+import { classifyMediaKeys } from '../../lib/media-classifier';
 
 
 /**
@@ -168,11 +170,17 @@ export const POST: APIRoute = async ({ request }) => {
     const publishedValue = 1;
 
     const r2KeysString = r2Keys.join(',');
+    const { photoCount, videoCount } = classifyMediaKeys(r2KeysString);
 
-    // Insert into D1
+    // Normalize timestamp to YYYY-MM-DD HH:MM:SS
+    const normalizedCreatedAt = createdAt
+      ? (new Date(createdAt).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''))
+      : null;
+
+    // Stage 1: Insert into D1 with published = 0 (unapproved until tags are written)
     const insertQuery = `
-      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, published, photo_bytes, video_bytes${createdAt ? ', created_at' : ''})
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, published, photo_bytes, video_bytes, photo_count, video_count, media_count_version${normalizedCreatedAt ? ', created_at' : ''})
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1${normalizedCreatedAt ? ', ?' : ''})
       RETURNING id
     `;
     const bindParams = [
@@ -183,12 +191,13 @@ export const POST: APIRoute = async ({ request }) => {
       authorUrl || `https://x.com/${authorInput.handle}`,
       postUrl || '',
       description || '',
-      publishedValue,
       photoBytes,
-      videoBytes
+      videoBytes,
+      photoCount,
+      videoCount
     ];
-    if (createdAt) {
-      bindParams.push(createdAt);
+    if (normalizedCreatedAt) {
+      bindParams.push(normalizedCreatedAt);
     }
     const imageResult = await env.DB.prepare(insertQuery)
       .bind(...bindParams)
@@ -200,12 +209,9 @@ export const POST: APIRoute = async ({ request }) => {
 
       // Save tags to D1 and link them to this image
       for (const tagName of autoTags) {
-        // Ensure the tag exists in tags table
         await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName).run();
-        // Get tag ID
         const tagRow = await env.DB.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: number }>();
         if (tagRow) {
-          // Link tag to this image in image_tags table
           await env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)')
             .bind(imageResult.id, tagRow.id)
             .run();
@@ -213,10 +219,12 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    // Update last_crawled_at for this account
-    await env.DB.prepare(
-      "UPDATE crawl_accounts SET last_crawled_at = datetime('now') WHERE lower(username) = ?"
-    ).bind(authorInput.handle.toLowerCase()).run();
+    // Stage 2: Atomically publish and bump directory version, update last_crawled_at
+    await env.DB.batch([
+      env.DB.prepare('UPDATE images SET published = 1 WHERE id = ?').bind(imageResult?.id),
+      createBumpDirectoryVersionStmt(env.DB),
+      env.DB.prepare("UPDATE crawl_accounts SET last_crawled_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE lower(username) = ?").bind(authorInput.handle.toLowerCase()),
+    ]);
 
     return new Response(JSON.stringify({ 
       success: true, 
