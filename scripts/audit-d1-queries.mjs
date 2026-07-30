@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID ?? '42262e62f0ff1107d0eb78d92a94d873';
+const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
 
 const BASELINE_SCENARIOS = [
   {

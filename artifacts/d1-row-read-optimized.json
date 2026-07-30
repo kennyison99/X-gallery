@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-30T12:45:59.233Z",
+  "timestamp": "2026-07-30T12:57:48.978Z",
   "schema_validated": false,
   "scenarios": [
     {
@@ -11,8 +11,8 @@
       "returned_rows": 49,
       "rows_read": 50,
       "rows_written": 0,
-      "duration_ms": 0.8214,
-      "sql_duration_ms": 0.8214
+      "duration_ms": 0.9754,
+      "sql_duration_ms": 0.9754
     },
     {
       "id": "public_directory_version_check",
@@ -23,8 +23,8 @@
       "returned_rows": 1,
       "rows_read": 1,
       "rows_written": 0,
-      "duration_ms": 0.2245,
-      "sql_duration_ms": 0.2245
+      "duration_ms": 0.185,
+      "sql_duration_ms": 0.185
     },
     {
       "id": "admin_overview_o1_sums",
@@ -35,8 +35,8 @@
       "returned_rows": 1,
       "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 3.4713,
-      "sql_duration_ms": 3.4713
+      "duration_ms": 2.4167,
+      "sql_duration_ms": 2.4167
     },
     {
       "id": "admin_author_stats_group_by",
@@ -47,8 +47,8 @@
       "returned_rows": 85,
       "rows_read": 36008,
       "rows_written": 0,
-      "duration_ms": 19.2903,
-      "sql_duration_ms": 19.2903
+      "duration_ms": 15.493,
+      "sql_duration_ms": 15.493
     },
     {
       "id": "search_page_first_cte",
@@ -59,8 +59,8 @@
       "returned_rows": 49,
       "rows_read": 34727,
       "rows_written": 0,
-      "duration_ms": 22.1519,
-      "sql_duration_ms": 22.1519
+      "duration_ms": 19.9145,
+      "sql_duration_ms": 19.9145
     }
   ]
 }

@@ -76,7 +76,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     return new Response(JSON.stringify({
       success: true,
-      deleted: deletedCount,
+      deleted: expiredIds.length,
       freed_bytes: freedBytes,
     }), {
       headers: { 'Content-Type': 'application/json' },

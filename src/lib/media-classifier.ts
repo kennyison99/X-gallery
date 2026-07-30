@@ -5,6 +5,11 @@ export interface ClassifiedMediaCount {
   videoCount: number;
 }
 
+export function isVideoKey(key: string): boolean {
+  const ext = key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? '';
+  return VIDEO_EXTS.has(ext);
+}
+
 /**
  * Classifies a comma-separated list of r2_keys into photo and video counts.
  */
@@ -22,8 +27,7 @@ export function classifyMediaKeys(r2Keys: string | null | undefined): Classified
   let videoCount = 0;
 
   for (const key of keys) {
-    const ext = key.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? '';
-    if (VIDEO_EXTS.has(ext)) {
+    if (isVideoKey(key)) {
       videoCount++;
     } else {
       photoCount++;

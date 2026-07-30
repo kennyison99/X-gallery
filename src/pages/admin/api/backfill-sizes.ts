@@ -1,11 +1,8 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
-import { classifyMediaKeys } from '../../../lib/media-classifier';
+import { classifyMediaKeys, isVideoKey } from '../../../lib/media-classifier';
 
-const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
-const isVideoKey = (k: string) => VIDEO_EXTS.has((k.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
-
-export const POST: APIRoute = async () => {
+export const POST: APIRoute = async ({ request }) => {
   if (!env || !env.DB || !env.BUCKET) {
     return new Response(JSON.stringify({ error: 'D1 or R2 binding not configured' }), {
       status: 500,
@@ -14,22 +11,49 @@ export const POST: APIRoute = async () => {
   }
 
   try {
-    const r2Sizes = new Map<string, number>();
-    let cursor: string | undefined;
-    let listCount = 0;
-    do {
-      const listResult = await env.BUCKET.list({ limit: 1000, cursor });
-      for (const obj of listResult.objects) {
-        r2Sizes.set(obj.key, obj.size);
-      }
-      listCount += listResult.objects.length;
-      cursor = listResult.truncated ? listResult.cursor : undefined;
-    } while (cursor);
+    const body = await request.json().catch(() => ({}));
+    const rawCursor = Number(body.cursor ?? 0);
+    const cursor = Number.isFinite(rawCursor) && rawCursor >= 0 ? rawCursor : 0;
+    const rawLimit = Number(body.limit ?? 35);
+    const limit = Math.min(Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 35), 40);
 
-    const { results } = await env.DB.prepare('SELECT id, r2_keys FROM images').all();
+    const { results } = await env.DB.prepare(
+      'SELECT id, r2_keys FROM images WHERE id > ? ORDER BY id ASC LIMIT ?'
+    ).bind(cursor, limit + 1).all<{ id: number; r2_keys: string }>();
+
+    if (!results || results.length === 0) {
+      return new Response(JSON.stringify({
+        success: true,
+        processed: 0,
+        nextCursor: cursor,
+        done: true,
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const hasMore = results.length > limit;
+    const rows = results.slice(0, limit);
+
+    // Collect all R2 keys for this batch
+    const batchKeys = new Set<string>();
+    for (const row of rows) {
+      const keys = (row.r2_keys || '').split(',').map((k) => k.trim()).filter(Boolean);
+      keys.forEach((k) => batchKeys.add(k));
+    }
+
+    // Fetch head metadata for keys in batch
+    const r2Sizes = new Map<string, number>();
+    for (const key of batchKeys) {
+      try {
+        const head = await env.BUCKET.head(key);
+        if (head) r2Sizes.set(key, head.size);
+      } catch (err) {
+        console.error(`R2 head failed for key ${key}:`, err);
+      }
+    }
+
     const statements = [];
-    for (const row of (results || []) as any[]) {
-      const keys = (row.r2_keys || '').split(',').map((k: string) => k.trim()).filter(Boolean);
+    for (const row of rows) {
+      const keys = (row.r2_keys || '').split(',').map((k) => k.trim()).filter(Boolean);
       let photoBytes = 0;
       let videoBytes = 0;
 
@@ -42,23 +66,23 @@ export const POST: APIRoute = async () => {
       const { photoCount, videoCount } = classifyMediaKeys(row.r2_keys);
 
       statements.push(
-        env.DB.prepare('UPDATE images SET photo_bytes = ?, video_bytes = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?')
-          .bind(photoBytes, videoBytes, photoCount, videoCount, row.id)
+        env.DB.prepare(
+          'UPDATE images SET photo_bytes = ?, video_bytes = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?'
+        ).bind(photoBytes, videoBytes, photoCount, videoCount, row.id)
       );
     }
 
-    let updatedCount = 0;
-    for (let i = 0; i < statements.length; i += 500) {
-      const batch = statements.slice(i, i + 500);
-      await env.DB.batch(batch);
-      updatedCount += batch.length;
+    if (statements.length > 0) {
+      await env.DB.batch(statements);
     }
+
+    const nextCursor = rows.at(-1)?.id ?? cursor;
 
     return new Response(JSON.stringify({
       success: true,
-      total_r2_objects: listCount,
-      total_db_rows: results?.length,
-      updatedCount,
+      processed: rows.length,
+      nextCursor,
+      done: !hasMore,
     }), { headers: { 'Content-Type': 'application/json' } });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), {

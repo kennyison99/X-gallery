@@ -316,10 +316,23 @@ const totalMediaSum = totalPhotosSum + totalVideosSum;
     backfillBtn.textContent = '同步中...';
     
     try {
-      const res = await fetch('/admin/api/backfill-sizes', { method: 'POST' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      alert(`同步完成！共從 R2 對齊並更新了 ${data.updatedCount} 筆貼文容量紀錄。`);
+      let cursor = 0;
+      let processed = 0;
+      while (true) {
+        const res = await fetch('/admin/api/backfill-sizes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cursor, limit: 35 }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        processed += Number(data.processed || 0);
+        if (data.done) break;
+        const nextCursor = Number(data.nextCursor);
+        if (!Number.isFinite(nextCursor) || nextCursor <= cursor) break;
+        cursor = nextCursor;
+      }
+      alert(`同步完成！共從 R2 對齊並更新了 ${processed} 筆貼文容量紀錄。`);
       window.location.reload();
     } catch (err: any) {
       alert(`同步失敗：${err.message}`);
