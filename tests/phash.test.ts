@@ -173,6 +173,22 @@ describe('Union-Find & Multi-Image Cluster Winner Selection', () => {
     assert.deepEqual(keeperIds, [200], 'Only Post 200 should be keeper');
     assert.deepEqual(pendingIds.sort((a, b) => a - b), [100, 300]);
   });
+
+  it('caps sample matches array to 100 while retaining exact totalMatchPairsCount for large match sets', () => {
+    // Generate 15 items that all have identical pHash (creating 15 * 14 / 2 = 105 match pairs)
+    const items: ImageHashItem[] = Array.from({ length: 15 }, (_, i) => ({
+      imageId: (i + 1) * 10,
+      r2Key: `key_${i}`,
+      phash: '0000000000000000',
+      likes: i,
+      title: `Post ${i}`,
+    }));
+
+    const { matches, totalMatchPairsCount } = buildDuplicateClusters(items, 10);
+
+    assert.equal(totalMatchPairsCount, 105, 'Total match pairs should be 105');
+    assert.equal(matches.length, 100, 'Sample matches array should be capped at 100 for memory protection');
+  });
 });
 
 describe('Backfill Loop Pagination through Empty Intermediate Pages (Blocker 1 Fix)', () => {
