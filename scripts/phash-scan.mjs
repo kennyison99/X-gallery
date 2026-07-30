@@ -22,7 +22,11 @@ function getArgValue(prefix, fallback) {
 
 const THRESHOLD = Math.min(63, Math.max(0, getArgValue('--threshold=', 10)));
 const MAX_BACKFILL_IMAGES = getArgValue('--limit=', 50); // Max unhashed images to backfill per run
-const CONCURRENCY = Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || '12', 10)));
+const CONCURRENCY = Math.min(16, Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || '12', 10))));
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function mapConcurrent(items, limit, fn) {
   const results = [];
@@ -51,13 +55,25 @@ async function fetchUnhashedMedia(cursor = 0, limit = 50) {
   return response.json();
 }
 
-async function fetchImageBuffer(r2Key) {
+async function fetchImageBuffer(r2Key, retries = 2) {
   const url = `${SITE_URL}/api/r2/${encodeURIComponent(r2Key)}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for key "${r2Key}"`);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} for key "${r2Key}"`);
+      }
+      return Buffer.from(await response.arrayBuffer());
+    } catch (err) {
+      if (attempt < retries) {
+        await sleep(500 * Math.pow(2, attempt));
+      } else {
+        throw err;
+      }
+    }
   }
-  return Buffer.from(await response.arrayBuffer());
 }
 
 async function saveHashesToDB(hashItems) {
@@ -110,13 +126,14 @@ export async function runBackfillLoop({
   concurrency = CONCURRENCY,
   logger = console.log,
 } = {}) {
-  let backfilledTotal = 0;
+  const clampedConcurrency = Math.min(16, Math.max(1, concurrency));
+  let successfulTotal = 0;
   let cursor = 0;
   let pageCount = 0;
 
   while (cursor !== null) {
-    if (maxBackfill > 0 && backfilledTotal >= maxBackfill) {
-      logger(`  Reached backfill limit of ${maxBackfill} images for this run.`);
+    if (maxBackfill > 0 && successfulTotal >= maxBackfill) {
+      logger(`  Reached backfill limit of ${maxBackfill} successful hashes for this run.`);
       break;
     }
 
@@ -124,16 +141,17 @@ export async function runBackfillLoop({
     const { unhashed = [], next_cursor = null } = await fetchFn(cursor, 50);
 
     if (unhashed.length > 0) {
-      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Computing pHashes (Concurrency: ${concurrency})...`);
-      
+      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Computing pHashes (Concurrency: ${clampedConcurrency})...`);
+
       const itemsToProcess = [];
       for (const item of unhashed) {
-        if (maxBackfill > 0 && backfilledTotal >= maxBackfill) break;
+        if (maxBackfill > 0 && (successfulTotal + itemsToProcess.length) >= maxBackfill) {
+          break;
+        }
         itemsToProcess.push(item);
-        backfilledTotal++;
       }
 
-      const poolResults = await mapConcurrent(itemsToProcess, concurrency, async (item) => {
+      const poolResults = await mapConcurrent(itemsToProcess, clampedConcurrency, async (item) => {
         try {
           const buffer = await fetchBufferFn(item.r2_key);
           const hashHex = await hashFn(buffer);
@@ -152,7 +170,8 @@ export async function runBackfillLoop({
 
       if (newHashes.length > 0) {
         await saveFn(newHashes);
-        logger(`  Persisted ${newHashes.length} pHash(es) to D1 database.`);
+        successfulTotal += newHashes.length;
+        logger(`  Persisted ${newHashes.length} pHash(es) to D1 database. Total saved this run: ${successfulTotal}/${maxBackfill > 0 ? maxBackfill : 'Unlimited'}`);
       }
     } else {
       logger(`  [Page ${pageCount}] 0 unhashed images on this page. Next cursor: ${next_cursor}`);
@@ -161,7 +180,7 @@ export async function runBackfillLoop({
     cursor = next_cursor;
   }
 
-  return backfilledTotal;
+  return successfulTotal;
 }
 
 async function main() {
