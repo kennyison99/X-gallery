@@ -74,3 +74,10 @@ CREATE INDEX IF NOT EXISTS idx_media_assets_unhashed ON media_assets(phash_versi
 CREATE INDEX IF NOT EXISTS idx_images_published_id ON images(published, id);
 CREATE INDEX IF NOT EXISTS idx_media_assets_image_id ON media_assets(image_id);
 
+-- 效能優化複合索引
+CREATE INDEX IF NOT EXISTS idx_images_published_created ON images(published, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_images_published_author ON images(published, author, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_image_tags_tag_image ON image_tags(tag_id, image_id);
+CREATE INDEX IF NOT EXISTS idx_images_post_url ON images(post_url);
+
+
