@@ -9,6 +9,12 @@ import AdminPostManager from '../../components/admin/AdminPostManager.astro';
 import AdminCrawlerPanel from '../../components/admin/AdminCrawlerPanel.astro';
 import AdminAutoTagPanel from '../../components/admin/AdminAutoTagPanel.astro';
 import { getDirectoryData } from '../../lib/directory-data';
+import {
+  rectOverlap,
+  getSelectionRect,
+  computePageSelectionState,
+  applySelectionMode,
+} from '../../lib/admin-selection';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
@@ -309,15 +315,16 @@ try {
     storageReconcileBtn.textContent = '重新計算';
   });
 
-  // Bulk action UI bindings
+  // Persistent Selection Toolbar UI bindings
   const selectAllCheckbox = document.getElementById('select-all-checkbox') as HTMLInputElement | null;
+  const selectPageBtn = document.getElementById('select-page-btn') as HTMLButtonElement | null;
+  const clearSelectionBtn = document.getElementById('clear-selection-btn') as HTMLButtonElement | null;
   const bulkActionsBar = document.getElementById('bulk-actions-bar');
   const selectedCountDisplay = document.getElementById('selected-count-display');
   const bulkDeleteBtn = document.getElementById('bulk-delete-btn') as HTMLButtonElement | null;
   const bulkDeleteProgress = document.getElementById('bulk-delete-progress');
   const bulkDeleteProgressBar = document.getElementById('bulk-delete-progress-bar') as HTMLProgressElement | null;
   const bulkDeleteProgressText = document.getElementById('bulk-delete-progress-text');
-
 
   const tabPublished = document.getElementById('tab-published');
   const tabPending = document.getElementById('tab-pending');
@@ -344,38 +351,89 @@ try {
     if (text) text.textContent = message;
   }
 
-  function syncCheckboxesFromState() {
-    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
-      const htmlCb = cb as HTMLInputElement;
-      const idAttr = htmlCb.getAttribute('data-id');
-      const id = idAttr ? parseInt(idAttr, 10) : NaN;
-      if (!isNaN(id)) {
-        htmlCb.checked = selectedIds.has(id);
-      }
-    });
-    updateBulkActionsState();
+  function getActiveSelectionRoot(): HTMLElement | null {
+    return activeView === 'grid' ? gridBody : tableBody;
   }
 
-  function updateBulkActionsState() {
-    const checkedCount = selectedIds.size;
+  function getCurrentPageItems(): HTMLElement[] {
+    const root = getActiveSelectionRoot();
+    if (!root) return [];
+    const selector = activeView === 'grid' ? '.grid-image-card' : '.image-row';
+    return Array.from(root.querySelectorAll<HTMLElement>(selector));
+  }
 
-    if (selectedCountDisplay) {
-      selectedCountDisplay.textContent = `已選擇 ${checkedCount} 筆照片`;
+  function getCurrentPageItemIds(): number[] {
+    return getCurrentPageItems()
+      .map((el) => parseInt(el.getAttribute('data-id') || '', 10))
+      .filter((id) => !isNaN(id));
+  }
+
+  function renderSelectionState() {
+    const visibleItems = getCurrentPageItems();
+    const visibleItemIds = visibleItems
+      .map((el) => parseInt(el.getAttribute('data-id') || '', 10))
+      .filter((id) => !isNaN(id));
+
+    // Synchronize item classes, checkboxes, aria-selected
+    visibleItems.forEach((itemEl) => {
+      const id = parseInt(itemEl.getAttribute('data-id') || '', 10);
+      const isSelected = selectedIds.has(id);
+      itemEl.classList.toggle('is-selected', isSelected);
+      itemEl.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    });
+
+    const activeRoot = getActiveSelectionRoot();
+    if (activeRoot) {
+      activeRoot.querySelectorAll<HTMLInputElement>('.image-select-checkbox').forEach((cb) => {
+        const id = parseInt(cb.getAttribute('data-id') || '', 10);
+        if (!isNaN(id)) {
+          cb.checked = selectedIds.has(id);
+        }
+      });
     }
 
-    if (bulkActionsBar) {
-      if (checkedCount > 0) {
-        bulkActionsBar.classList.add('visible');
-      } else {
-        bulkActionsBar.classList.remove('visible');
-      }
-    }
+    const pageState = computePageSelectionState(visibleItemIds, selectedIds);
 
+    // Header checkbox triple-state
     if (selectAllCheckbox) {
-      const visibleCheckboxes = Array.from(document.querySelectorAll('.image-select-checkbox')) as HTMLInputElement[];
-      const checkedVisibleCount = visibleCheckboxes.filter(cb => cb.checked).length;
-      selectAllCheckbox.checked = visibleCheckboxes.length > 0 && checkedVisibleCount === visibleCheckboxes.length;
+      selectAllCheckbox.checked = pageState.allSelected;
+      selectAllCheckbox.indeterminate = pageState.partiallySelected;
+      selectAllCheckbox.disabled = visibleItemIds.length === 0;
     }
+
+    // Page toggle button label
+    if (selectPageBtn) {
+      selectPageBtn.textContent = pageState.allSelected && visibleItemIds.length > 0 ? '取消選取當前頁' : '全選當前頁';
+      selectPageBtn.disabled = visibleItemIds.length === 0;
+    }
+
+    // Clear selection button
+    if (clearSelectionBtn) {
+      clearSelectionBtn.disabled = selectedIds.size === 0;
+    }
+
+    // Bulk delete button
+    if (bulkDeleteBtn) {
+      bulkDeleteBtn.disabled = selectedIds.size === 0;
+    }
+
+    // Selected count display
+    if (selectedCountDisplay) {
+      selectedCountDisplay.textContent = `已選擇 ${selectedIds.size} 筆照片`;
+    }
+  }
+
+  function toggleCurrentPageSelection() {
+    const visibleItemIds = getCurrentPageItemIds();
+    const pageState = computePageSelectionState(visibleItemIds, selectedIds);
+
+    if (pageState.allSelected) {
+      visibleItemIds.forEach((id) => selectedIds.delete(id));
+    } else {
+      visibleItemIds.forEach((id) => selectedIds.add(id));
+    }
+
+    renderSelectionState();
   }
 
   // UI interactions for file input
@@ -1021,7 +1079,7 @@ try {
     if (postsLoading) return;
     postsLoading = true;
     currentPage = page;
-    sessionStorage.setItem('admin-current-page', String(page)); // 保存頁數
+    sessionStorage.setItem('admin-current-page', String(page));
 
     const perPage = itemsPerPage();
     const offset = (page - 1) * perPage;
@@ -1047,7 +1105,6 @@ try {
 
       totalItems = data.total;
 
-      // 檢查是否因為刪除而導致頁碼越界，若越界則跳回最後一頁並重新加載
       const totalPages = Math.ceil(totalItems / perPage) || 1;
       if (currentPage > totalPages) {
         postsLoading = false;
@@ -1055,25 +1112,17 @@ try {
         return;
       }
 
-      // Inject HTML
       if (tableBody) tableBody.innerHTML = data.table_rows || '';
       if (gridBody) gridBody.innerHTML = data.grid_cards || '';
 
-      // Show/hide empty states
       const isEmpty = data.total === 0;
       if (emptyState) emptyState.style.display = isEmpty ? 'block' : 'none';
       if (gridEmptyState) gridEmptyState.style.display = isEmpty ? 'block' : 'none';
 
-      // Hydrate data-src -> src for visible thumbnails
       hydratePostMedia();
-
-      // Rebind row-level event handlers
       rebindRowHandlers();
+      renderSelectionState();
 
-      // 同步 DOM 勾選狀態與 selectedIds，支援跨頁勾選
-      syncCheckboxesFromState();
-
-      // Update pagination UI
       if (paginationInfo) {
         if (totalItems > 0) {
           paginationInfo.textContent = `顯示第 ${data.showing_start}-${data.showing_end} 筆，共 ${totalItems} 筆`;
@@ -1095,7 +1144,6 @@ try {
   }
 
   function rebindRowHandlers() {
-    // Edit buttons
     document.querySelectorAll('.edit-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-id');
@@ -1115,7 +1163,6 @@ try {
       });
     });
 
-    // Delete buttons
     document.querySelectorAll('.delete-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const imgId = btn.getAttribute('data-id');
@@ -1145,7 +1192,6 @@ try {
       });
     });
 
-    // Approve buttons
     document.querySelectorAll('.approve-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const imgId = btn.getAttribute('data-id');
@@ -1176,7 +1222,6 @@ try {
     });
   }
 
-  // Filter event listeners (debounce search, immediate for selects)
   searchInput?.addEventListener('input', () => {
     sessionStorage.setItem('admin-filter-search', searchInput.value);
     if (searchDebounce) clearTimeout(searchDebounce);
@@ -1199,7 +1244,6 @@ try {
     loadPosts(1);
   });
 
-  // Pagination buttons
   firstPageBtn?.addEventListener('click', () => { if (currentPage > 1) loadPosts(1); });
   prevPageBtn?.addEventListener('click', () => { if (currentPage > 1) loadPosts(currentPage - 1); });
   nextPageBtn?.addEventListener('click', () => {
@@ -1211,43 +1255,26 @@ try {
     if (currentPage < totalPages) loadPosts(totalPages);
   });
 
-  // Keyboard navigation for pagination via Arrow Keys (<- / ->)
   document.addEventListener('keydown', (e) => {
-    // Only switch pages if the active element is not an input or textarea
     const active = document.activeElement;
     if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
       return;
     }
-
-    // Only switch if the post manager tab/panel is currently visible
     const postsPanel = document.getElementById('panel-posts');
-    if (!postsPanel || postsPanel.hidden) {
-      return;
-    }
-
-    if (e.key === 'ArrowLeft') {
-      if (prevPageBtn && !prevPageBtn.disabled) {
-        prevPageBtn.click();
-      }
-    } else if (e.key === 'ArrowRight') {
-      if (nextPageBtn && !nextPageBtn.disabled) {
-        nextPageBtn.click();
-      }
-    }
+    if (!postsPanel || postsPanel.hidden) return;
+    if (e.key === 'ArrowLeft') { if (prevPageBtn && !prevPageBtn.disabled) prevPageBtn.click(); }
+    else if (e.key === 'ArrowRight') { if (nextPageBtn && !nextPageBtn.disabled) nextPageBtn.click(); }
   });
 
-  // View toggle
   const viewToggleTable = document.getElementById('view-toggle-table');
   const viewToggleGrid = document.getElementById('view-toggle-grid');
 
   function switchView(view: 'table' | 'grid') {
     if (activeView === view) return;
+    cancelActiveDrag();
     activeView = view;
-    localStorage.setItem('admin-active-view', view); // 保存 view 設定
+    localStorage.setItem('admin-active-view', view);
     
-    if (selectAllCheckbox) selectAllCheckbox.checked = false;
-    updateBulkActionsState();
-
     if (view === 'table') {
       viewToggleTable?.classList.add('active');
       viewToggleGrid?.classList.remove('active');
@@ -1259,18 +1286,23 @@ try {
       if (gridViewEl) gridViewEl.style.display = 'block';
       if (tableViewEl) tableViewEl.style.display = 'none';
     }
-    loadPosts(currentPage); // 切換視圖時保留當前頁碼
+    loadPosts(currentPage);
   }
 
   viewToggleTable?.addEventListener('click', () => switchView('table'));
   viewToggleGrid?.addEventListener('click', () => switchView('grid'));
 
-  // Attach settings change handlers on page load
+  selectPageBtn?.addEventListener('click', toggleCurrentPageSelection);
+  selectAllCheckbox?.addEventListener('change', toggleCurrentPageSelection);
+  clearSelectionBtn?.addEventListener('click', () => {
+    selectedIds.clear();
+    renderSelectionState();
+  });
+
   document.querySelectorAll('.toggle-enabled-cb, .toggle-crawlall-cb').forEach(cb => {
     cb.addEventListener('change', handleToggleCrawlSetting);
   });
 
-  // Listen for individual row checkbox changes
   document.addEventListener('change', (e) => {
     const target = e.target as HTMLElement;
     if (target && target.classList.contains('image-select-checkbox')) {
@@ -1278,31 +1310,23 @@ try {
       const idAttr = htmlCb.getAttribute('data-id');
       const id = idAttr ? parseInt(idAttr, 10) : NaN;
       if (!isNaN(id)) {
-        if (htmlCb.checked) {
-          selectedIds.add(id);
-        } else {
-          selectedIds.delete(id);
-        }
+        if (htmlCb.checked) selectedIds.add(id);
+        else selectedIds.delete(id);
       }
-      updateBulkActionsState();
+      renderSelectionState();
     }
   });
 
-  // Listen for clicks on the elements to toggle checkboxes (Grid card or Table thumbnail)
   document.addEventListener('click', (e) => {
-    const target = e.target as HTMLElement;
-
-    // Prevent toggling when clicking on interactive elements
-    if (
-      target.tagName === 'INPUT' || 
-      target.tagName === 'BUTTON' || 
-      target.closest('button') || 
-      target.closest('a')
-    ) {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.closest('button') || target.closest('a')) return;
 
-    // Case 1: Grid card click
     const gridCard = target.closest('.grid-image-card') as HTMLElement | null;
     if (gridCard) {
       const cb = gridCard.querySelector('.image-select-checkbox') as HTMLInputElement | null;
@@ -1313,7 +1337,6 @@ try {
       return;
     }
 
-    // Case 2: Table thumbnail click
     const thumbContainer = target.closest('.thumb-container') as HTMLElement | null;
     if (thumbContainer) {
       const row = thumbContainer.closest('.image-row') as HTMLElement | null;
@@ -1324,27 +1347,7 @@ try {
           cb.dispatchEvent(new Event('change', { bubbles: true }));
         }
       }
-      return;
     }
-  });
-
-  // Select all checkbox handler — affects only currently visible rows
-  selectAllCheckbox?.addEventListener('change', () => {
-    const isChecked = selectAllCheckbox.checked;
-    document.querySelectorAll('.image-select-checkbox').forEach(cb => {
-      const htmlCb = cb as HTMLInputElement;
-      htmlCb.checked = isChecked;
-      const idAttr = htmlCb.getAttribute('data-id');
-      const id = idAttr ? parseInt(idAttr, 10) : NaN;
-      if (!isNaN(id)) {
-        if (isChecked) {
-          selectedIds.add(id);
-        } else {
-          selectedIds.delete(id);
-        }
-      }
-    });
-    updateBulkActionsState();
   });
 
   autoTagBtn?.addEventListener('click', async () => {

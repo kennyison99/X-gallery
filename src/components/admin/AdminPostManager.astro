@@ -62,10 +62,18 @@ const { publishedCount, pendingCount, authors, tags } = Astro.props;
           </select>
         </div>
 
-        <!-- Bulk Actions Bar -->
+        <!-- Persistent Selection Toolbar -->
         <div id="bulk-actions-bar" class="bulk-actions">
-          <span id="selected-count-display">已選擇 0 筆照片</span>
-          <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <button type="button" id="select-page-btn" class="btn" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">
+              全選當前頁
+            </button>
+            <button type="button" id="clear-selection-btn" class="btn" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;" disabled>
+              清除選取
+            </button>
+            <span id="selected-count-display">已選擇 0 筆照片</span>
+          </div>
+          <button id="bulk-delete-btn" class="btn btn-danger" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;" disabled>
             刪除所選
           </button>
         </div>

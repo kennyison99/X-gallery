@@ -179,7 +179,10 @@ export const GET: APIRoute = async ({ url }) => {
     // Table row
     tableRows += `<tr class="image-row" data-id="${image.id}" data-published="${image.published}" data-has-photo="${hasPhoto}" data-has-video="${hasVideo}" data-author="${escapeAttr(authorHandle)}" data-author-display-name="${escapeAttr(image.author_display_name || '')}" data-author-search="${escapeAttr(authorSearch)}">
   <td style="text-align: center; vertical-align: middle;">
-    <input type="checkbox" class="image-select-checkbox" data-id="${image.id}" style="cursor: pointer;" />
+    <div style="display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem;">
+      <span class="drag-select-handle" role="button" tabindex="-1" aria-label="拖曳選取貼文" data-drag-select-handle data-id="${image.id}">⋮⋮</span>
+      <input type="checkbox" class="image-select-checkbox" data-id="${image.id}" style="cursor: pointer;" />
+    </div>
   </td>
   <td>
     <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
@@ -214,7 +217,8 @@ export const GET: APIRoute = async ({ url }) => {
 
     // Grid card
     gridCards += `<div class="grid-image-card" data-id="${image.id}" data-published="${image.published}" data-has-photo="${hasPhoto}" data-has-video="${hasVideo}" data-author="${escapeAttr(authorHandle)}" data-author-display-name="${escapeAttr(image.author_display_name || '')}" data-author-search="${escapeAttr(authorSearch)}">
-  <div class="grid-card-select-overlay">
+  <div class="grid-card-select-overlay" style="display: flex; align-items: center; gap: 0.25rem;">
+    <span class="drag-select-handle" role="button" tabindex="-1" aria-label="拖曳選取貼文" data-drag-select-handle data-id="${image.id}">⋮⋮</span>
     <input type="checkbox" class="image-select-checkbox grid-select-checkbox" data-id="${image.id}" style="cursor: pointer;" />
   </div>
   <div class="grid-card-media">

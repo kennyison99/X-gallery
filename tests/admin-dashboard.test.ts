@@ -68,11 +68,13 @@ test('admin subcomponents retain element IDs, metadata inputs, crawler controls,
   const uploadPanelContent = fs.readFileSync(uploadPanelPath, 'utf-8');
   const crawlerPanelContent = fs.readFileSync(crawlerPanelPath, 'utf-8');
 
-  // Check PostManager IDs, empty-state wording, and tab buttons
+  // Check PostManager IDs, empty-state wording, and selection toolbar buttons
   assert.ok(postManagerContent.includes('id="tab-published"'), 'Must include tab-published');
   assert.ok(postManagerContent.includes('id="tab-pending"'), 'Must include tab-pending');
   assert.ok(postManagerContent.includes('id="bulk-actions-bar"'), 'Must include bulk-actions-bar');
   assert.ok(postManagerContent.includes('id="select-all-checkbox"'), 'Must include select-all-checkbox');
+  assert.ok(postManagerContent.includes('id="select-page-btn"'), 'Must include select-page-btn');
+  assert.ok(postManagerContent.includes('id="clear-selection-btn"'), 'Must include clear-selection-btn');
   assert.ok(postManagerContent.includes('id="admin-empty-state"'), 'Must include admin-empty-state');
   assert.ok(postManagerContent.includes('資料庫目前無照片'), 'Must include empty state wording');
 
@@ -100,11 +102,12 @@ test('admin index.astro includes media_counts_ready rollout gate check and table
   assert.ok(content.includes('fallbackVideos'), 'Must accumulate fallbackVideos in unbackfilled state');
 });
 
-test('admin-posts.ts uses NOCASE collation for author index matching and directory cache', () => {
+test('admin-posts.ts uses NOCASE collation for author index matching and renders drag select handles', () => {
   const adminPostsPath = path.resolve('src/pages/api/admin-posts.ts');
   assert.ok(fs.existsSync(adminPostsPath));
 
   const content = fs.readFileSync(adminPostsPath, 'utf-8');
   assert.ok(content.includes('COLLATE NOCASE'), 'Must use COLLATE NOCASE for author filter query');
   assert.ok(content.includes('getDirectoryData'), 'Must use getDirectoryData for tag sanitization');
+  assert.ok(content.includes('data-drag-select-handle'), 'Must render data-drag-select-handle for touch drag selection');
 });
