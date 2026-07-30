@@ -13,6 +13,9 @@ import {
   fetchGalleryBatch,
 } from '../../lib/gallery-feed';
 
+import { getDirectoryData, createBumpDirectoryVersionStmt } from '../../lib/directory-data';
+import { classifyMediaKeys } from '../../lib/media-classifier';
+
 export const GET: APIRoute = async ({ url }) => {
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ error: 'D1 DB binding "DB" is not configured' }), {
@@ -34,14 +37,13 @@ export const GET: APIRoute = async ({ url }) => {
 
     const { items, hasMore } = await fetchGalleryBatch(env.DB, batchParams);
 
-    // Fetch distinct authors for active posts to sanitize tag lists
-    const authorsQuery = await env.DB.prepare('SELECT DISTINCT author FROM images WHERE published = 1').all();
-    const authorSet = new Set((authorsQuery.results || []).map((r: any) => r.author.toLowerCase()));
+    // Fetch cached directory data to sanitize tag lists (1 D1 row read on cache hit)
+    const directory = await getDirectoryData(env.DB, 'public');
 
     const formattedImages = items.map((img: any) => ({
       ...img,
       tags: img.tags_list 
-        ? img.tags_list.split(',').filter((tag: string) => !authorSet.has(tag.trim().toLowerCase())) 
+        ? img.tags_list.split(',').filter((tag: string) => !directory.canonicalAuthorSet.has(tag.trim().toLowerCase())) 
         : []
     }));
 
@@ -136,6 +138,7 @@ export const POST: APIRoute = async ({ request }) => {
     await addStorageBytes(incomingBytes);
 
     const r2KeysString = r2Keys.join(',');
+    const { photoCount, videoCount } = classifyMediaKeys(r2KeysString);
 
     // Parse tags: clean them up
     const tags = (tagsString || '')
@@ -143,10 +146,10 @@ export const POST: APIRoute = async ({ request }) => {
       .map(t => t.trim().replace(/^#/, ''))
       .filter(t => t.length > 0);
 
-    // 1. Insert image/post metadata
+    // Stage 1: Insert image/post metadata with published = 0 (unapproved until tags are written)
     const insertImageQuery = `
-      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, photo_bytes, video_bytes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO images (title, r2_keys, author, author_display_name, author_url, post_url, description, photo_bytes, video_bytes, photo_count, video_count, media_count_version, published)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
       RETURNING id
     `;
     const imageResult = await env.DB.prepare(insertImageQuery)
@@ -159,7 +162,9 @@ export const POST: APIRoute = async ({ request }) => {
         postUrl || '', 
         description || '',
         photoBytes,
-        videoBytes
+        videoBytes,
+        photoCount,
+        videoCount
       )
       .first();
 
@@ -170,23 +175,26 @@ export const POST: APIRoute = async ({ request }) => {
 
     // 2. Insert tags and link them
     for (const tagName of tags) {
-      // Insert tag if not exists
       await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)')
         .bind(tagName)
         .run();
 
-      // Get tag ID
       const tagResult = await env.DB.prepare('SELECT id FROM tags WHERE name = ?')
         .bind(tagName)
         .first();
 
       if (tagResult) {
-        // Link image and tag
         await env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)')
           .bind(imageId, tagResult.id)
           .run();
       }
     }
+
+    // Stage 2: Atomically set published = 1 and bump directory_version in a single D1 transaction
+    await env.DB.batch([
+      env.DB.prepare('UPDATE images SET published = 1 WHERE id = ?').bind(imageId),
+      createBumpDirectoryVersionStmt(env.DB),
+    ]);
 
     return new Response(JSON.stringify({ success: true, imageId }), {
       headers: { 'Content-Type': 'application/json' }

@@ -6,6 +6,8 @@ import {
   type AutoTagImage
 } from '../../../lib/auto-tag-backfill.ts';
 
+import { createBumpDirectoryVersionStmt } from '../../../lib/directory-data';
+
 export const POST: APIRoute = async ({ request }) => {
   if (!env?.DB) {
     return json({ error: 'D1 binding is not configured' }, 500);
@@ -14,8 +16,12 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json().catch(() => ({}));
     const { cursor, limit } = normalizeAutoTagBatchInput(body);
-    const totalRow = await env.DB.prepare('SELECT COUNT(*) AS total FROM images')
-      .first<{ total: number }>();
+    const includeTotal = body.includeTotal === true || cursor === 0;
+
+    const totalRow = includeTotal
+      ? await env.DB.prepare('SELECT COUNT(*) AS total FROM images').first<{ total: number }>()
+      : null;
+
     const { results } = await env.DB.prepare(
       'SELECT id, author, description FROM images WHERE id > ? ORDER BY id ASC LIMIT ?'
     ).bind(cursor, limit + 1).all<AutoTagImage>();
@@ -52,13 +58,17 @@ export const POST: APIRoute = async ({ request }) => {
           (sum, result) => sum + Number(result.meta?.changes ?? 0),
           0
         );
+
+        if (added > 0) {
+          await createBumpDirectoryVersionStmt(env.DB).run();
+        }
       }
     }
 
     const nextCursor = images.at(-1)?.id ?? cursor;
     return json({
       scanned: images.length,
-      total: Number(totalRow?.total ?? 0),
+      total: totalRow ? Number(totalRow.total) : undefined,
       added,
       nextCursor,
       done: !hasMore

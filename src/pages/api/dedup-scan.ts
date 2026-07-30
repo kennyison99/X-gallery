@@ -11,6 +11,7 @@ import {
   type MediaDuplicateFix,
 } from '../../lib/dedup-media';
 import { addStorageBytes } from '../../lib/storage';
+import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
 
 const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 50;
@@ -275,6 +276,9 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     await addStorageBytes(-freedBytes);
+    if (deletedCards > 0) {
+      await createBumpDirectoryVersionStmt(env.DB).run();
+    }
     return json({
       success: true,
       fixed: fixedIds.length,

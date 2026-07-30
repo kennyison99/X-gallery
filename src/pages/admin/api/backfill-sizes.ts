@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { classifyMediaKeys } from '../../../lib/media-classifier';
 
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 const isVideoKey = (k: string) => VIDEO_EXTS.has((k.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? ''));
@@ -38,9 +39,11 @@ export const POST: APIRoute = async () => {
         else photoBytes += size;
       }
 
+      const { photoCount, videoCount } = classifyMediaKeys(row.r2_keys);
+
       statements.push(
-        env.DB.prepare('UPDATE images SET photo_bytes = ?, video_bytes = ? WHERE id = ?')
-          .bind(photoBytes, videoBytes, row.id)
+        env.DB.prepare('UPDATE images SET photo_bytes = ?, video_bytes = ?, photo_count = ?, video_count = ?, media_count_version = 1 WHERE id = ?')
+          .bind(photoBytes, videoBytes, photoCount, videoCount, row.id)
       );
     }
 

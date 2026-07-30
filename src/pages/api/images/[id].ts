@@ -7,6 +7,8 @@ import {
   isVideoKey,
 } from '../../../lib/storage';
 import { normalizeAuthorInput } from '../../../lib/admin-dashboard';
+import { createBumpDirectoryVersionStmt } from '../../../lib/directory-data';
+import { classifyMediaKeys } from '../../../lib/media-classifier';
 
 export const DELETE: APIRoute = async ({ params }) => {
   if (!env || !env.DB || !env.BUCKET) {
@@ -59,10 +61,11 @@ export const DELETE: APIRoute = async ({ params }) => {
       await addStorageBytes(-freedBytes);
     }
 
-    // Delete from D1 (cascade deletes associations)
-    await env.DB.prepare('DELETE FROM images WHERE id = ?')
-      .bind(imageId)
-      .run();
+    // Delete from D1 atomically with directory version bump
+    await env.DB.batch([
+      createBumpDirectoryVersionStmt(env.DB),
+      env.DB.prepare('DELETE FROM images WHERE id = ?').bind(imageId),
+    ]);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' }
@@ -201,12 +204,16 @@ export const PUT: APIRoute = async ({ params, request }) => {
 
       const finalKeys = [...keptKeys, ...newlyUploadedKeys];
       const finalKeysString = finalKeys.join(',');
+      const { photoCount, videoCount } = classifyMediaKeys(finalKeysString);
 
-      await env.DB.prepare(
-        "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, updated_at = datetime('now') WHERE id = ?"
-      )
-        .bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, imageId)
-        .run();
+      const updateStmt = env.DB.prepare(
+        "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, photo_count = ?, video_count = ?, media_count_version = 1, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id = ?"
+      ).bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, photoCount, videoCount, imageId);
+
+      await env.DB.batch([
+        createBumpDirectoryVersionStmt(env.DB),
+        updateStmt,
+      ]);
     } catch (error) {
       for (const key of newlyUploadedKeys) {
         await env.BUCKET.delete(key).catch(() => {});

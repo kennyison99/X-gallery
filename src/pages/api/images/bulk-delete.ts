@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { addStorageBytes } from '../../../lib/storage';
+import { createConditionalBumpDirectoryVersionStmt } from '../../../lib/directory-data';
 
 /**
  * POST /api/images/bulk-delete
@@ -77,11 +78,15 @@ export const POST: APIRoute = async ({ request }) => {
       await addStorageBytes(-freedBytes);
     }
 
-    // 3. Delete the image records from D1 chunk by chunk (cascade delete handles image_tags relations)
+    // 3. Delete image records from D1 chunk by chunk with atomic conditional directory version bump
     for (const chunk of idChunks) {
       const placeholders = chunk.map(() => '?').join(',');
+      const conditionSql = `SELECT 1 FROM images WHERE id IN (${placeholders}) AND published = 1`;
       const deleteQuery = `DELETE FROM images WHERE id IN (${placeholders})`;
-      await env.DB.prepare(deleteQuery).bind(...chunk).run();
+      await env.DB.batch([
+        createConditionalBumpDirectoryVersionStmt(env.DB, conditionSql, chunk),
+        env.DB.prepare(deleteQuery).bind(...chunk),
+      ]);
     }
 
     return new Response(JSON.stringify({ success: true, count: imageIds.length }), {
