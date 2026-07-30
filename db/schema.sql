@@ -20,7 +20,10 @@ CREATE TABLE images (
   updated_at TEXT,               -- 最後編輯時間
   published INTEGER DEFAULT 1,
   photo_bytes INTEGER DEFAULT 0,
-  video_bytes INTEGER DEFAULT 0
+  video_bytes INTEGER DEFAULT 0,
+  photo_count INTEGER NOT NULL DEFAULT 0,
+  video_count INTEGER NOT NULL DEFAULT 0,
+  media_count_version INTEGER NOT NULL DEFAULT 0
 );
 
 -- 標籤表格
@@ -55,10 +58,12 @@ CREATE TABLE crawl_accounts (
 CREATE TABLE storage_stats (
   id INTEGER PRIMARY KEY,
   total_bytes INTEGER NOT NULL DEFAULT 0,
+  directory_version INTEGER NOT NULL DEFAULT 1,
+  media_counts_ready INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-INSERT INTO storage_stats (id, total_bytes) VALUES (1, 0);
+INSERT INTO storage_stats (id, total_bytes, directory_version, media_counts_ready) VALUES (1, 0, 1, 0);
 
 -- 媒體檔案/pHash 特徵資料表
 CREATE TABLE IF NOT EXISTS media_assets (
@@ -80,5 +85,8 @@ CREATE INDEX IF NOT EXISTS idx_images_published_created ON images(published, cre
 CREATE INDEX IF NOT EXISTS idx_images_published_author ON images(published, author, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag_image ON image_tags(tag_id, image_id);
 CREATE INDEX IF NOT EXISTS idx_images_post_url ON images(post_url);
+CREATE INDEX IF NOT EXISTS idx_images_pending_created_id ON images(created_at, id) WHERE published = 0;
+CREATE INDEX IF NOT EXISTS idx_images_published_author_nocase_created_id ON images(published, author COLLATE NOCASE, created_at DESC, id DESC);
+
 
 
