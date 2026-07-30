@@ -102,7 +102,7 @@ test('admin index.astro includes media_counts_ready rollout gate check and table
   assert.ok(content.includes('fallbackVideos'), 'Must accumulate fallbackVideos in unbackfilled state');
 });
 
-test('admin-posts.ts uses NOCASE collation for author index matching and renders drag select handles', () => {
+test('admin-posts.ts uses NOCASE collation, renders drag select handles, and disables image dragging', () => {
   const adminPostsPath = path.resolve('src/pages/api/admin-posts.ts');
   assert.ok(fs.existsSync(adminPostsPath));
 
@@ -110,9 +110,10 @@ test('admin-posts.ts uses NOCASE collation for author index matching and renders
   assert.ok(content.includes('COLLATE NOCASE'), 'Must use COLLATE NOCASE for author filter query');
   assert.ok(content.includes('getDirectoryData'), 'Must use getDirectoryData for tag sanitization');
   assert.ok(content.includes('data-drag-select-handle'), 'Must render data-drag-select-handle for touch drag selection');
+  assert.ok(content.includes('draggable="false"'), 'Must set draggable="false" on thumbnail images');
 });
 
-test('admin index.astro client script contains complete Pointer Drag Engine wiring and client-side helper imports', () => {
+test('admin index.astro client script contains complete Pointer Drag Engine wiring, primary button checks, and sync final frame computation', () => {
   const adminIndexPath = path.resolve('src/pages/admin/index.astro');
   assert.ok(fs.existsSync(adminIndexPath));
 
@@ -131,9 +132,15 @@ test('admin index.astro client script contains complete Pointer Drag Engine wiri
   assert.ok(scriptContent.includes("addEventListener('pointermove'"), 'Must bind pointermove listener');
   assert.ok(scriptContent.includes("addEventListener('pointerup'"), 'Must bind pointerup listener');
   assert.ok(scriptContent.includes("addEventListener('pointercancel'"), 'Must bind pointercancel listener');
+  assert.ok(scriptContent.includes("addEventListener('dragstart'"), 'Must bind dragstart listener to prevent native image drag');
   assert.ok(scriptContent.includes('setPointerCapture'), 'Must call setPointerCapture');
   assert.ok(scriptContent.includes('releasePointerCapture'), 'Must call releasePointerCapture');
   assert.ok(scriptContent.includes('requestAnimationFrame'), 'Must use requestAnimationFrame for RAF throttling');
+
+  // Verify primary pointer checks and sync final frame calculation on pointerup
+  assert.ok(scriptContent.includes('isPrimary'), 'Must verify e.isPrimary on pointerdown');
+  assert.ok(scriptContent.includes('button !== 0'), 'Must verify e.button === 0 for mouse drag initiation');
+  assert.ok(scriptContent.includes('processDragFrame(latestPointerX, latestPointerY)'), 'Must execute processDragFrame synchronously on pointerup');
 
   // Verify variables and cleanup definitions
   assert.ok(scriptContent.includes('let suppressNextClick'), 'Must declare suppressNextClick variable');

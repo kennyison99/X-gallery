@@ -1421,10 +1421,49 @@ try {
   });
 
   // Pointer Event Drag-to-Select Engine
+  function processDragFrame(x: number, y: number) {
+    if (!dragState) return;
+
+    const boxRect = getSelectionRect(
+      dragState.startX,
+      dragState.startY,
+      x,
+      y
+    );
+
+    if (dragBoxEl) {
+      dragBoxEl.style.left = `${boxRect.left}px`;
+      dragBoxEl.style.top = `${boxRect.top}px`;
+      dragBoxEl.style.width = `${boxRect.width}px`;
+      dragBoxEl.style.height = `${boxRect.height}px`;
+    }
+
+    const newCandidates = new Set<number>();
+    dragState.itemRects.forEach((item) => {
+      const isOverlapping = rectOverlap(boxRect, item.rect);
+      item.element.classList.toggle('is-drag-preview', isOverlapping);
+      if (isOverlapping) {
+        newCandidates.add(item.id);
+      }
+    });
+
+    dragState.candidateIds = newCandidates;
+  }
+
   const panelPostsEl = document.getElementById('panel-posts');
   if (panelPostsEl) {
+    panelPostsEl.addEventListener('dragstart', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('.image-row, .grid-image-card')) {
+        e.preventDefault();
+      }
+    });
+
     panelPostsEl.addEventListener('pointerdown', (e: PointerEvent) => {
       if (postsLoading) return;
+      if (!e.isPrimary) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
       const target = e.target as HTMLElement | null;
       if (!target) return;
 
@@ -1484,6 +1523,7 @@ try {
       if (!dragState.active && dist >= 6) {
         dragState.active = true;
         ensureDragSelectBox();
+        document.body.style.userSelect = 'none';
       }
 
       if (!dragState.active) return;
@@ -1491,32 +1531,7 @@ try {
       if (dragFrame === null) {
         dragFrame = requestAnimationFrame(() => {
           dragFrame = null;
-          if (!dragState) return;
-
-          const boxRect = getSelectionRect(
-            dragState.startX,
-            dragState.startY,
-            latestPointerX,
-            latestPointerY
-          );
-
-          if (dragBoxEl) {
-            dragBoxEl.style.left = `${boxRect.left}px`;
-            dragBoxEl.style.top = `${boxRect.top}px`;
-            dragBoxEl.style.width = `${boxRect.width}px`;
-            dragBoxEl.style.height = `${boxRect.height}px`;
-          }
-
-          const newCandidates = new Set<number>();
-          dragState.itemRects.forEach((item) => {
-            const isOverlapping = rectOverlap(boxRect, item.rect);
-            item.element.classList.toggle('is-drag-preview', isOverlapping);
-            if (isOverlapping) {
-              newCandidates.add(item.id);
-            }
-          });
-
-          dragState.candidateIds = newCandidates;
+          processDragFrame(latestPointerX, latestPointerY);
         });
       }
     });
@@ -1524,9 +1539,21 @@ try {
     const handlePointerUpOrCancel = (e: PointerEvent) => {
       if (!dragState || dragState.pointerId !== e.pointerId) return;
 
+      latestPointerX = e.clientX;
+      latestPointerY = e.clientY;
+
       if (dragFrame !== null) {
         cancelAnimationFrame(dragFrame);
         dragFrame = null;
+      }
+
+      const dist = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY);
+      if (!dragState.active && dist >= 6) {
+        dragState.active = true;
+      }
+
+      if (dragState.active && e.type === 'pointerup') {
+        processDragFrame(latestPointerX, latestPointerY);
       }
 
       const wasActive = dragState.active;
@@ -1536,6 +1563,7 @@ try {
         dragState.targetElement.releasePointerCapture(e.pointerId);
       } catch {}
 
+      document.body.style.userSelect = '';
       getCurrentPageItems().forEach((el) => el.classList.remove('is-drag-preview'));
       removeDragSelectBox();
       dragState = null;

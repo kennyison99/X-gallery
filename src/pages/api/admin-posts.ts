@@ -188,7 +188,7 @@ export const GET: APIRoute = async ({ url }) => {
     <div class="thumb-container" style="position: relative; width: 48px; height: 48px; cursor: pointer;">
       ${firstIsVideo
         ? `<video data-src="${r2Url}" class="admin-thumb" preload="metadata" muted playsinline></video>`
-        : `<img data-src="${previewUrl}" alt="${titleAttr}" class="admin-thumb" />`}
+        : `<img data-src="${previewUrl}" alt="${titleAttr}" class="admin-thumb" draggable="false" />`}
       ${totalCount > 1 ? `<span class="thumb-count-badge">+${totalCount - 1}</span>` : ''}
     </div>
   </td>
@@ -224,7 +224,7 @@ export const GET: APIRoute = async ({ url }) => {
   <div class="grid-card-media">
     ${firstIsVideo
       ? `<video data-src="${r2Url}" class="grid-thumb" preload="metadata" muted playsinline></video>`
-      : `<img data-src="${previewUrl}" alt="${titleAttr}" class="grid-thumb" />`}
+      : `<img data-src="${previewUrl}" alt="${titleAttr}" class="grid-thumb" draggable="false" />`}
     ${totalCount > 1 ? `<span class="grid-thumb-count-badge">+${totalCount - 1}</span>` : ''}
     <span class="grid-thumb-size-badge">💾 ${sizeStr}</span>
     <div class="grid-card-hover-overlay">
