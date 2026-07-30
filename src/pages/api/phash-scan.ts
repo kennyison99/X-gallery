@@ -3,7 +3,7 @@ import type { APIRoute } from 'astro';
 import { chunkArray, isValidPHashHex } from '../../lib/phash-utils';
 
 const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
+const MAX_PAGE_SIZE = 200;
 
 interface UnhashedMediaRow {
   image_id: number;

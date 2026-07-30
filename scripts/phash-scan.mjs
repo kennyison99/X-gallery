@@ -3,8 +3,12 @@
 // Phase 2: Graph Union-Find clustering across stored pHashes.
 // Phase 3: Move duplicate non-winners into pending review (published = 0).
 
+import os from 'node:os';
 import { computePHash } from '../src/lib/phash-sharp.ts';
 import { buildDuplicateClusters } from '../src/lib/phash-utils.ts';
+
+// Auto-scale libuv threadpool size for multi-core Macs to fully utilize all CPU cores in Sharp
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || String(Math.max(16, os.cpus().length * 4));
 
 const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:4321').replace(/\/$/, '');
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? '';
@@ -22,7 +26,8 @@ function getArgValue(prefix, fallback) {
 
 const THRESHOLD = Math.min(63, Math.max(0, getArgValue('--threshold=', 10)));
 const MAX_BACKFILL_IMAGES = getArgValue('--limit=', 50); // Max unhashed images to backfill per run
-const CONCURRENCY = Math.min(16, Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || '12', 10))));
+const DEFAULT_CONCURRENCY = Math.max(12, os.cpus().length * 4);
+const CONCURRENCY = Math.min(128, Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || String(DEFAULT_CONCURRENCY), 10))));
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -126,7 +131,8 @@ export async function runBackfillLoop({
   concurrency = CONCURRENCY,
   logger = console.log,
 } = {}) {
-  const clampedConcurrency = Math.min(16, Math.max(1, concurrency));
+  const clampedConcurrency = Math.min(128, Math.max(1, concurrency));
+  const fetchPageSize = clampedConcurrency > 50 || maxBackfill === 0 ? 100 : 50;
   let successfulTotal = 0;
   let cursor = 0;
   let pageCount = 0;
@@ -138,7 +144,7 @@ export async function runBackfillLoop({
     }
 
     pageCount++;
-    const { unhashed = [], next_cursor = null } = await fetchFn(cursor, 50);
+    const { unhashed = [], next_cursor = null } = await fetchFn(cursor, fetchPageSize);
 
     if (unhashed.length > 0) {
       logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Processing in sub-batches (Concurrency: ${clampedConcurrency})...`);
