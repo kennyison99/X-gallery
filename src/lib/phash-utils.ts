@@ -31,28 +31,79 @@ export function isValidPHashHex(hex: unknown): hex is string {
   return typeof hex === 'string' && /^[0-9a-fA-F]{16}$/.test(hex);
 }
 
+// Precomputed Cosine matrix lookup table for N = 32 to eliminate dynamic Math.cos() calls
+const DCT_N = 32;
+const COS_LOOKUP = new Float64Array(DCT_N * DCT_N);
+const C_FACTOR = new Float64Array(DCT_N);
+
+C_FACTOR[0] = 1 / Math.sqrt(2);
+for (let i = 1; i < DCT_N; i++) C_FACTOR[i] = 1.0;
+
+for (let u = 0; u < DCT_N; u++) {
+  for (let x = 0; x < DCT_N; x++) {
+    COS_LOOKUP[u * DCT_N + x] = Math.cos(((2 * x + 1) * u * Math.PI) / (2 * DCT_N));
+  }
+}
+
 /**
-  * Compute 2D Discrete Cosine Transform (DCT) on N x N 1-channel grayscale matrix.
+  * Fast Separable 2D Discrete Cosine Transform (DCT) on 32 x 32 1-channel matrix.
+  * Uses 1D row-column separable decomposition and precomputed cosine lookup tables,
+  * reducing computational complexity from 1,048,576 operations to 65,536 (16x-100x speedup).
   */
 export function compute2DDCT(pixels: Uint8Array | Float64Array | number[], N = 32): Float64Array {
-  const dct = new Float64Array(N * N);
-  const c = new Float64Array(N);
-  c[0] = 1 / Math.sqrt(2);
-  for (let i = 1; i < N; i++) c[i] = 1;
-
-  for (let u = 0; u < N; u++) {
-    for (let v = 0; v < N; v++) {
-      let sum = 0;
-      for (let x = 0; x < N; x++) {
-        for (let y = 0; y < N; y++) {
-          sum += pixels[x * N + y]
-            * Math.cos(((2 * x + 1) * u * Math.PI) / (2 * N))
-            * Math.cos(((2 * y + 1) * v * Math.PI) / (2 * N));
+  if (N !== 32) {
+    // Fallback for non-32 size
+    const dct = new Float64Array(N * N);
+    const c = new Float64Array(N);
+    c[0] = 1 / Math.sqrt(2);
+    for (let i = 1; i < N; i++) c[i] = 1;
+    for (let u = 0; u < N; u++) {
+      for (let v = 0; v < N; v++) {
+        let sum = 0;
+        for (let x = 0; x < N; x++) {
+          for (let y = 0; y < N; y++) {
+            sum += pixels[x * N + y]
+              * Math.cos(((2 * x + 1) * u * Math.PI) / (2 * N))
+              * Math.cos(((2 * y + 1) * v * Math.PI) / (2 * N));
+          }
         }
+        dct[u * N + v] = 0.25 * c[u] * c[v] * sum;
       }
-      dct[u * N + v] = 0.25 * c[u] * c[v] * sum;
+    }
+    return dct;
+  }
+
+  // Separable 2D DCT for 32x32:
+  // Step 1: Compute 1D DCT along rows: intermediate[x, v] = sum_y pixels[x, y] * cos(v, y)
+  const intermediate = new Float64Array(32 * 32);
+  for (let x = 0; x < 32; x++) {
+    const rowOffset = x * 32;
+    for (let v = 0; v < 32; v++) {
+      const vOffset = v * 32;
+      let sum = 0;
+      for (let y = 0; y < 32; y++) {
+        sum += pixels[rowOffset + y] * COS_LOOKUP[vOffset + y];
+      }
+      intermediate[rowOffset + v] = sum;
     }
   }
+
+  // Step 2: Compute 1D DCT along columns: dct[u, v] = 0.25 * c(u) * c(v) * sum_x intermediate[x, v] * cos(u, x)
+  const dct = new Float64Array(32 * 32);
+  for (let u = 0; u < 32; u++) {
+    const uOffset = u * 32;
+    const cu = C_FACTOR[u];
+    for (let v = 0; v < 32; v++) {
+      const cv = C_FACTOR[v];
+      const factor = 0.25 * cu * cv;
+      let sum = 0;
+      for (let x = 0; x < 32; x++) {
+        sum += intermediate[x * 32 + v] * COS_LOOKUP[uOffset + x];
+      }
+      dct[uOffset + v] = factor * sum;
+    }
+  }
+
   return dct;
 }
 
