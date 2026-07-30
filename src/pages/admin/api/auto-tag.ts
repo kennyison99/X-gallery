@@ -32,27 +32,22 @@ export const POST: APIRoute = async ({ request }) => {
 
     let added = 0;
     if (tagNames.length > 0 && links.length > 0) {
-      // Execute tag creation, tag-image linking, and directory version bump in a SINGLE atomic D1 batch transaction
-      const batchStmts = [
-        ...tagNames.map((tagName) =>
-          env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName)
-        ),
-        ...links.map(({ imageId, tagName }) =>
-          env.DB.prepare(
-            'INSERT OR IGNORE INTO image_tags (image_id, tag_id) SELECT ?, id FROM tags WHERE name = ?'
-          ).bind(imageId, tagName)
-        ),
+      // Set-based SQL transaction: exactly 3 statements per batch, safely under D1 Free Plan 50 statement limits
+      const uniqueTagsJson = JSON.stringify(Array.from(new Set(tagNames)));
+      const linksJson = JSON.stringify(links.map((l) => ({ imageId: l.imageId, tagName: l.tagName })));
+
+      const batchResults = await env.DB.batch([
+        env.DB.prepare('INSERT OR IGNORE INTO tags(name) SELECT value FROM json_each(?)').bind(uniqueTagsJson),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO image_tags(image_id, tag_id)
+           SELECT json_extract(j.value, '$.imageId'), t.id
+           FROM json_each(?) j
+           JOIN tags t ON t.name = json_extract(j.value, '$.tagName')`
+        ).bind(linksJson),
         createBumpDirectoryVersionStmt(env.DB)
-      ];
+      ]);
 
-      const batchResults = await env.DB.batch(batchStmts);
-
-      // Sum changes from image_tags insertion statements (skipping tag inserts and final version bump)
-      const linkResults = batchResults.slice(tagNames.length, tagNames.length + links.length);
-      added = linkResults.reduce(
-        (sum, result) => sum + Number(result.meta?.changes ?? 0),
-        0
-      );
+      added = Number(batchResults[1]?.meta?.changes ?? 0);
     }
 
     const nextCursor = images.at(-1)?.id ?? cursor;

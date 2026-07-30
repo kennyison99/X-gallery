@@ -191,11 +191,8 @@ async function applyMediaFix(requested: MediaDuplicateFix) {
     else photoBytes += size;
   });
 
-  await env.DB.batch([
-    env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
-      .bind(remainingStr, photoCount, videoCount, photoBytes, videoBytes, row.id),
-    createBumpDirectoryVersionStmt(env.DB),
-  ]);
+  await env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
+    .bind(remainingStr, photoCount, videoCount, photoBytes, videoBytes, row.id).run();
   const deleted = await deleteObjects(current.delete_keys, objects);
   return { ...deleted, deletedCards: 0, fixedId: row.id };
 }
@@ -311,7 +308,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     return json({
       success: true,
-      fixed: deletedCards,
+      fixed: fixedIds.length,
       deleted_cards: deletedCards,
       fixed_cards: deletedCards,
       deleted_objects: deletedObjects,

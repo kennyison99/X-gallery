@@ -52,29 +52,40 @@ test('admin index.astro retains full component structure and subcomponents', () 
   // Check tab navigation script attributes
   assert.ok(content.includes('data-admin-panel'), 'Must include data-admin-panel attribute for tabs');
   assert.ok(content.includes('data-admin-tab'), 'Must include data-admin-tab attribute for tabs');
+  assert.ok(content.includes('data-post-status="pending"'), 'Must include pending shortcut listener target');
 });
 
-test('admin subcomponents retain element IDs and metadata inputs', () => {
+test('admin subcomponents retain element IDs, metadata inputs, crawler controls, and empty-state wording', () => {
   const postManagerPath = path.resolve('src/components/admin/AdminPostManager.astro');
   const uploadPanelPath = path.resolve('src/components/admin/AdminUploadPanel.astro');
+  const crawlerPanelPath = path.resolve('src/components/admin/AdminCrawlerPanel.astro');
   
   assert.ok(fs.existsSync(postManagerPath));
   assert.ok(fs.existsSync(uploadPanelPath));
+  assert.ok(fs.existsSync(crawlerPanelPath));
 
   const postManagerContent = fs.readFileSync(postManagerPath, 'utf-8');
   const uploadPanelContent = fs.readFileSync(uploadPanelPath, 'utf-8');
+  const crawlerPanelContent = fs.readFileSync(crawlerPanelPath, 'utf-8');
 
-  // Check PostManager IDs and tab buttons
+  // Check PostManager IDs, empty-state wording, and tab buttons
   assert.ok(postManagerContent.includes('id="tab-published"'), 'Must include tab-published');
   assert.ok(postManagerContent.includes('id="tab-pending"'), 'Must include tab-pending');
   assert.ok(postManagerContent.includes('id="bulk-actions-bar"'), 'Must include bulk-actions-bar');
   assert.ok(postManagerContent.includes('id="select-all-checkbox"'), 'Must include select-all-checkbox');
+  assert.ok(postManagerContent.includes('id="admin-empty-state"'), 'Must include admin-empty-state');
+  assert.ok(postManagerContent.includes('資料庫目前無照片'), 'Must include empty state wording');
 
   // Check UploadPanel input fields
   assert.ok(uploadPanelContent.includes('name="author"'), 'Must include author input');
   assert.ok(uploadPanelContent.includes('name="author_display_name"'), 'Must include author_display_name input');
   assert.ok(uploadPanelContent.includes('name="author_url"'), 'Must include author_url input');
   assert.ok(uploadPanelContent.includes('name="post_url"'), 'Must include post_url input');
+
+  // Check CrawlerPanel controls and canonical handles
+  assert.ok(crawlerPanelContent.includes('id="crawl-username"'), 'Must include crawl-username');
+  assert.ok(crawlerPanelContent.includes('id="add-crawl-btn"'), 'Must include add-crawl-btn');
+  assert.ok(crawlerPanelContent.includes('id="crawl-accounts-list"'), 'Must include crawl-accounts-list');
 });
 
 test('admin index.astro includes media_counts_ready rollout gate check and table aggregations', () => {

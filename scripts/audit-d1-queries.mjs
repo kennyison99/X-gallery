@@ -47,20 +47,24 @@ function runQuery(sql, fallbackSql = null) {
     if (resultObj?.error) {
       const errMsg = String(resultObj.error);
       if (fallbackSql && (errMsg.includes('no such column') || errMsg.includes('no such table'))) {
-        console.warn(`[Audit Warning] Column missing in remote DB, executing fallback: ${fallbackSql}`);
-        return runQuery(fallbackSql, null);
+        console.warn(`[Audit Warning] Migration 010 pending in remote DB, using fallback query: ${fallbackSql}`);
+        const fallbackRes = runQuery(fallbackSql, null);
+        return { ...fallbackRes, executed_sql: fallbackSql, fallback_used: true };
       }
       throw new Error(`D1 Query Error: ${errMsg}`);
     }
     return {
+      executed_sql: sql,
+      fallback_used: false,
       results: resultObj?.results ?? [],
       meta: resultObj?.meta ?? {},
     };
   } catch (err) {
     const rawError = (err.stderr || err.stdout || err.message || String(err)).toString();
     if (fallbackSql && (rawError.includes('no such column') || rawError.includes('no such table'))) {
-      console.warn(`[Audit Warning] Column missing in remote DB, executing fallback: ${fallbackSql}`);
-      return runQuery(fallbackSql, null);
+      console.warn(`[Audit Warning] Migration 010 pending in remote DB, using fallback query: ${fallbackSql}`);
+      const fallbackRes = runQuery(fallbackSql, null);
+      return { ...fallbackRes, executed_sql: fallbackSql, fallback_used: true };
     }
     throw new Error(`Failed executing D1 query [${sql}]: ${rawError}`);
   }
@@ -69,21 +73,35 @@ function runQuery(sql, fallbackSql = null) {
 async function benchmark() {
   console.log('=== D1 Query Row-Read Empirical Benchmark Audit ===');
 
+  // Check Schema State
+  console.log('\n--- Checking Remote Database Schema ---');
+  let schemaValidated = false;
+  try {
+    const imagesInfo = runQuery('PRAGMA table_info(images);');
+    const cols = (imagesInfo.results || []).map((r) => r.name);
+    schemaValidated = cols.includes('photo_count') && cols.includes('photo_bytes');
+    console.log(`Migration 010 schema status: ${schemaValidated ? 'APPLIED' : 'PENDING (Will audit with fallback transparently)'}`);
+  } catch (e) {
+    console.warn('Could not query PRAGMA table_info:', e.message);
+  }
+
   // 1. Run Baseline Scenarios
   console.log('\n--- Running Baseline Scenarios ---');
-  const baselineReport = { timestamp: new Date().toISOString(), scenarios: [] };
+  const baselineReport = { timestamp: new Date().toISOString(), schema_validated: schemaValidated, scenarios: [] };
   for (const s of BASELINE_SCENARIOS) {
     console.log(`Running baseline: ${s.name}...`);
-    const { results, meta } = runQuery(s.sql);
+    const res = runQuery(s.sql);
     const item = {
       id: s.id,
       name: s.name,
       sql: s.sql,
-      returned_rows: results.length,
-      rows_read: meta.rows_read ?? 0,
-      rows_written: meta.rows_written ?? 0,
-      duration_ms: meta.duration ?? 0,
-      sql_duration_ms: meta.timings?.sql_duration_ms ?? 0,
+      executed_sql: res.executed_sql,
+      fallback_used: res.fallback_used,
+      returned_rows: res.results.length,
+      rows_read: res.meta.rows_read ?? 0,
+      rows_written: res.meta.rows_written ?? 0,
+      duration_ms: res.meta.duration ?? 0,
+      sql_duration_ms: res.meta.timings?.sql_duration_ms ?? 0,
     };
     baselineReport.scenarios.push(item);
     console.log(`  -> rows_read: ${item.rows_read}, returned: ${item.returned_rows}, duration: ${item.duration_ms}ms`);
@@ -125,22 +143,24 @@ async function benchmark() {
   ];
 
   console.log('\n--- Running Real Empirical Optimized Scenarios ---');
-  const optimizedReport = { timestamp: new Date().toISOString(), scenarios: [] };
+  const optimizedReport = { timestamp: new Date().toISOString(), schema_validated: schemaValidated, scenarios: [] };
   for (const s of OPTIMIZED_SCENARIOS) {
     console.log(`Running optimized: ${s.name}...`);
-    const { results, meta } = runQuery(s.sql, s.fallbackSql);
+    const res = runQuery(s.sql, s.fallbackSql);
     const item = {
       id: s.id,
       name: s.name,
       sql: s.sql,
-      returned_rows: results.length,
-      rows_read: meta.rows_read ?? 0,
-      rows_written: meta.rows_written ?? 0,
-      duration_ms: meta.duration ?? 0,
-      sql_duration_ms: meta.timings?.sql_duration_ms ?? 0,
+      executed_sql: res.executed_sql,
+      fallback_used: res.fallback_used,
+      returned_rows: res.results.length,
+      rows_read: res.meta.rows_read ?? 0,
+      rows_written: res.meta.rows_written ?? 0,
+      duration_ms: res.meta.duration ?? 0,
+      sql_duration_ms: res.meta.timings?.sql_duration_ms ?? 0,
     };
     optimizedReport.scenarios.push(item);
-    console.log(`  -> rows_read: ${item.rows_read}, returned: ${item.returned_rows}, duration: ${item.duration_ms}ms`);
+    console.log(`  -> rows_read: ${item.rows_read}, returned: ${item.returned_rows}, duration: ${item.duration_ms}ms (fallback: ${res.fallback_used})`);
   }
 
   const artifactsDir = path.resolve('artifacts');

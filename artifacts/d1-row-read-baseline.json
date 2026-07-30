@@ -1,65 +1,78 @@
 {
-  "timestamp": "2026-07-30T12:33:11.760Z",
+  "timestamp": "2026-07-30T12:45:52.501Z",
+  "schema_validated": false,
   "scenarios": [
     {
       "id": "gallery_page1_offset",
       "name": "Public Gallery First Page (Offset 0)",
       "sql": "SELECT id, title, r2_keys, author, author_display_name, likes, created_at FROM images WHERE published = 1 ORDER BY created_at DESC, id DESC LIMIT 49;",
+      "executed_sql": "SELECT id, title, r2_keys, author, author_display_name, likes, created_at FROM images WHERE published = 1 ORDER BY created_at DESC, id DESC LIMIT 49;",
+      "fallback_used": false,
       "returned_rows": 49,
       "rows_read": 49,
       "rows_written": 0,
-      "duration_ms": 0.7386,
-      "sql_duration_ms": 0.7386
+      "duration_ms": 0.8618,
+      "sql_duration_ms": 0.8618
     },
     {
       "id": "gallery_deep_offset",
       "name": "Public Gallery Deep Page (Offset 1000)",
       "sql": "SELECT id, title, r2_keys, author, author_display_name, likes, created_at FROM images WHERE published = 1 ORDER BY created_at DESC, id DESC LIMIT 49 OFFSET 1000;",
+      "executed_sql": "SELECT id, title, r2_keys, author, author_display_name, likes, created_at FROM images WHERE published = 1 ORDER BY created_at DESC, id DESC LIMIT 49 OFFSET 1000;",
+      "fallback_used": false,
       "returned_rows": 49,
       "rows_read": 1049,
       "rows_written": 0,
-      "duration_ms": 0.7852,
-      "sql_duration_ms": 0.7852
+      "duration_ms": 0.8435,
+      "sql_duration_ms": 0.8435
     },
     {
       "id": "public_distinct_authors",
       "name": "Public Distinct Authors Directory Scan",
       "sql": "SELECT DISTINCT author FROM images WHERE published = 1;",
+      "executed_sql": "SELECT DISTINCT author FROM images WHERE published = 1;",
+      "fallback_used": false,
       "returned_rows": 85,
       "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 2.3379,
-      "sql_duration_ms": 2.3379
+      "duration_ms": 2.7226,
+      "sql_duration_ms": 2.7226
     },
     {
       "id": "admin_overview_full_scan",
       "name": "Admin Overview Media Keys Scan",
       "sql": "SELECT author, author_display_name, r2_keys FROM images;",
+      "executed_sql": "SELECT author, author_display_name, r2_keys FROM images;",
+      "fallback_used": false,
       "returned_rows": 18004,
       "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 70.4509,
-      "sql_duration_ms": 70.4509
+      "duration_ms": 72.167,
+      "sql_duration_ms": 72.167
     },
     {
       "id": "admin_posts_count",
       "name": "Admin Posts Count Query",
       "sql": "SELECT COUNT(*) as total FROM images WHERE published = 1;",
+      "executed_sql": "SELECT COUNT(*) as total FROM images WHERE published = 1;",
+      "fallback_used": false,
       "returned_rows": 1,
       "rows_read": 18004,
       "rows_written": 0,
-      "duration_ms": 2.0226,
-      "sql_duration_ms": 2.0226
+      "duration_ms": 1.6238,
+      "sql_duration_ms": 1.6238
     },
     {
       "id": "search_keyword_like",
       "name": "Keyword Search Substring Scan",
       "sql": "SELECT id, title, description, author FROM images WHERE published = 1 AND (title LIKE '%原神%' OR description LIKE '%原神%' OR author LIKE '%原神%') ORDER BY created_at DESC, id DESC LIMIT 49;",
+      "executed_sql": "SELECT id, title, description, author FROM images WHERE published = 1 AND (title LIKE '%原神%' OR description LIKE '%原神%' OR author LIKE '%原神%') ORDER BY created_at DESC, id DESC LIMIT 49;",
+      "fallback_used": false,
       "returned_rows": 49,
       "rows_read": 14873,
       "rows_written": 0,
-      "duration_ms": 17.7004,
-      "sql_duration_ms": 17.7004
+      "duration_ms": 16.9141,
+      "sql_duration_ms": 16.9141
     }
   ]
 }

@@ -45,7 +45,7 @@ let totalVideos = 0;
 
 try {
   if (mediaCountsReady) {
-    // Fast O(1) table aggregation using pre-calculated photo_count & video_count
+    // Efficient database-side SUM table aggregation eliminating worker-side text string parsing
     const countsRow = await env.DB.prepare(`
       SELECT 
         COUNT(*) as total, 
