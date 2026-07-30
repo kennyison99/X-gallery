@@ -1,5 +1,5 @@
 // Perceptual Hash (pHash) similarity scan script for X-gallery images.
-// Phase 1: Incrementally backfill & persist 64-bit pHash into DB.
+// Phase 1: Incrementally backfill & persist 64-bit pHash into DB with multi-worker concurrency.
 // Phase 2: Graph Union-Find clustering across stored pHashes.
 // Phase 3: Move duplicate non-winners into pending review (published = 0).
 
@@ -22,12 +22,22 @@ function getArgValue(prefix, fallback) {
 
 const THRESHOLD = Math.min(63, Math.max(0, getArgValue('--threshold=', 10)));
 const MAX_BACKFILL_IMAGES = getArgValue('--limit=', 50); // Max unhashed images to backfill per run
-const REQUEST_DELAY_MS = getArgValue('--delay=', 100); // Delay between fetches
+const CONCURRENCY = Math.max(1, getArgValue('--concurrency=', parseInt(process.env.CONCURRENCY || '12', 10)));
 
-// CRAWL_API_KEY check is performed inside main() when run via CLI
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function mapConcurrent(items, limit, fn) {
+  const results = [];
+  const executing = new Set();
+  for (const item of items) {
+    const p = Promise.resolve().then(() => fn(item));
+    results.push(p);
+    executing.add(p);
+    const clean = () => executing.delete(p);
+    p.then(clean, clean);
+    if (executing.size >= limit) {
+      await Promise.race(executing);
+    }
+  }
+  return Promise.all(results);
 }
 
 async function fetchUnhashedMedia(cursor = 0, limit = 50) {
@@ -97,7 +107,7 @@ export async function runBackfillLoop({
   saveFn = saveHashesToDB,
   fetchBufferFn = fetchImageBuffer,
   maxBackfill = MAX_BACKFILL_IMAGES,
-  delayMs = REQUEST_DELAY_MS,
+  concurrency = CONCURRENCY,
   logger = console.log,
 } = {}) {
   let backfilledTotal = 0;
@@ -114,28 +124,31 @@ export async function runBackfillLoop({
     const { unhashed = [], next_cursor = null } = await fetchFn(cursor, 50);
 
     if (unhashed.length > 0) {
-      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Computing pHashes...`);
-      const newHashes = [];
-
+      logger(`  [Page ${pageCount}] Found ${unhashed.length} unhashed image(s). Computing pHashes (Concurrency: ${concurrency})...`);
+      
+      const itemsToProcess = [];
       for (const item of unhashed) {
         if (maxBackfill > 0 && backfilledTotal >= maxBackfill) break;
+        itemsToProcess.push(item);
+        backfilledTotal++;
+      }
 
+      const poolResults = await mapConcurrent(itemsToProcess, concurrency, async (item) => {
         try {
-          if (delayMs > 0 && backfilledTotal > 0) {
-            await sleep(delayMs);
-          }
           const buffer = await fetchBufferFn(item.r2_key);
           const hashHex = await hashFn(buffer);
-          newHashes.push({
+          return {
             image_id: item.image_id,
             r2_key: item.r2_key,
             phash: hashHex,
-          });
-          backfilledTotal++;
+          };
         } catch (err) {
           logger(`  [Warning] Failed to hash "${item.r2_key}" (Image #${item.image_id}): ${err.message}`);
+          return null;
         }
-      }
+      });
+
+      const newHashes = poolResults.filter(Boolean);
 
       if (newHashes.length > 0) {
         await saveFn(newHashes);
@@ -162,7 +175,7 @@ async function main() {
   console.log(`Mode        : ${APPLY ? 'APPLY (move duplicates to pending)' : 'DRY-RUN'}`);
   console.log(`Threshold   : ${THRESHOLD} bits (Hamming Distance <= ${THRESHOLD})`);
   console.log(`Max Backfill: ${MAX_BACKFILL_IMAGES > 0 ? MAX_BACKFILL_IMAGES + ' images/run' : 'Unlimited'}`);
-  console.log(`Fetch Delay : ${REQUEST_DELAY_MS} ms`);
+  console.log(`Concurrency : ${CONCURRENCY} parallel workers`);
 
   // --- Phase 1: Incremental Backfill of Missing pHashes ---
   console.log('\n[Phase 1] Checking unhashed media assets across all pages...');

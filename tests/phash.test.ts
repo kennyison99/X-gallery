@@ -220,7 +220,7 @@ describe('Backfill Loop Pagination through Empty Intermediate Pages (Blocker 1 F
       saveFn: mockSaveFn,
       fetchBufferFn: mockFetchBuffer,
       maxBackfill: 0,
-      delayMs: 0,
+      concurrency: 4,
       logger: () => {},
     });
 
@@ -228,6 +228,44 @@ describe('Backfill Loop Pagination through Empty Intermediate Pages (Blocker 1 F
     assert.equal(backfilledTotal, 1);
     assert.equal(savedHashes.length, 1);
     assert.equal(savedHashes[0].r2_key, 'img60.jpg');
+  });
+
+  it('processes multiple items in parallel using specified worker concurrency', async () => {
+    const unhashedItems = Array.from({ length: 10 }, (_, i) => ({
+      image_id: i + 1,
+      r2_key: `img_${i + 1}.jpg`,
+    }));
+
+    let maxSimultaneous = 0;
+    let activeTasks = 0;
+
+    const mockFetchBuffer = async (key: string) => {
+      activeTasks++;
+      if (activeTasks > maxSimultaneous) maxSimultaneous = activeTasks;
+      await new Promise((res) => setTimeout(res, 10));
+      activeTasks--;
+      return Buffer.from(key);
+    };
+
+    const mockFetchUnhashed = async (cursor: number) => {
+      if (cursor === 0) return { unhashed: unhashedItems, next_cursor: null };
+      return { unhashed: [], next_cursor: null };
+    };
+
+    const savedHashes: any[] = [];
+    const backfilledTotal = await runBackfillLoop({
+      fetchFn: mockFetchUnhashed,
+      hashFn: async () => '1122334455667788',
+      saveFn: async (items: any[]) => savedHashes.push(...items),
+      fetchBufferFn: mockFetchBuffer,
+      maxBackfill: 0,
+      concurrency: 5,
+      logger: () => {},
+    });
+
+    assert.equal(backfilledTotal, 10);
+    assert.equal(savedHashes.length, 10);
+    assert.ok(maxSimultaneous > 1 && maxSimultaneous <= 5, `Expected simultaneous tasks between 2 and 5, got ${maxSimultaneous}`);
   });
 });
 

@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: '50'
+      concurrency:
+        description: 'Parallel worker concurrency limit (default 12)'
+        required: false
+        type: string
+        default: '12'
       threshold:
         description: 'Max Hamming distance threshold (0-63, default 10)'
         required: false
@@ -51,7 +56,8 @@ jobs:
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
           ENV_LIMIT: ${{ inputs.limit }}
           ENV_THRESHOLD: ${{ inputs.threshold }}
-        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}"
+          ENV_CONCURRENCY: ${{ inputs.concurrency }}
+        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --concurrency="${ENV_CONCURRENCY:-12}"
 
       - name: Run pHash scan and move duplicates to pending review
         if: ${{ inputs.apply }}
@@ -60,4 +66,5 @@ jobs:
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
           ENV_LIMIT: ${{ inputs.limit }}
           ENV_THRESHOLD: ${{ inputs.threshold }}
-        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --apply
+          ENV_CONCURRENCY: ${{ inputs.concurrency }}
+        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --concurrency="${ENV_CONCURRENCY:-12}" --apply
