@@ -5,9 +5,11 @@ export const GALLERY_BATCH_LIMIT = 24;
 export const MAX_GALLERY_LIMIT = 48;
 
 export type GallerySort = 'newest' | 'oldest';
+export type GalleryMedia = 'all' | 'photo' | 'video';
 
 export interface GalleryBatchParams {
   sort: GallerySort;
+  media: GalleryMedia;
   cursorStr?: string;
   offset: number;
   limit: number;
@@ -48,6 +50,11 @@ export function parseGalleryBatchParams(params: URLSearchParams): GalleryBatchPa
   const sort = params.get('sort') ?? 'newest';
   if (sort !== 'newest' && sort !== 'oldest') throw new Error('Invalid sort');
 
+  const media = params.get('media') ?? 'all';
+  if (media !== 'all' && media !== 'photo' && media !== 'video') {
+    throw new Error('Invalid media');
+  }
+
   const cursorStr = params.get('cursor')?.trim() || undefined;
   const offset = integerParam(params.get('offset'), 0, 'offset');
   const requestedLimit = integerParam(
@@ -59,6 +66,7 @@ export function parseGalleryBatchParams(params: URLSearchParams): GalleryBatchPa
 
   const res: GalleryBatchParams = {
     sort: sort as GallerySort,
+    media: media as GalleryMedia,
     offset,
     limit: Math.min(requestedLimit, MAX_GALLERY_LIMIT),
     tag: params.get('tag'),
@@ -68,6 +76,30 @@ export function parseGalleryBatchParams(params: URLSearchParams): GalleryBatchPa
     res.cursorStr = cursorStr;
   }
   return res;
+}
+
+export function buildGalleryBatchSearchParams(options: {
+  reset: boolean;
+  sort: GallerySort;
+  media: GalleryMedia;
+  offset: number;
+  nextCursor: string;
+  tag: string | null;
+  author: string | null;
+}): URLSearchParams {
+  const params = new URLSearchParams({
+    limit: String(options.reset ? INITIAL_GALLERY_LIMIT : GALLERY_BATCH_LIMIT),
+    sort: options.sort,
+  });
+  if (options.media !== 'all') params.set('media', options.media);
+  if (!options.reset && options.nextCursor) {
+    params.set('cursor', options.nextCursor);
+  } else {
+    params.set('offset', String(options.reset ? 0 : options.offset));
+  }
+  if (options.tag) params.set('tag', options.tag);
+  if (options.author) params.set('author', options.author);
+  return params;
 }
 
 export function takeGalleryBatch<T>(rows: T[], limit: number): {
@@ -89,6 +121,7 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
     tag: options.tag,
     author: options.author,
     sort: options.sort,
+    media: options.media,
   });
 
   const decodedCursor = options.cursorStr ? decodeCursor(options.cursorStr, filterKey, options.sort) : null;
@@ -104,6 +137,12 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
     bindings.push(options.author);
   } else {
     whereClauses.push('i.published = 1');
+  }
+
+  if (options.media === 'photo') {
+    whereClauses.push('i.photo_count > 0');
+  } else if (options.media === 'video') {
+    whereClauses.push('i.video_count > 0');
   }
 
   if (decodedCursor) {

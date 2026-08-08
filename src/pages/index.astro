@@ -120,7 +120,10 @@ const pageTitle = activeTag
 </BaseLayout>
 
 <script>
-  import { GALLERY_BATCH_LIMIT, INITIAL_GALLERY_LIMIT } from '../lib/gallery-feed';
+  import {
+    buildGalleryBatchSearchParams,
+    type GalleryMedia,
+  } from '../lib/gallery-feed';
 
   // Restore liked state from localStorage on load
   function restoreLikes() {
@@ -229,6 +232,11 @@ const pageTitle = activeTag
         buttons.forEach((button) => button.classList.remove('active'));
         btn.classList.add('active');
         applyMediaFilter();
+
+        const media = (btn as HTMLElement).dataset.mediaType;
+        if (media === 'all' || media === 'photo' || media === 'video') {
+          document.dispatchEvent(new CustomEvent('gallery:media-filter', { detail: { media } }));
+        }
       });
     });
   }
@@ -253,6 +261,7 @@ const pageTitle = activeTag
     let pendingReset = false;
     let retryReset = false;
     let sort: 'newest' | 'oldest' = 'newest';
+    let media: GalleryMedia = 'all';
 
     async function fetchBatch({ reset }: { reset: boolean }) {
       if (loading) {
@@ -267,17 +276,15 @@ const pageTitle = activeTag
       status.textContent = '載入中…';
 
       try {
-        const params = new URLSearchParams({
-          limit: String(reset ? INITIAL_GALLERY_LIMIT : GALLERY_BATCH_LIMIT),
+        const params = buildGalleryBatchSearchParams({
+          reset,
           sort,
+          media,
+          offset,
+          nextCursor,
+          tag: activeTag,
+          author: activeAuthor,
         });
-        if (!reset && nextCursor) {
-          params.set('cursor', nextCursor);
-        } else {
-          params.set('offset', String(reset ? 0 : offset));
-        }
-        if (activeTag) params.set('tag', activeTag);
-        if (activeAuthor) params.set('author', activeAuthor);
 
         const response = await fetch(`/api/gallery?${params}`);
         if (!response.ok) throw new Error(`Gallery request failed: ${response.status}`);
@@ -333,6 +340,13 @@ const pageTitle = activeTag
 
     if (hasMore) observer.observe(sentinel);
     retry.addEventListener('click', () => void fetchBatch({ reset: retryReset }));
+
+    document.addEventListener('gallery:media-filter', (event) => {
+      const nextMedia = (event as CustomEvent<{ media?: GalleryMedia }>).detail?.media;
+      if (nextMedia !== 'all' && nextMedia !== 'photo' && nextMedia !== 'video') return;
+      media = nextMedia;
+      void fetchBatch({ reset: true });
+    });
 
     items.forEach((item) => {
       item.addEventListener('click', () => {

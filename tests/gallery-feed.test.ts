@@ -6,11 +6,13 @@ const feed = await import('../src/lib/gallery-feed.ts').catch(() => ({}));
 const parseGalleryBatchParams = feed.parseGalleryBatchParams ?? (() => undefined);
 const takeGalleryBatch = feed.takeGalleryBatch ?? (() => undefined);
 const buildGalleryQuery = feed.buildGalleryQuery ?? (() => ({ sql: '', bindings: [] }));
+const buildGalleryBatchSearchParams = feed.buildGalleryBatchSearchParams ?? (() => undefined);
 
 test('parses a valid oldest batch and caps its limit at 48', () => {
-  const params = new URLSearchParams('sort=oldest&offset=48&limit=100&tag=art&author=alice');
+  const params = new URLSearchParams('sort=oldest&media=video&offset=48&limit=100&tag=art&author=alice');
   assert.deepEqual(parseGalleryBatchParams(params), {
     sort: 'oldest',
+    media: 'video',
     offset: 48,
     limit: 48,
     tag: 'art',
@@ -21,6 +23,7 @@ test('parses a valid oldest batch and caps its limit at 48', () => {
 test('defaults the initial feed to newest offset zero and 48 posts', () => {
   assert.deepEqual(parseGalleryBatchParams(new URLSearchParams()), {
     sort: 'newest',
+    media: 'all',
     offset: 0,
     limit: 48,
     tag: null,
@@ -30,7 +33,22 @@ test('defaults the initial feed to newest offset zero and 48 posts', () => {
 
 test('rejects invalid sort and offset values', () => {
   assert.throws(() => parseGalleryBatchParams(new URLSearchParams('sort=random')), /sort/);
+  assert.throws(() => parseGalleryBatchParams(new URLSearchParams('media=audio')), /media/);
   assert.throws(() => parseGalleryBatchParams(new URLSearchParams('offset=-1')), /offset/);
+});
+
+test('keeps the selected media type when sorting resets the gallery request', () => {
+  const params = buildGalleryBatchSearchParams({
+    reset: true,
+    sort: 'oldest',
+    media: 'video',
+    offset: 48,
+    nextCursor: 'ignored-on-reset',
+    tag: null,
+    author: 'kanade_suntm',
+  });
+
+  assert.equal(params.toString(), 'limit=48&sort=oldest&media=video&offset=0&author=kanade_suntm');
 });
 
 test('uses one extra row to report whether another batch exists', () => {
@@ -66,6 +84,24 @@ test('binds filters before batch controls and reverses both sort keys', () => {
   assert.deepEqual(query.bindings, ['alice', 25, 48]);
 });
 
+test('filters video batches in SQL before applying the page limit', () => {
+  const options = parseGalleryBatchParams(
+    new URLSearchParams('sort=oldest&media=video&limit=24&author=kanade_suntm'),
+  );
+  const query = buildGalleryQuery(options);
+
+  assert.match(query.sql, /i\.video_count > 0/);
+  assert.match(query.sql, /WHERE i\.author = \? AND i\.published = 1 AND i\.video_count > 0/);
+  assert.deepEqual(query.bindings, ['kanade_suntm', 25]);
+});
+
+test('uses different cursor filter keys for different media filters', () => {
+  const allQuery = buildGalleryQuery(parseGalleryBatchParams(new URLSearchParams('media=all')));
+  const videoQuery = buildGalleryQuery(parseGalleryBatchParams(new URLSearchParams('media=video')));
+
+  assert.notEqual(allQuery.filterKey, videoQuery.filterKey);
+});
+
 test('the homepage renders its initial cards through the bounded feed query', () => {
   const source = readFileSync(new URL('../src/pages/index.astro', import.meta.url), 'utf8');
 
@@ -88,8 +124,8 @@ test('the gallery endpoint renders a validated ImageCard fragment', () => {
 test('the homepage incrementally loads cards and resets server sorting', () => {
   const source = readFileSync(new URL('../src/pages/index.astro', import.meta.url), 'utf8');
 
-  assert.match(source, /INITIAL_GALLERY_LIMIT/);
-  assert.match(source, /GALLERY_BATCH_LIMIT/);
+  assert.match(source, /buildGalleryBatchSearchParams/);
+  assert.match(source, /gallery:media-filter/);
   assert.match(source, /IntersectionObserver/);
   assert.match(source, /rootMargin:\s*['"]800px 0px['"]/);
   assert.match(source, /grid\.replaceChildren/);
