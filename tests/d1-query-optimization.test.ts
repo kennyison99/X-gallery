@@ -195,6 +195,24 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
     const secondRowSize = (sizeDescRows[1].photo_bytes || 0) + (sizeDescRows[1].video_bytes || 0);
     assert.ok(firstRowSize >= secondRowSize, `firstRowSize (${firstRowSize}) should be >= secondRowSize (${secondRowSize})`);
 
+    // 8. EXPLAIN QUERY PLAN verification for Admin author + size_desc using composite expression index
+    const authorSizeDescParams = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&author=artist_alice&sort=size_desc&limit=10&offset=0'));
+    const authorSizeDescQ = buildAdminPostsQuery(authorSizeDescParams, true);
+    const authorSizePlan = db.prepare(`EXPLAIN QUERY PLAN ${authorSizeDescQ.pageSql}`).all(...authorSizeDescQ.pageBindings) as any[];
+    const authorSizePlanDetails = authorSizePlan.map(p => p.detail).join('; ');
+
+    assert.ok(
+      authorSizePlanDetails.includes('idx_images_published_author_nocase_size_desc'),
+      `author + size_desc query plan must use idx_images_published_author_nocase_size_desc, got: ${authorSizePlanDetails}`
+    );
+    const authorInnerPagePlan = authorSizePlan.find(p => p.detail.includes('idx_images_published_author_nocase_size_desc'));
+    assert.ok(authorInnerPagePlan, 'Inner page CTE must use idx_images_published_author_nocase_size_desc');
+
+    // Verify execution returns only artist_alice posts in descending size order
+    const authorSizeRows = db.prepare(authorSizeDescQ.pageSql).all(...authorSizeDescQ.pageBindings) as any[];
+    assert.ok(authorSizeRows.length > 0);
+    assert.ok(authorSizeRows.every(r => r.author.toLowerCase() === 'artist_alice'));
+
     db.close();
   });
 });

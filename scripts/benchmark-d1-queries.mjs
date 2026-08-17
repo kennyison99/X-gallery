@@ -136,6 +136,7 @@ const adminCases = [
   { name: 'Admin: search + video', url: 'https://example.com/api/admin-posts?published=1&search=alice&media=video&limit=10&offset=0', ready: true },
   { name: 'Admin: author + video', url: 'https://example.com/api/admin-posts?published=1&author=creator_bob&media=video&limit=10&offset=0', ready: true },
   { name: 'Admin: size_desc', url: 'https://example.com/api/admin-posts?published=1&sort=size_desc&limit=10&offset=0', ready: true },
+  { name: 'Admin: author + size_desc', url: 'https://example.com/api/admin-posts?published=1&author=artist_alice&sort=size_desc&limit=10&offset=0', ready: true },
   { name: 'Admin: size_asc', url: 'https://example.com/api/admin-posts?published=1&sort=size_asc&limit=10&offset=0', ready: true },
   { name: 'Admin: deep offset (page 50)', url: 'https://example.com/api/admin-posts?published=1&limit=10&offset=500', ready: true },
 ];
