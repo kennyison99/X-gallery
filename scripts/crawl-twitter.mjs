@@ -398,12 +398,56 @@ async function downloadMediaTask(task, archive) {
   return { status: "failed", task };
 }
 
+// Video transcoding settings (H.264 CRF 22 with VBV bitrate cap to prevent entropy inflation)
+const VIDEO_TRANSCODE_CRF = 22;
+const VIDEO_TRANSCODE_MAXRATE = "3000k";
+const VIDEO_TRANSCODE_BUFSIZE = "6000k";
+const VIDEO_TRANSCODE_PRESET = "slow";
+const VIDEO_TRANSCODE_TIMEOUT_MS = 180_000; // 3 minutes max per video
+const VIDEO_TRANSCODE_MIN_SAVINGS_RATIO = 0.05; // Must save >= 5% to keep transcoded version
+
+async function transcodeVideoFile(mediaPath) {
+  const origStats = fs.statSync(mediaPath);
+  const origSize = origStats.size;
+  const transcodedPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".transcoded.mp4");
+
+  try {
+    const cmd = `ffmpeg -y -i "${mediaPath}" -c:v libx264 -preset ${VIDEO_TRANSCODE_PRESET} -crf ${VIDEO_TRANSCODE_CRF} -maxrate ${VIDEO_TRANSCODE_MAXRATE} -bufsize ${VIDEO_TRANSCODE_BUFSIZE} -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 128k "${transcodedPath}"`;
+    await execAsync(cmd, { timeout: VIDEO_TRANSCODE_TIMEOUT_MS });
+
+    if (fs.existsSync(transcodedPath)) {
+      const newSize = fs.statSync(transcodedPath).size;
+      // Size Guard: only use transcoded file if it saves at least 5% (newSize <= origSize * (1 - MIN_SAVINGS_RATIO))
+      if (newSize <= origSize * (1 - VIDEO_TRANSCODE_MIN_SAVINGS_RATIO)) {
+        fs.unlinkSync(mediaPath);
+        fs.renameSync(transcodedPath, mediaPath);
+        const savedMb = ((origSize - newSize) / (1024 * 1024)).toFixed(2);
+        const pct = (((origSize - newSize) / origSize) * 100).toFixed(1);
+        console.log(`    ✓ Video transcoded: ${(origSize / 1024 / 1024).toFixed(2)}MB -> ${(newSize / 1024 / 1024).toFixed(2)}MB (-${pct}%, saved ${savedMb}MB)`);
+      } else {
+        fs.unlinkSync(transcodedPath);
+        console.log(`    ℹ Video transcode skipped (Size Guard): new size ${(newSize / 1024 / 1024).toFixed(2)}MB not saving >= 5% vs ${(origSize / 1024 / 1024).toFixed(2)}MB. Retaining original.`);
+      }
+    }
+  } catch (err) {
+    if (fs.existsSync(transcodedPath)) {
+      try { fs.unlinkSync(transcodedPath); } catch {}
+    }
+    console.warn(`    ⚠️ Video transcode failed, falling back to original: ${err.message}`);
+  }
+  return mediaPath;
+}
+
 async function convertMediaFile(mediaPath, itemType) {
   const ext = path.extname(mediaPath).toLowerCase();
   const isGif = itemType === "gif" || itemType === "animated_gif";
   const isVideo = itemType === "video";
 
-  if (isVideo || ext === ".webp") return mediaPath;
+  if (isVideo) {
+    return await transcodeVideoFile(mediaPath);
+  }
+
+  if (ext === ".webp") return mediaPath;
 
   const webpPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
   if (isGif) {

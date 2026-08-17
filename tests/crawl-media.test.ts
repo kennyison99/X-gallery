@@ -31,3 +31,17 @@ test('preserves the same media identity when it belongs to different tweets', ()
 
   assert.deepEqual(dedupeMediaItems(items), items);
 });
+
+test('crawler script includes H.264 CRF 22 transcode command with VBV cap and Size Guard', async () => {
+  const fs = await import('node:fs');
+  const crawlerScript = fs.readFileSync('scripts/crawl-twitter.mjs', 'utf8');
+
+  assert.match(crawlerScript, /VIDEO_TRANSCODE_CRF\s*=\s*22;/);
+  assert.match(crawlerScript, /VIDEO_TRANSCODE_MAXRATE\s*=\s*["']3000k["']/);
+  assert.match(crawlerScript, /VIDEO_TRANSCODE_BUFSIZE\s*=\s*["']6000k["']/);
+  assert.match(crawlerScript, /VIDEO_TRANSCODE_PRESET\s*=\s*["']slow["']/);
+  assert.match(crawlerScript, /-movflags \+faststart/);
+  assert.match(crawlerScript, /VIDEO_TRANSCODE_MIN_SAVINGS_RATIO\s*=\s*0\.05/);
+  assert.match(crawlerScript, /transcodeVideoFile/);
+});
+
