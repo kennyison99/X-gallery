@@ -206,37 +206,44 @@ export const PUT: APIRoute = async ({ params, request }) => {
       const finalKeysString = finalKeys.join(',');
       const { photoCount, videoCount } = classifyMediaKeys(finalKeysString);
 
-      // Process and ensure tags exist prior to single batch transaction
+      // Process tags
       const tags = (tagsString || '')
         .split(/[\s,]+/)
         .map(t => t.trim().replace(/^#/, ''))
         .filter(t => t.length > 0);
 
-      const tagIdMap = new Map<string, number>();
-      for (const tagName of tags) {
-        await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName).run();
-        const tagResult = await env.DB.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: number }>();
-        if (tagResult) {
-          tagIdMap.set(tagName, tagResult.id);
-        }
-      }
+      const uniqueTags = [...new Set(tags)];
 
       const updateStmt = env.DB.prepare(
         "UPDATE images SET title = ?, r2_keys = ?, author = ?, author_display_name = ?, author_url = ?, post_url = ?, description = ?, published = 1, photo_bytes = ?, video_bytes = ?, photo_count = ?, video_count = ?, media_count_version = 1, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id = ?"
       ).bind(title || '推文寫真', finalKeysString, authorInput.handle, authorInput.displayName, authorUrl || '', postUrl || '', description || '', photoBytes, videoBytes, photoCount, videoCount, imageId);
 
-      const deleteImageTagsStmt = env.DB.prepare('DELETE FROM image_tags WHERE image_id = ?').bind(imageId);
-      const linkTagStmts = Array.from(tagIdMap.values()).map((tagId) =>
-        env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)').bind(imageId, tagId)
-      );
-
-      // Atomic single transaction: update image, update tags, and bump version together
-      await env.DB.batch([
+      const batchStmts: any[] = [
         updateStmt,
-        deleteImageTagsStmt,
-        ...linkTagStmts,
-        createBumpDirectoryVersionStmt(env.DB),
-      ]);
+        env.DB.prepare('DELETE FROM image_tags WHERE image_id = ?').bind(imageId),
+      ];
+
+      if (uniqueTags.length > 0) {
+        const uniqueTagsJson = JSON.stringify(uniqueTags);
+        const linksJson = JSON.stringify(uniqueTags.map(tagName => ({ imageId, tagName })));
+
+        batchStmts.unshift(
+          env.DB.prepare('INSERT OR IGNORE INTO tags(name) SELECT value FROM json_each(?)').bind(uniqueTagsJson)
+        );
+        batchStmts.push(
+          env.DB.prepare(
+            `INSERT OR IGNORE INTO image_tags(image_id, tag_id)
+             SELECT json_extract(j.value, '$.imageId'), t.id
+             FROM json_each(?) j
+             JOIN tags t ON t.name = json_extract(j.value, '$.tagName')`
+          ).bind(linksJson)
+        );
+      }
+
+      batchStmts.push(createBumpDirectoryVersionStmt(env.DB));
+
+      // Atomic single transaction: update tags catalog, update image, replace links, and bump version together
+      await env.DB.batch(batchStmts);
     } catch (error) {
       for (const key of newlyUploadedKeys) {
         await env.BUCKET.delete(key).catch(() => {});
