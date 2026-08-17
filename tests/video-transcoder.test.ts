@@ -65,6 +65,30 @@ test('validateTranscodeOutput enforces duration, codec, and size sanity', () => 
   assert.equal(validateTranscodeOutput(orig, tinyFile).valid, false);
 });
 
+test('transcodeVideoFile: skips videos below minFileSizeBytes threshold', async () => {
+  const tempDir = createTempDir();
+  const smallInputPath = path.join(tempDir, 'small_clip.mp4');
+
+  try {
+    execSync(
+      `ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=30 -c:v libx264 -crf 30 -pix_fmt yuv420p "${smallInputPath}"`,
+      { stdio: 'ignore' }
+    );
+
+    const limiter = new ConcurrencyLimiter(1);
+    const result = await transcodeVideoFile(smallInputPath, {
+      minFileSizeBytes: 5 * 1000 * 1000, // 5 MB threshold
+      limiter,
+    });
+
+    assert.equal(result.transcoded, false);
+    assert.equal(result.chosenPath, smallInputPath);
+    assert.match(result.reason, /below 5.0MB/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('transcodeVideoFile: saves > 15% on high-bitrate video, returns transcoded path', async () => {
   const tempDir = createTempDir();
   const rawInputPath = path.join(tempDir, 'sample_high_bitrate.mp4');
@@ -83,6 +107,7 @@ test('transcodeVideoFile: saves > 15% on high-bitrate video, returns transcoded 
     const result = await transcodeVideoFile(rawInputPath, {
       crf: 28,
       minSavingsRatio: 0.15,
+      minFileSizeBytes: 0, // Allow test fixture through
       preset: 'ultrafast',
       limiter,
     });
@@ -116,6 +141,7 @@ test('transcodeVideoFile: skips and retains original when savings < 15% (Size Gu
     // Setting required savings to 80% to intentionally trigger Size Guard rejection
     const result = await transcodeVideoFile(rawInputPath, {
       minSavingsRatio: 0.80,
+      minFileSizeBytes: 0,
       preset: 'ultrafast',
       limiter,
     });
@@ -142,6 +168,7 @@ test('transcodeVideoFile: non-destructive fallback when FFmpeg fails on corrupte
     const limiter = new ConcurrencyLimiter(1);
     const result = await transcodeVideoFile(corruptInputPath, {
       timeoutMs: 5000,
+      minFileSizeBytes: 0,
       limiter,
     });
 

@@ -40,3 +40,6 @@ task.md
 
 # Isolated implementation worktrees
 .worktrees/
+
+# Local cache
+.cache/

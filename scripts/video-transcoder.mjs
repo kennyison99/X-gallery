@@ -10,6 +10,10 @@ export const VIDEO_TRANSCODE_CRF = 22;
 export const VIDEO_TRANSCODE_MAXRATE = '3000k';
 export const VIDEO_TRANSCODE_BUFSIZE = '6000k';
 export const VIDEO_TRANSCODE_MIN_SAVINGS_RATIO = 0.15; // Must save >= 15% to justify lossy generation
+export const VIDEO_TRANSCODE_MIN_FILE_SIZE_BYTES = parseInt(
+  process.env.VIDEO_TRANSCODE_MIN_FILE_SIZE_BYTES ?? '',
+  10
+) || 5 * 1000 * 1000; // Skip videos < 5 MB to prevent CPU waste on already-compressed files
 export const VIDEO_TRANSCODE_TIMEOUT_MS = 180_000; // 3 minutes timeout per video
 export const DEFAULT_TRANSCODE_CONCURRENCY = 1; // Limit concurrent CPU-heavy FFmpeg processes
 
@@ -209,6 +213,7 @@ export async function transcodeVideoFile(
     preset = resolvePreset(),
     timeoutMs = VIDEO_TRANSCODE_TIMEOUT_MS,
     minSavingsRatio = VIDEO_TRANSCODE_MIN_SAVINGS_RATIO,
+    minFileSizeBytes = VIDEO_TRANSCODE_MIN_FILE_SIZE_BYTES,
     limiter = globalTranscodeLimiter,
   } = options;
 
@@ -218,6 +223,21 @@ export async function transcodeVideoFile(
 
   const origStats = fs.statSync(mediaPath);
   const origSize = origStats.size;
+
+  // Skip videos below threshold (e.g. < 5 MB) - small files rarely yield savings and waste CPU
+  if (minFileSizeBytes > 0 && origSize < minFileSizeBytes) {
+    const sizeMb = (origSize / 1000 / 1000).toFixed(2);
+    const thresholdMb = (minFileSizeBytes / 1000 / 1000).toFixed(1);
+    console.log(
+      `    ℹ Video transcode skipped: size (${sizeMb}MB) is below ${thresholdMb}MB threshold. Retaining original.`
+    );
+    return {
+      chosenPath: mediaPath,
+      transcoded: false,
+      reason: `File size below ${thresholdMb}MB`,
+    };
+  }
+
   const transcodedPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, '.transcoded.mp4');
 
   // Clean up any stale leftover file from earlier aborted run
