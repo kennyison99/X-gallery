@@ -402,7 +402,7 @@ async function downloadMediaTask(task, archive) {
 const VIDEO_TRANSCODE_CRF = 22;
 const VIDEO_TRANSCODE_MAXRATE = "3000k";
 const VIDEO_TRANSCODE_BUFSIZE = "6000k";
-const VIDEO_TRANSCODE_PRESET = "slow";
+const VIDEO_TRANSCODE_PRESET = process.env.VIDEO_TRANSCODE_PRESET ?? "medium"; // 'medium' balances compression efficiency and GitHub Runner execution time
 const VIDEO_TRANSCODE_TIMEOUT_MS = 180_000; // 3 minutes max per video
 const VIDEO_TRANSCODE_MIN_SAVINGS_RATIO = 0.05; // Must save >= 5% to keep transcoded version
 
