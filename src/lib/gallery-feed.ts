@@ -167,19 +167,24 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
   return {
     sql: `
       WITH page_images AS (
-        SELECT i.*
+        SELECT i.id
         FROM images i
         ${tagJoin}
         WHERE ${whereSql}
         ORDER BY i.created_at ${direction}, i.id ${direction}
         LIMIT ? ${offsetClause}
       )
-      SELECT p.*, group_concat(t.name) AS tags_list
+      SELECT 
+        i.id, i.title, i.r2_keys, i.author, i.author_display_name,
+        i.author_url, i.post_url, i.description, i.likes,
+        i.created_at, i.updated_at,
+        group_concat(t.name) AS tags_list
       FROM page_images p
+      JOIN images i ON p.id = i.id
       LEFT JOIN image_tags it ON p.id = it.image_id
       LEFT JOIN tags t ON it.tag_id = t.id
       GROUP BY p.id
-      ORDER BY p.created_at ${direction}, p.id ${direction}`,
+      ORDER BY i.created_at ${direction}, i.id ${direction}`,
     bindings,
     filterKey,
   };

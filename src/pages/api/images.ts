@@ -177,28 +177,31 @@ export const POST: APIRoute = async ({ request }) => {
       throw new Error('Failed to insert post record into D1');
     }
 
-    // 2. Insert tags and link them
-    for (const tagName of tags) {
-      await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)')
-        .bind(tagName)
-        .run();
+    // 2. Stage 2: Atomically insert tags, link them, publish post, and bump directory_version in a single D1 transaction
+    const uniqueTags = [...new Set(tags)];
+    const batchStmts: any[] = [];
 
-      const tagResult = await env.DB.prepare('SELECT id FROM tags WHERE name = ?')
-        .bind(tagName)
-        .first();
+    if (uniqueTags.length > 0) {
+      const uniqueTagsJson = JSON.stringify(uniqueTags);
+      const linksJson = JSON.stringify(uniqueTags.map(tagName => ({ imageId, tagName })));
 
-      if (tagResult) {
-        await env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)')
-          .bind(imageId, tagResult.id)
-          .run();
-      }
+      batchStmts.push(
+        env.DB.prepare('INSERT OR IGNORE INTO tags(name) SELECT value FROM json_each(?)').bind(uniqueTagsJson),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO image_tags(image_id, tag_id)
+           SELECT json_extract(j.value, '$.imageId'), t.id
+           FROM json_each(?) j
+           JOIN tags t ON t.name = json_extract(j.value, '$.tagName')`
+        ).bind(linksJson)
+      );
     }
 
-    // Stage 2: Atomically set published = 1 and bump directory_version in a single D1 transaction
-    await env.DB.batch([
+    batchStmts.push(
       env.DB.prepare('UPDATE images SET published = 1 WHERE id = ?').bind(imageId),
       createBumpDirectoryVersionStmt(env.DB),
-    ]);
+    );
+
+    await env.DB.batch(batchStmts);
 
     return new Response(JSON.stringify({ success: true, imageId }), {
       headers: { 'Content-Type': 'application/json' }

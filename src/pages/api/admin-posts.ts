@@ -1,10 +1,18 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
-import { authorSearchText, formatAuthorName, normalizeAuthorHandle } from '../../lib/admin-dashboard';
+import {
+  authorSearchText,
+  formatAuthorName,
+  normalizeAuthorHandle,
+  buildAdminPostsQuery,
+  parseAdminPostsParams,
+  type AdminPostsQueryParams,
+} from '../../lib/admin-dashboard';
 
 import { getDirectoryData } from '../../lib/directory-data';
 
 // Admin post list with server-side pagination, filtering, and sorting.
+// Uses COLLATE NOCASE for case-insensitive author filtering via buildAdminPostsQuery.
 // Returns HTML fragments (table rows + grid cards) for AJAX insertion.
 //
 // Query params:
@@ -19,18 +27,6 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function parseParams(url: URL) {
-  const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10) || 0);
-  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') ?? '10', 10) || 10));
-  const published = url.searchParams.get('published') === '0' ? 0 : 1;
-  const search = (url.searchParams.get('search') ?? '').trim().toLowerCase();
-  const author = (url.searchParams.get('author') ?? '').trim();
-  const tag = (url.searchParams.get('tag') ?? '').trim();
-  const media = url.searchParams.get('media') ?? '';
-  const sort = url.searchParams.get('sort') ?? 'newest';
-  return { offset, limit, published, search, author, tag, media, sort };
 }
 
 function escapeHtml(s: string): string {
@@ -62,64 +58,25 @@ export const GET: APIRoute = async ({ url }) => {
     return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
   };
 
-  const params = parseParams(url);
+  const params = parseAdminPostsParams(url);
 
-  // Build WHERE clauses
-  const conditions: string[] = ['i.published = ?'];
-  const bindings: unknown[] = [params.published];
-
-  if (params.search) {
-    conditions.push('(LOWER(i.title) LIKE ? OR LOWER(i.author) LIKE ? OR LOWER(i.description) LIKE ? OR LOWER(i.author_display_name) LIKE ?)');
-    const pat = `%${params.search}%`;
-    bindings.push(pat, pat, pat, pat);
-  }
-
-  if (params.author) {
-    conditions.push('i.author = ? COLLATE NOCASE');
-    bindings.push(params.author.replace(/^@/, ''));
-  }
-
-  if (params.tag) {
-    conditions.push(`i.id IN (SELECT it.image_id FROM image_tags it JOIN tags t ON it.tag_id = t.id WHERE t.name = ?)`);
-    bindings.push(params.tag);
-  }
-
+  let mediaCountsReady = false;
   if (params.media === 'photo' || params.media === 'video') {
-    if (params.media === 'video') {
-      conditions.push(`i.r2_keys LIKE '%.mp4%' OR i.r2_keys LIKE '%.webm%' OR i.r2_keys LIKE '%.mov%' OR i.r2_keys LIKE '%.m4v%'`);
-    } else {
-      conditions.push(`(i.r2_keys NOT LIKE '%.mp4%' AND i.r2_keys NOT LIKE '%.webm%' AND i.r2_keys NOT LIKE '%.mov%' AND i.r2_keys NOT LIKE '%.m4v%')`);
+    try {
+      const statsRow = await env.DB.prepare('SELECT media_counts_ready FROM storage_stats WHERE id = 1').first<{ media_counts_ready: number }>();
+      mediaCountsReady = statsRow?.media_counts_ready === 1;
+    } catch {
+      // Fall back to r2_keys LIKE pattern matching
     }
   }
 
-  const where = conditions.join(' AND ');
+  const { countSql, countBindings, pageSql, pageBindings } = buildAdminPostsQuery(params, mediaCountsReady);
 
   // Count total matching rows (for pagination info)
-  const countSql = `SELECT COUNT(*) as total FROM images i WHERE ${where}`;
-  const countRow = await env.DB.prepare(countSql).bind(...bindings).first<{ total: number }>();
+  const countRow = await env.DB.prepare(countSql).bind(...countBindings).first<{ total: number }>();
   const total = countRow?.total ?? 0;
 
   // Fetch the current page
-  const pageBindings = [...bindings, params.limit, params.offset];
-
-  let orderBy = 'i.created_at DESC, i.id DESC';
-  if (params.sort === 'oldest') {
-    orderBy = 'i.created_at ASC, i.id ASC';
-  } else if (params.sort === 'size_desc') {
-    orderBy = '(COALESCE(i.photo_bytes, 0) + COALESCE(i.video_bytes, 0)) DESC, i.created_at DESC, i.id DESC';
-  } else if (params.sort === 'size_asc') {
-    orderBy = '(COALESCE(i.photo_bytes, 0) + COALESCE(i.video_bytes, 0)) ASC, i.created_at DESC, i.id DESC';
-  }
-
-  const pageSql = `
-    SELECT i.*, group_concat(t.name) AS tags_list
-    FROM images i
-    LEFT JOIN image_tags it ON i.id = it.image_id
-    LEFT JOIN tags t ON it.tag_id = t.id
-    WHERE ${where}
-    GROUP BY i.id
-    ORDER BY ${orderBy}
-    LIMIT ? OFFSET ?`;
   const { results = [] } = await env.DB.prepare(pageSql).bind(...pageBindings).all<any>();
 
   // Fetch cached directory data to sanitize author handles from tags
