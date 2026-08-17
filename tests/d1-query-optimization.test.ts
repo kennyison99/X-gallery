@@ -175,6 +175,26 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
     assert.equal(insertedLinks.length, 3);
     assert.deepEqual(insertedLinks.map(l => l.name).sort(), ['art', 'new_tag_1', 'new_tag_2']);
 
+    // 7. EXPLAIN QUERY PLAN verification for Admin size_desc using expression index
+    const adminSizeDescParams = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&sort=size_desc&limit=10&offset=0'));
+    const adminSizeDescQ = buildAdminPostsQuery(adminSizeDescParams, true);
+    const sizeDescPlan = db.prepare(`EXPLAIN QUERY PLAN ${adminSizeDescQ.pageSql}`).all(...adminSizeDescQ.pageBindings) as any[];
+    const sizeDescPlanDetails = sizeDescPlan.map(p => p.detail).join('; ');
+
+    assert.ok(
+      sizeDescPlanDetails.includes('idx_images_published_size_desc'),
+      `size_desc query plan must use idx_images_published_size_desc, got: ${sizeDescPlanDetails}`
+    );
+    const innerPagePlan = sizeDescPlan.find(p => p.detail.includes('COVERING INDEX idx_images_published_size_desc'));
+    assert.ok(innerPagePlan, 'Inner page CTE must use COVERING INDEX idx_images_published_size_desc to paginate top rows without full table scan');
+
+    // Verify size_desc execution returns descending size order
+    const sizeDescRows = db.prepare(adminSizeDescQ.pageSql).all(...adminSizeDescQ.pageBindings) as any[];
+    assert.equal(sizeDescRows.length, 10);
+    const firstRowSize = (sizeDescRows[0].photo_bytes || 0) + (sizeDescRows[0].video_bytes || 0);
+    const secondRowSize = (sizeDescRows[1].photo_bytes || 0) + (sizeDescRows[1].video_bytes || 0);
+    assert.ok(firstRowSize >= secondRowSize, `firstRowSize (${firstRowSize}) should be >= secondRowSize (${secondRowSize})`);
+
     db.close();
   });
 });

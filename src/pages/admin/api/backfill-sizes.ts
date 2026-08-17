@@ -93,6 +93,10 @@ export const POST: APIRoute = async ({ request }) => {
       await env.DB.batch(statements);
     }
 
+    if (!hasMore) {
+      await env.DB.prepare('UPDATE storage_stats SET directory_version = directory_version + 1 WHERE id = 1').run();
+    }
+
     const nextCursor = rows.at(-1)?.id ?? cursor;
 
     return new Response(JSON.stringify({

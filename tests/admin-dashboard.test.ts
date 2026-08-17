@@ -90,16 +90,21 @@ test('admin subcomponents retain element IDs, metadata inputs, crawler controls,
   assert.ok(crawlerPanelContent.includes('id="crawl-accounts-list"'), 'Must include crawl-accounts-list');
 });
 
-test('admin index.astro includes media_counts_ready rollout gate check and table aggregations', () => {
+test('admin overview includes media_counts_ready rollout gate check and consolidated table aggregations', () => {
   const adminIndexPath = path.resolve('src/pages/admin/index.astro');
+  const directoryDataPath = path.resolve('src/lib/directory-data.ts');
   assert.ok(fs.existsSync(adminIndexPath));
+  assert.ok(fs.existsSync(directoryDataPath));
 
-  const content = fs.readFileSync(adminIndexPath, 'utf-8');
-  assert.ok(content.includes('media_counts_ready'), 'Must check media_counts_ready in storage_stats');
-  assert.ok(content.includes('SUM(photo_count)'), 'Must aggregate SUM(photo_count)');
-  assert.ok(content.includes('SUM(video_count)'), 'Must aggregate SUM(video_count)');
-  assert.ok(content.includes('fallbackPhotos'), 'Must accumulate fallbackPhotos in unbackfilled state');
-  assert.ok(content.includes('fallbackVideos'), 'Must accumulate fallbackVideos in unbackfilled state');
+  const adminContent = fs.readFileSync(adminIndexPath, 'utf-8');
+  assert.ok(adminContent.includes('media_counts_ready'), 'Must check media_counts_ready in storage_stats');
+  assert.ok(adminContent.includes('getAdminOverviewStats'), 'Must call getAdminOverviewStats in admin index.astro');
+
+  const directoryContent = fs.readFileSync(directoryDataPath, 'utf-8');
+  assert.ok(directoryContent.includes('SUM(photo_count)'), 'Must aggregate SUM(photo_count)');
+  assert.ok(directoryContent.includes('SUM(video_count)'), 'Must aggregate SUM(video_count)');
+  assert.ok(directoryContent.includes('SUM(photo_bytes)'), 'Must aggregate SUM(photo_bytes)');
+  assert.ok(directoryContent.includes('SUM(video_bytes)'), 'Must aggregate SUM(video_bytes)');
 });
 
 test('admin-posts.ts uses NOCASE collation, renders drag select handles, and disables image dragging', () => {

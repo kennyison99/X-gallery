@@ -79,7 +79,7 @@ export const POST: APIRoute = async ({ request }) => {
       remaining = Number(remainingRow?.remaining ?? 0);
 
       if (remaining === 0) {
-        await env.DB.prepare('UPDATE storage_stats SET media_counts_ready = 1 WHERE id = 1').run();
+        await env.DB.prepare('UPDATE storage_stats SET media_counts_ready = 1, directory_version = directory_version + 1 WHERE id = 1').run();
         mediaCountsReady = true;
       }
     }

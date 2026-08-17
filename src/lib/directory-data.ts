@@ -16,9 +16,39 @@ export interface DirectoryData {
   canonicalAuthorSet: Set<string>;
 }
 
+export interface AdminAuthorStatItem {
+  author: string;
+  author_display_name: string | null;
+  posts: number;
+  published: number;
+  pending: number;
+  photos: number;
+  videos: number;
+  photo_bytes: number;
+  video_bytes: number;
+}
+
+export interface AdminOverviewStats {
+  version: number;
+  totalPosts: number;
+  publishedCount: number;
+  pendingCount: number;
+  totalPhotos: number;
+  totalVideos: number;
+  authorStats: AdminAuthorStatItem[];
+}
+
 export interface GetDirectoryDataOptions {
   cache?: any; // Cloudflare Workers Cache API instance
   cacheBaseUrl?: string;
+  version?: number;
+  adminAuthors?: AdminAuthorItem[];
+}
+
+export interface GetAdminOverviewStatsOptions {
+  cache?: any;
+  cacheBaseUrl?: string;
+  mediaCountsReady?: boolean;
 }
 
 // Bounded single-entry in-memory cache per scope to avoid memory leaks
@@ -26,6 +56,14 @@ const memoryCache: Record<'public' | 'admin', { version: number; data: Directory
   public: null,
   admin: null,
 };
+
+let adminOverviewMemoryCache: { version: number; data: AdminOverviewStats } | null = null;
+
+export function clearDirectoryMemoryCache(): void {
+  memoryCache.public = null;
+  memoryCache.admin = null;
+  adminOverviewMemoryCache = null;
+}
 
 /**
  * Creates SQL statement to unconditionally bump directory version.
@@ -44,18 +82,22 @@ export function createConditionalBumpDirectoryVersionStmt(db: any, conditionSql:
 
 /**
  * Fetches structured directory metadata (authors & tags) using scoped versioned caching.
- * Always reads directory_version fresh from D1 (1 row read) on each request.
+ * If options.version is provided, skips querying storage_stats.
+ * If scope === 'admin' and options.adminAuthors is provided, avoids duplicate GROUP BY author scan on images.
  */
 export async function getDirectoryData(
   db: any,
   scope: 'public' | 'admin' = 'public',
   options: GetDirectoryDataOptions = {}
 ): Promise<DirectoryData> {
-  // 1. Always query current directory_version from D1 (1 D1 row read)
-  const versionRow = await db
-    .prepare('SELECT directory_version FROM storage_stats WHERE id = 1')
-    .first<{ directory_version: number }>();
-  const version = versionRow?.directory_version ?? 1;
+  // 1. Determine directory_version (use passed version or query D1 1 row read)
+  let version = options.version;
+  if (typeof version !== 'number') {
+    const versionRow = await db
+      .prepare('SELECT directory_version FROM storage_stats WHERE id = 1')
+      .first<{ directory_version: number }>();
+    version = versionRow?.directory_version ?? 1;
+  }
 
   // 2. Check in-memory single-entry version cache
   const cachedMem = memoryCache[scope];
@@ -95,13 +137,19 @@ export async function getDirectoryData(
       .all<{ author: string }>();
     authors = results.map((r: { author: string }) => r.author);
   } else {
-    const { results = [] } = await db
-      .prepare(
-        'SELECT DISTINCT author, MAX(author_display_name) as author_display_name FROM images GROUP BY author ORDER BY author ASC'
-      )
-      .all<AdminAuthorItem>();
-    adminAuthors = results;
-    authors = results.map((r: AdminAuthorItem) => r.author);
+    if (options.adminAuthors && options.adminAuthors.length > 0) {
+      // Reuse already computed admin authors to avoid second images table GROUP BY scan
+      adminAuthors = options.adminAuthors;
+      authors = adminAuthors.map((r) => r.author);
+    } else {
+      const { results = [] } = await db
+        .prepare(
+          'SELECT DISTINCT author, MAX(author_display_name) as author_display_name FROM images GROUP BY author ORDER BY author ASC'
+        )
+        .all<AdminAuthorItem>();
+      adminAuthors = results;
+      authors = results.map((r: AdminAuthorItem) => r.author);
+    }
   }
 
   const { results: tagResults = [] } = await db
@@ -129,6 +177,219 @@ export async function getDirectoryData(
         tags: data.tags,
       };
       const res = new Response(JSON.stringify(responsePayload), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=86400',
+        },
+      });
+      await cache.put(cacheKey, res);
+    } catch {
+      // Fail open on Cache API put errors
+    }
+  }
+
+  return data;
+}
+
+/**
+ * Fetches consolidated Admin Overview metrics & Author stats using versioned caching.
+ * Performs at most ONE single images table GROUP BY aggregation on cache miss,
+ * deriving global totals via JS reduction without a second full table scan.
+ */
+export async function getAdminOverviewStats(
+  db: any,
+  version?: number,
+  options: GetAdminOverviewStatsOptions = {}
+): Promise<AdminOverviewStats> {
+  // 1. Determine directory_version and mediaCountsReady
+  let mediaCountsReady = options.mediaCountsReady;
+  let resolvedVersion = version;
+
+  if (typeof resolvedVersion !== 'number' || typeof mediaCountsReady !== 'boolean') {
+    const statsRow = await db
+      .prepare('SELECT directory_version, media_counts_ready FROM storage_stats WHERE id = 1')
+      .first<{ directory_version: number; media_counts_ready: number }>();
+    if (typeof resolvedVersion !== 'number') {
+      resolvedVersion = statsRow?.directory_version ?? 1;
+    }
+    if (typeof mediaCountsReady !== 'boolean') {
+      mediaCountsReady = statsRow?.media_counts_ready === 1;
+    }
+  }
+
+  // 2. Check in-memory single-entry version cache
+  if (adminOverviewMemoryCache && adminOverviewMemoryCache.version === resolvedVersion) {
+    return adminOverviewMemoryCache.data;
+  }
+
+  // 3. Fail-open Cache API check
+  const cache = options.cache ?? (typeof caches !== 'undefined' ? (caches as any).default : undefined);
+  const baseUrl = options.cacheBaseUrl ?? 'http://localhost';
+  const cacheKey = `${baseUrl}/api/admin-overview-cache-v${resolvedVersion}`;
+
+  if (cache) {
+    try {
+      const match = await cache.match(cacheKey);
+      if (match) {
+        const data: AdminOverviewStats = await match.json();
+        adminOverviewMemoryCache = { version: resolvedVersion, data };
+        return data;
+      }
+    } catch {
+      // Fail open on Cache API errors
+    }
+  }
+
+  // 4. Query D1 for consolidated author & global metrics on cache miss
+  let authorStats: AdminAuthorStatItem[] = [];
+  let totalPosts = 0;
+  let publishedCount = 0;
+  let pendingCount = 0;
+  let totalPhotos = 0;
+  let totalVideos = 0;
+
+  if (mediaCountsReady) {
+    // Single consolidated query replacing two separate full table scans
+    const { results = [] } = await db
+      .prepare(`
+        SELECT 
+          author, 
+          MAX(author_display_name) AS author_display_name, 
+          COUNT(*) AS posts, 
+          SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) AS published, 
+          SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) AS pending, 
+          SUM(photo_count) AS photos, 
+          SUM(video_count) AS videos, 
+          SUM(photo_bytes) AS photo_bytes, 
+          SUM(video_bytes) AS video_bytes 
+        FROM images 
+        GROUP BY author 
+        ORDER BY author ASC
+      `)
+      .all<any>();
+
+    authorStats = (results || []).map((r: any) => ({
+      author: String(r.author || ''),
+      author_display_name: r.author_display_name ? String(r.author_display_name) : null,
+      posts: Number(r.posts || 0),
+      published: Number(r.published || 0),
+      pending: Number(r.pending || 0),
+      photos: Number(r.photos || 0),
+      videos: Number(r.videos || 0),
+      photo_bytes: Number(r.photo_bytes || 0),
+      video_bytes: Number(r.video_bytes || 0),
+    }));
+
+    // JS reduction over ~87 author rows to calculate global summary counts
+    for (const r of authorStats) {
+      totalPosts += r.posts;
+      publishedCount += r.published;
+      pendingCount += r.pending;
+      totalPhotos += r.photos;
+      totalVideos += r.videos;
+    }
+  } else {
+    // Fallback path before media count backfill is complete
+    const countRow = await db
+      .prepare(
+        'SELECT COUNT(*) as total, SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as pending FROM images'
+      )
+      .first<any>();
+
+    totalPosts = Number(countRow?.total || 0);
+    publishedCount = Number(countRow?.published || 0);
+    pendingCount = Number(countRow?.pending || 0);
+
+    const authorRows = await db
+      .prepare('SELECT author, author_display_name, r2_keys, published, photo_bytes, video_bytes FROM images')
+      .all<any>();
+
+    const authorMap = new Map<
+      string,
+      { display: string | null; posts: number; published: number; pending: number; photos: number; videos: number; photo_bytes: number; video_bytes: number }
+    >();
+
+    for (const row of authorRows.results || []) {
+      const author = String(row.author || '');
+      const displayName = row.author_display_name ? String(row.author_display_name) : null;
+      const isPublished = Number(row.published || 0) === 1;
+      const photoBytes = Number(row.photo_bytes || 0);
+      const videoBytes = Number(row.video_bytes || 0);
+      const keys = (row.r2_keys || '')
+        .split(',')
+        .map((k: string) => k.trim())
+        .filter((k: string) => k.length > 0);
+
+      let photosCount = 0;
+      let videosCount = 0;
+      for (const key of keys) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.endsWith('.mp4') || lowerKey.endsWith('.webm') || lowerKey.endsWith('.mov') || lowerKey.endsWith('.m4v')) {
+          videosCount++;
+        } else {
+          photosCount++;
+        }
+      }
+
+      totalPhotos += photosCount;
+      totalVideos += videosCount;
+
+      const existing = authorMap.get(author);
+      if (existing) {
+        existing.posts += 1;
+        if (isPublished) existing.published += 1;
+        else existing.pending += 1;
+        existing.photos += photosCount;
+        existing.videos += videosCount;
+        existing.photo_bytes += photoBytes;
+        existing.video_bytes += videoBytes;
+        if (!existing.display && displayName) existing.display = displayName;
+      } else {
+        authorMap.set(author, {
+          display: displayName,
+          posts: 1,
+          published: isPublished ? 1 : 0,
+          pending: isPublished ? 0 : 1,
+          photos: photosCount,
+          videos: videosCount,
+          photo_bytes: photoBytes,
+          video_bytes: videoBytes,
+        });
+      }
+    }
+
+    authorStats = Array.from(authorMap.entries())
+      .map(([author, data]) => ({
+        author,
+        author_display_name: data.display,
+        posts: data.posts,
+        published: data.published,
+        pending: data.pending,
+        photos: data.photos,
+        videos: data.videos,
+        photo_bytes: data.photo_bytes,
+        video_bytes: data.video_bytes,
+      }))
+      .sort((a, b) => a.author.localeCompare(b.author));
+  }
+
+  const data: AdminOverviewStats = {
+    version: resolvedVersion,
+    totalPosts,
+    publishedCount,
+    pendingCount,
+    totalPhotos,
+    totalVideos,
+    authorStats,
+  };
+
+  // Update in-memory cache
+  adminOverviewMemoryCache = { version: resolvedVersion, data };
+
+  // Fail-open Cache API write
+  if (cache) {
+    try {
+      const res = new Response(JSON.stringify(data), {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'public, max-age=86400',

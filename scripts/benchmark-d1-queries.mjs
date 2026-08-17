@@ -146,6 +146,24 @@ for (const c of adminCases) {
   results.push(runBenchmark('Admin', c.name, q.pageSql, q.pageBindings));
 }
 
+// Admin Overview consolidated aggregation benchmark
+const overviewSql = `
+  SELECT 
+    author, 
+    MAX(author_display_name) AS author_display_name, 
+    COUNT(*) AS posts, 
+    SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) AS published, 
+    SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) AS pending, 
+    SUM(photo_count) AS photos, 
+    SUM(video_count) AS videos, 
+    SUM(photo_bytes) AS photo_bytes, 
+    SUM(video_bytes) AS video_bytes 
+  FROM images 
+  GROUP BY author 
+  ORDER BY author ASC
+`;
+results.push(runBenchmark('Admin', 'Admin: overview consolidated query', overviewSql));
+
 console.table(results.map(r => ({
   Test: r.name,
   Rows: r.rowCount,
