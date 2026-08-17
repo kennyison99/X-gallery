@@ -6,10 +6,16 @@ import {
   normalizeAuthorHandle,
   buildAdminPostsQuery,
   parseAdminPostsParams,
+  canUseOverviewCount,
+  getOverviewCount,
   type AdminPostsQueryParams,
 } from '../../lib/admin-dashboard';
 
-import { getDirectoryData } from '../../lib/directory-data';
+import {
+  getAdminOverviewStats,
+  getDirectoryData,
+  type AdminOverviewStats,
+} from '../../lib/directory-data';
 
 // Admin post list with server-side pagination, filtering, and sorting.
 // Uses COLLATE NOCASE for case-insensitive author filtering via buildAdminPostsQuery.
@@ -72,15 +78,31 @@ export const GET: APIRoute = async ({ url }) => {
 
   const { countSql, countBindings, pageSql, pageBindings } = buildAdminPostsQuery(params, mediaCountsReady);
 
-  // Count total matching rows (for pagination info)
-  const countRow = await env.DB.prepare(countSql).bind(...countBindings).first<{ total: number }>();
-  const total = countRow?.total ?? 0;
+  // Count total matching rows: bypass expensive 18.36k index scan on unfiltered queries by reusing cached overview
+  let total: number;
+  let overview: AdminOverviewStats | null = null;
+
+  if (canUseOverviewCount(params)) {
+    overview = await getAdminOverviewStats(env.DB);
+    total = getOverviewCount(params, overview);
+  } else {
+    const countRow = await env.DB.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+    total = countRow?.total ?? 0;
+  }
 
   // Fetch the current page
   const { results = [] } = await env.DB.prepare(pageSql).bind(...pageBindings).all<any>();
 
-  // Fetch cached directory data to sanitize author handles from tags
-  const directory = await getDirectoryData(env.DB, 'admin');
+  // Fetch cached directory data to sanitize author handles from tags, reusing overview version & authors
+  const directory = overview
+    ? await getDirectoryData(env.DB, 'admin', {
+        version: overview.version,
+        adminAuthors: overview.authorStats.map((r) => ({
+          author: r.author,
+          author_display_name: r.author_display_name,
+        })),
+      })
+    : await getDirectoryData(env.DB, 'admin');
   const authorSet = directory.canonicalAuthorSet;
 
   // Build HTML

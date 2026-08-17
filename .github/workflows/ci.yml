@@ -2,7 +2,7 @@ name: CI Quality & Build Verification
 
 on:
   push:
-    branches: [main, 'feature/*']
+    branches: [main, 'feature/*', 'perf/*']
   pull_request:
     branches: [main]
 

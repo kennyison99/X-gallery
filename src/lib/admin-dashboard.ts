@@ -131,3 +131,14 @@ export function buildAdminPostsQuery(params: AdminPostsQueryParams, mediaCountsR
     where,
   };
 }
+
+export function canUseOverviewCount(params: AdminPostsQueryParams): boolean {
+  return !params.search && !params.author && !params.tag && !params.media;
+}
+
+export function getOverviewCount(
+  params: AdminPostsQueryParams,
+  overview: { publishedCount: number; pendingCount: number }
+): number {
+  return params.published === 1 ? overview.publishedCount : overview.pendingCount;
+}

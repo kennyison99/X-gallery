@@ -155,3 +155,33 @@ test('admin index.astro client script contains complete Pointer Drag Engine wiri
   assert.ok(scriptContent.includes('cancelActiveDrag();'), 'Must invoke cancelActiveDrag in view switch and loadPosts');
   assert.ok(scriptContent.includes('drag-select-box'), 'Must manage dynamic marquee drag-select-box');
 });
+
+test('canUseOverviewCount and getOverviewCount correctly route unfiltered vs filtered pagination queries', async () => {
+  const { canUseOverviewCount, getOverviewCount, parseAdminPostsParams } = await import('../src/lib/admin-dashboard.ts');
+
+  // 1. Unfiltered published
+  const p1 = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&limit=10&offset=0'));
+  assert.equal(canUseOverviewCount(p1), true);
+  assert.equal(getOverviewCount(p1, { publishedCount: 18360, pendingCount: 42 }), 18360);
+
+  // 2. Unfiltered pending
+  const p2 = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=0&limit=10&offset=0'));
+  assert.equal(canUseOverviewCount(p2), true);
+  assert.equal(getOverviewCount(p2, { publishedCount: 18360, pendingCount: 42 }), 42);
+
+  // 3. Filtered: author
+  const p3 = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&author=alice&limit=10&offset=0'));
+  assert.equal(canUseOverviewCount(p3), false);
+
+  // 4. Filtered: search
+  const p4 = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&search=art&limit=10&offset=0'));
+  assert.equal(canUseOverviewCount(p4), false);
+
+  // 5. Filtered: tag
+  const p5 = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&tag=landscape&limit=10&offset=0'));
+  assert.equal(canUseOverviewCount(p5), false);
+
+  // 6. Filtered: media
+  const p6 = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&media=photo&limit=10&offset=0'));
+  assert.equal(canUseOverviewCount(p6), false);
+});

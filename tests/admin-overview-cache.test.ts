@@ -248,4 +248,88 @@ describe('Admin Overview Stats & Directory Cache Consolidation Suite', () => {
     const dedupVersion = db.prepare('SELECT directory_version FROM storage_stats WHERE id = 1').get() as any;
     assert.equal(dedupVersion.directory_version, 3);
   });
+
+  it('Admin Posts: unfiltered query bypasses SQL COUNT and reuses overview version & authors for directory lookup', async () => {
+    const { canUseOverviewCount, getOverviewCount, parseAdminPostsParams, buildAdminPostsQuery } = await import('../src/lib/admin-dashboard.ts');
+    const mockDb = createD1Adapter(db);
+
+    // Warm cache on version 1
+    await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+    mockDb.resetCounts();
+
+    const params = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&limit=10&offset=0'));
+    assert.equal(canUseOverviewCount(params), true);
+
+    const { countSql, countBindings, pageSql, pageBindings } = buildAdminPostsQuery(params, true);
+
+    // Simulated admin-posts handler logic:
+    let total: number;
+    let overview: any = null;
+    if (canUseOverviewCount(params)) {
+      overview = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+      total = getOverviewCount(params, overview);
+    } else {
+      const countRow = await mockDb.prepare(countSql).bind(...countBindings).first();
+      total = countRow?.total ?? 0;
+    }
+
+    assert.equal(total, 5); // 5 published images in test seed
+
+    // Page query execution
+    await mockDb.prepare(pageSql).bind(...pageBindings).all();
+
+    // Directory lookup reusing overview version and adminAuthors
+    const directory = overview
+      ? await getDirectoryData(mockDb, 'admin', {
+          version: overview.version,
+          adminAuthors: overview.authorStats.map((r: any) => ({
+            author: r.author,
+            author_display_name: r.author_display_name,
+          })),
+        })
+      : await getDirectoryData(mockDb, 'admin');
+
+    assert.equal(directory.version, 1);
+    assert.deepEqual(directory.authors, ['alice', 'bob']);
+
+    const queriesRun = mockDb.getQueriesRun();
+    // Assert: SQL COUNT(*) was NOT executed on images!
+    assert.ok(
+      !queriesRun.some((q) => q.startsWith('SELECT COUNT(*) as total FROM images')),
+      `Expected no SELECT COUNT(*) query on images, but got: ${queriesRun.join(', ')}`
+    );
+    // Assert: No second GROUP BY author was executed
+    assert.ok(
+      !queriesRun.some((q) => q.includes('GROUP BY author')),
+      `Expected no GROUP BY author query, but got: ${queriesRun.join(', ')}`
+    );
+  });
+
+  it('Admin Posts: filtered queries (author, tag, search, media) execute exact SQL COUNT', async () => {
+    const { canUseOverviewCount, parseAdminPostsParams, buildAdminPostsQuery } = await import('../src/lib/admin-dashboard.ts');
+    const mockDb = createD1Adapter(db);
+
+    const filterUrls = [
+      'https://example.com/api/admin-posts?published=1&author=alice&limit=10&offset=0',
+      'https://example.com/api/admin-posts?published=1&tag=landscape&limit=10&offset=0',
+      'https://example.com/api/admin-posts?published=1&search=photo&limit=10&offset=0',
+      'https://example.com/api/admin-posts?published=1&media=photo&limit=10&offset=0',
+    ];
+
+    for (const urlStr of filterUrls) {
+      mockDb.resetCounts();
+      const params = parseAdminPostsParams(new URL(urlStr));
+      assert.equal(canUseOverviewCount(params), false);
+
+      const { countSql, countBindings } = buildAdminPostsQuery(params, true);
+      const countRow = await mockDb.prepare(countSql).bind(...countBindings).first<any>();
+      assert.ok(countRow !== undefined);
+
+      const queriesRun = mockDb.getQueriesRun();
+      assert.ok(
+        queriesRun.some((q) => q.startsWith('SELECT COUNT(*) as total FROM images')),
+        `Expected SELECT COUNT(*) for filtered query ${urlStr}`
+      );
+    }
+  });
 });
