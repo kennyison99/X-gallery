@@ -31,3 +31,12 @@ test('preserves the same media identity when it belongs to different tweets', ()
 
   assert.deepEqual(dedupeMediaItems(items), items);
 });
+
+test('crawler script delegates video conversion to video-transcoder module', async () => {
+  const fs = await import('node:fs');
+  const crawlerScript = fs.readFileSync('scripts/crawl-twitter.mjs', 'utf8');
+
+  assert.match(crawlerScript, /import\s*\{[^}]*transcodeVideoFile[^}]*\}\s*from\s*["']\.\/video-transcoder\.mjs["']/);
+  assert.match(crawlerScript, /await transcodeVideoFile\(mediaPath\)/);
+});
+

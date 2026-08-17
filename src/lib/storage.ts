@@ -2,7 +2,8 @@ import { env } from 'cloudflare:workers';
 
 // R2 free-tier storage cap used for the admin "used / 10GB" display and the
 // soft reject that kicks in near the limit.
-export const STORAGE_LIMIT_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
+// Cloudflare R2 calculates storage using standard decimal units: 1 GB = 10^9 bytes.
+export const STORAGE_LIMIT_BYTES = 10 * 1000 * 1000 * 1000; // 10 GB (10,000,000,000 bytes)
 export const STORAGE_REJECT_THRESHOLD = 0.95; // reject new uploads at >= 95%
 
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);

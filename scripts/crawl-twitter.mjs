@@ -5,6 +5,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
 import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, newerThanLatest, samePostSignature } from "./media-items.mjs";
+import { transcodeVideoFile } from "./video-transcoder.mjs";
 
 const execAsync = promisify(exec);
 
@@ -403,7 +404,12 @@ async function convertMediaFile(mediaPath, itemType) {
   const isGif = itemType === "gif" || itemType === "animated_gif";
   const isVideo = itemType === "video";
 
-  if (isVideo || ext === ".webp") return mediaPath;
+  if (isVideo) {
+    const result = await transcodeVideoFile(mediaPath);
+    return result.chosenPath;
+  }
+
+  if (ext === ".webp") return mediaPath;
 
   const webpPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
   if (isGif) {

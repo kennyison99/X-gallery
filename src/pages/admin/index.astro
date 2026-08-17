@@ -257,10 +257,10 @@ try {
 
   // ---- R2 storage capacity widget ----
   function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    if (bytes < 1000) return `${bytes} B`;
+    if (bytes < 1000 * 1000) return `${(bytes / 1000).toFixed(1)} KB`;
+    if (bytes < 1000 * 1000 * 1000) return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
+    return `${(bytes / (1000 * 1000 * 1000)).toFixed(2)} GB`;
   }
 
   const storageBarFill = document.getElementById('storage-bar-fill');
@@ -274,7 +274,7 @@ try {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '讀取失敗');
       const total = Number(data.total_bytes || 0);
-      const limit = Number(data.limit_bytes || 10 * 1024 * 1024 * 1024);
+      const limit = Number(data.limit_bytes || 10 * 1000 * 1000 * 1000);
       const pct = Math.min(100, (total / limit) * 100);
 
       if (storageBarFill) {
