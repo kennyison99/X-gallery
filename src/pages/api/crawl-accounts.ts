@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { normalizeCrawlUsername } from '../../lib/crawl-accounts.ts';
+import { createBumpDirectoryVersionStmt } from '../../lib/directory-data.ts';
 
 // GET — 取得所有爬取帳號
 export const GET: APIRoute = async () => {
@@ -157,28 +158,30 @@ export const PUT: APIRoute = async ({ request }) => {
         });
       }
 
-      await env.DB.prepare(
-        'UPDATE crawl_accounts SET username = ? WHERE lower(username) = ?'
-      ).bind(newUsername, username).run();
-
-      await env.DB.prepare(
-        `UPDATE images
-         SET author = ?,
-             author_url = ?,
-             post_url = replace(replace(post_url, ?, ?), ?, ?),
-             title = replace(title, ?, ?)
-         WHERE lower(author) = ?`
-      ).bind(
-        newUsername,
-        `https://x.com/${newUsername}`,
-        `https://x.com/${username}/status/`,
-        `https://x.com/${newUsername}/status/`,
-        `https://twitter.com/${username}/status/`,
-        `https://x.com/${newUsername}/status/`,
-        `@${username}`,
-        `@${newUsername}`,
-        username,
-      ).run();
+      await env.DB.batch([
+        env.DB.prepare(
+          'UPDATE crawl_accounts SET username = ? WHERE lower(username) = ?'
+        ).bind(newUsername, username),
+        env.DB.prepare(
+          `UPDATE images
+           SET author = ?,
+               author_url = ?,
+               post_url = replace(replace(post_url, ?, ?), ?, ?),
+               title = replace(title, ?, ?)
+           WHERE lower(author) = ?`
+        ).bind(
+          newUsername,
+          `https://x.com/${newUsername}`,
+          `https://x.com/${username}/status/`,
+          `https://x.com/${newUsername}/status/`,
+          `https://twitter.com/${username}/status/`,
+          `https://x.com/${newUsername}/status/`,
+          `@${username}`,
+          `@${newUsername}`,
+          username,
+        ),
+        createBumpDirectoryVersionStmt(env.DB),
+      ]);
 
       return new Response(JSON.stringify({ success: true, username: newUsername }), {
         headers: { 'Content-Type': 'application/json' }

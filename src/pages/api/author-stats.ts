@@ -1,9 +1,11 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { getAdminOverviewStats } from '../../lib/directory-data';
 
 /**
  * GET /api/author-stats
  * Returns per-author byte usage by querying photo_bytes and video_bytes from D1.
+ * Leverages versioned admin overview cache.
  *
  * Response: { authors: { [handle]: { photo_bytes, video_bytes } } }
  */
@@ -17,21 +19,13 @@ export const GET: APIRoute = async () => {
   }
 
   try {
-    const query = `
-      SELECT 
-        author, 
-        SUM(photo_bytes) as photo_bytes, 
-        SUM(video_bytes) as video_bytes 
-      FROM images 
-      GROUP BY author
-    `;
-    const { results } = await env.DB.prepare(query).all();
+    const overview = await getAdminOverviewStats(env.DB);
 
     const authors: Record<string, { photo_bytes: number; video_bytes: number }> = {};
-    for (const row of (results || []) as any[]) {
-      authors[row.author] = {
-        photo_bytes: Number(row.photo_bytes || 0),
-        video_bytes: Number(row.video_bytes || 0),
+    for (const item of overview.authorStats) {
+      authors[item.author] = {
+        photo_bytes: Number(item.photo_bytes || 0),
+        video_bytes: Number(item.video_bytes || 0),
       };
     }
 
@@ -45,3 +39,4 @@ export const GET: APIRoute = async () => {
     });
   }
 };
+

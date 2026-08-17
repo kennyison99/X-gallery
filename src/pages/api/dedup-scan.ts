@@ -191,8 +191,11 @@ async function applyMediaFix(requested: MediaDuplicateFix) {
     else photoBytes += size;
   });
 
-  await env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
-    .bind(remainingStr, photoCount, videoCount, photoBytes, videoBytes, row.id).run();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
+      .bind(remainingStr, photoCount, videoCount, photoBytes, videoBytes, row.id),
+    createBumpDirectoryVersionStmt(env.DB),
+  ]);
   const deleted = await deleteObjects(current.delete_keys, objects);
   return { ...deleted, deletedCards: 0, fixedId: row.id };
 }

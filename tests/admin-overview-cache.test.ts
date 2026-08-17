@@ -1,0 +1,251 @@
+import assert from 'node:assert/strict';
+import { describe, it, beforeEach } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import {
+  getAdminOverviewStats,
+  getDirectoryData,
+  clearDirectoryMemoryCache,
+} from '../src/lib/directory-data.ts';
+
+describe('Admin Overview Stats & Directory Cache Consolidation Suite', () => {
+  let db: DatabaseSync;
+
+  beforeEach(() => {
+    clearDirectoryMemoryCache();
+    db = new DatabaseSync(':memory:');
+    const schemaSql = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8');
+    db.exec(schemaSql);
+
+    // Seed test records
+    const insertImageStmt = db.prepare(`
+      INSERT INTO images (
+        id, title, r2_keys, author, author_display_name, description, created_at, published, photo_bytes, video_bytes, photo_count, video_count, media_count_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `);
+
+    // Author Alice: 3 published, 1 pending
+    insertImageStmt.run(1, 'Alice 1', 'a1.jpg', 'alice', 'Alice Wonder', 'desc 1', '2026-08-01 10:00:00', 1, 1000, 0, 1, 0);
+    insertImageStmt.run(2, 'Alice 2', 'a2.mp4', 'alice', 'Alice Wonder', 'desc 2', '2026-08-02 10:00:00', 1, 0, 5000, 0, 1);
+    insertImageStmt.run(3, 'Alice 3', 'a3.jpg,a3.mp4', 'alice', 'Alice Wonder', 'desc 3', '2026-08-03 10:00:00', 1, 2000, 8000, 1, 1);
+    insertImageStmt.run(4, 'Alice 4', 'a4.jpg', 'alice', 'Alice Wonder', 'desc 4', '2026-08-04 10:00:00', 0, 1500, 0, 1, 0);
+
+    // Author Bob: 2 published
+    insertImageStmt.run(5, 'Bob 1', 'b1.jpg', 'bob', 'Bob Builder', 'desc 5', '2026-08-05 10:00:00', 1, 3000, 0, 1, 0);
+    insertImageStmt.run(6, 'Bob 2', 'b2.jpg', 'bob', 'Bob Builder', 'desc 6', '2026-08-06 10:00:00', 1, 4000, 0, 1, 0);
+
+    // Seed tags
+    db.prepare("INSERT INTO tags (id, name) VALUES (1, 'landscape'), (2, 'portrait')").run();
+    db.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1), (5, 2)').run();
+
+    // Mark media_counts_ready = 1
+    db.prepare('UPDATE storage_stats SET media_counts_ready = 1, directory_version = 1 WHERE id = 1').run();
+  });
+
+  // Adapter wrapping DatabaseSync to simulate Cloudflare D1 interface
+  function createD1Adapter(realDb: DatabaseSync) {
+    let queryCount = 0;
+    const queriesRun: string[] = [];
+
+    const adapter = {
+      getQueryCount: () => queryCount,
+      getQueriesRun: () => [...queriesRun],
+      resetCounts: () => {
+        queryCount = 0;
+        queriesRun.length = 0;
+      },
+      prepare(sql: string) {
+        return {
+          bind(...bindings: unknown[]) {
+            return {
+              async first<T = unknown>(): Promise<T | null> {
+                queryCount++;
+                queriesRun.push(sql.trim());
+                const stmt = realDb.prepare(sql);
+                const row = stmt.get(...bindings);
+                return (row as T) ?? null;
+              },
+              async all<T = unknown>(): Promise<{ results: T[] }> {
+                queryCount++;
+                queriesRun.push(sql.trim());
+                const stmt = realDb.prepare(sql);
+                const results = stmt.all(...bindings);
+                return { results: results as T[] };
+              },
+              async run(): Promise<{ meta: { changes: number } }> {
+                queryCount++;
+                queriesRun.push(sql.trim());
+                const stmt = realDb.prepare(sql);
+                const info = stmt.run(...bindings);
+                return { meta: { changes: Number(info.changes) } };
+              },
+            };
+          },
+          async first<T = unknown>(): Promise<T | null> {
+            return this.bind().first<T>();
+          },
+          async all<T = unknown>(): Promise<{ results: T[] }> {
+            return this.bind().all<T>();
+          },
+          async run(): Promise<{ meta: { changes: number } }> {
+            return this.bind().run();
+          },
+        };
+      },
+    };
+    return adapter;
+  }
+
+  it('getAdminOverviewStats consolidates author aggregation and JS reduction into exact global totals', async () => {
+    const mockDb = createD1Adapter(db);
+
+    const stats = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+
+    // Assert global totals
+    assert.equal(stats.totalPosts, 6);
+    assert.equal(stats.publishedCount, 5);
+    assert.equal(stats.pendingCount, 1);
+    assert.equal(stats.totalPhotos, 5); // Alice: 1+0+1+1=3, Bob: 1+1=2 -> Total 5
+    assert.equal(stats.totalVideos, 2); // Alice: 0+1+1+0=2, Bob: 0 -> Total 2
+
+    // Assert author-level breakdown
+    assert.equal(stats.authorStats.length, 2);
+    const alice = stats.authorStats.find((a) => a.author === 'alice')!;
+    assert.ok(alice);
+    assert.equal(alice.author_display_name, 'Alice Wonder');
+    assert.equal(alice.posts, 4);
+    assert.equal(alice.published, 3);
+    assert.equal(alice.pending, 1);
+    assert.equal(alice.photos, 3);
+    assert.equal(alice.videos, 2);
+    assert.equal(alice.photo_bytes, 4500); // 1000 + 0 + 2000 + 1500
+    assert.equal(alice.video_bytes, 13000); // 0 + 5000 + 8000 + 0
+
+    const bob = stats.authorStats.find((a) => a.author === 'bob')!;
+    assert.ok(bob);
+    assert.equal(bob.posts, 2);
+    assert.equal(bob.published, 2);
+    assert.equal(bob.pending, 0);
+    assert.equal(bob.photo_bytes, 7000);
+    assert.equal(bob.video_bytes, 0);
+
+    // Verify exactly ONE images query was executed (no second global-count query)
+    const imagesQueries = mockDb.getQueriesRun().filter((q) => q.includes('FROM images'));
+    assert.equal(imagesQueries.length, 1);
+    assert.ok(imagesQueries[0].includes('GROUP BY author'));
+  });
+
+  it('getAdminOverviewStats returns cached in-memory data on subsequent calls (0 D1 image queries on hit)', async () => {
+    const mockDb = createD1Adapter(db);
+
+    // Cold miss: 1 query
+    const stats1 = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+    assert.equal(mockDb.getQueryCount(), 1);
+
+    // Cache hit: 0 queries
+    mockDb.resetCounts();
+    const stats2 = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+    assert.equal(mockDb.getQueryCount(), 0);
+    assert.deepEqual(stats1, stats2);
+  });
+
+  it('getDirectoryData reuses passed version and adminAuthors to eliminate redundant version & author queries', async () => {
+    const mockDb = createD1Adapter(db);
+
+    // 1. Fetch overview stats
+    const overview = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+    assert.equal(mockDb.getQueryCount(), 1); // 1 query for overview
+
+    // 2. Derive adminAuthors
+    const adminAuthors = overview.authorStats.map((r) => ({
+      author: r.author,
+      author_display_name: r.author_display_name,
+    }));
+
+    // 3. Call getDirectoryData with passed version & adminAuthors
+    mockDb.resetCounts();
+    const directory = await getDirectoryData(mockDb, 'admin', { version: 1, adminAuthors });
+
+    // Assert directory result
+    assert.equal(directory.version, 1);
+    assert.deepEqual(directory.authors, ['alice', 'bob']);
+    assert.equal(directory.tags.length, 2);
+
+    // Assert: getDirectoryData only queried `tags`, NOT `storage_stats` or `images`!
+    const queries = mockDb.getQueriesRun();
+    assert.equal(queries.length, 1);
+    assert.ok(queries[0].includes('FROM tags'));
+    assert.ok(!queries.some((q) => q.includes('FROM images')));
+    assert.ok(!queries.some((q) => q.includes('FROM storage_stats')));
+  });
+
+  it('cache invalidates cleanly when directory_version is bumped', async () => {
+    const mockDb = createD1Adapter(db);
+
+    // 1. Warm cache on version 1
+    const v1Stats = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
+    assert.equal(v1Stats.version, 1);
+    assert.equal(mockDb.getQueryCount(), 1);
+
+    // 2. Bump version to 2 and add an image for Bob
+    db.prepare('UPDATE storage_stats SET directory_version = 2 WHERE id = 1').run();
+    db.prepare(`
+      INSERT INTO images (
+        id, title, r2_keys, author, author_display_name, description, created_at, published, photo_bytes, video_bytes, photo_count, video_count, media_count_version
+      ) VALUES (7, 'Bob 3', 'b3.jpg', 'bob', 'Bob Builder', 'desc 7', '2026-08-07 10:00:00', 1, 2000, 0, 1, 0, 1)
+    `).run();
+
+    // 3. Fetch version 2 (cache miss on new version)
+    mockDb.resetCounts();
+    const v2Stats = await getAdminOverviewStats(mockDb, 2, { mediaCountsReady: true });
+
+    assert.equal(v2Stats.version, 2);
+    assert.equal(mockDb.getQueryCount(), 1); // Queried fresh data
+    assert.equal(v2Stats.totalPosts, 7); // 6 + 1
+    assert.equal(v2Stats.publishedCount, 6); // 5 + 1
+    const bob = v2Stats.authorStats.find((a) => a.author === 'bob')!;
+    assert.equal(bob.posts, 3);
+    assert.equal(bob.photo_bytes, 9000); // 7000 + 2000
+  });
+
+  it('handles fallback correctly when mediaCountsReady = false and accumulates photo_bytes and video_bytes', async () => {
+    const mockDb = createD1Adapter(db);
+
+    const fallbackStats = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: false });
+
+    assert.equal(fallbackStats.totalPosts, 6);
+    assert.equal(fallbackStats.publishedCount, 5);
+    assert.equal(fallbackStats.pendingCount, 1);
+    assert.equal(fallbackStats.authorStats.length, 2);
+
+    const alice = fallbackStats.authorStats.find((a) => a.author === 'alice')!;
+    assert.ok(alice);
+    assert.equal(alice.photo_bytes, 4500);
+    assert.equal(alice.video_bytes, 13000);
+    assert.equal(alice.published, 3);
+    assert.equal(alice.pending, 1);
+
+    const bob = fallbackStats.authorStats.find((a) => a.author === 'bob')!;
+    assert.ok(bob);
+    assert.equal(bob.photo_bytes, 7000);
+    assert.equal(bob.video_bytes, 0);
+    assert.equal(bob.published, 2);
+    assert.equal(bob.pending, 0);
+  });
+
+  it('directory version invariant: account rename and dedup media fix bump version', () => {
+    // 1. Initial version
+    const initialVersion = db.prepare('SELECT directory_version FROM storage_stats WHERE id = 1').get() as any;
+    assert.equal(initialVersion.directory_version, 1);
+
+    // 2. Simulate crawl account rename batch
+    db.prepare('UPDATE storage_stats SET directory_version = directory_version + 1 WHERE id = 1').run();
+    const renamedVersion = db.prepare('SELECT directory_version FROM storage_stats WHERE id = 1').get() as any;
+    assert.equal(renamedVersion.directory_version, 2);
+
+    // 3. Simulate dedup media fix batch
+    db.prepare('UPDATE storage_stats SET directory_version = directory_version + 1 WHERE id = 1').run();
+    const dedupVersion = db.prepare('SELECT directory_version FROM storage_stats WHERE id = 1').get() as any;
+    assert.equal(dedupVersion.directory_version, 3);
+  });
+});

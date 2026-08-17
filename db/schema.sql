@@ -87,6 +87,4 @@ CREATE INDEX IF NOT EXISTS idx_image_tags_tag_image ON image_tags(tag_id, image_
 CREATE INDEX IF NOT EXISTS idx_images_post_url ON images(post_url);
 CREATE INDEX IF NOT EXISTS idx_images_pending_created_id ON images(created_at, id) WHERE published = 0;
 CREATE INDEX IF NOT EXISTS idx_images_published_author_nocase_created_id ON images(published, author COLLATE NOCASE, created_at DESC, id DESC);
-
-
-
+CREATE INDEX IF NOT EXISTS idx_images_published_size_desc ON images(published, (COALESCE(photo_bytes, 0) + COALESCE(video_bytes, 0)) DESC, created_at DESC, id DESC);
