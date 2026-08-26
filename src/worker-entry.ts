@@ -70,7 +70,8 @@ async function dispatchCrawlWorkflow(env: Env, now: Date): Promise<void> {
 /**
  * Custom Worker entrypoint that wraps the Astro handler and adds a `scheduled`
  * handler for cron triggers. The 05:00 UTC cron runs the daily cleanup; the
- * 04:20 UTC cron dispatches the crawl workflow on GitHub as a backup trigger.
+ * 01:30, 04:30, 07:30, 10:30, 13:30, 16:30, 19:30, and 22:30 UTC cron
+ * dispatches the crawl workflow on GitHub as a backup trigger.
  */
 export default {
   fetch: (astroHandler as any).fetch,
@@ -93,8 +94,8 @@ export default {
       return;
     }
 
-    // At 12:20 HKT, dispatch only when the 12:07 GitHub schedule did not run.
-    if (event.cron === '20 4 * * *') {
+    // 23 minutes after each primary GitHub schedule, dispatch only when it did not run.
+    if (event.cron === '30 1,4,7,10,13,16,19,22 * * *') {
       ctx.waitUntil(dispatchCrawlWorkflow(env, new Date(event.scheduledTime)));
       return;
     }

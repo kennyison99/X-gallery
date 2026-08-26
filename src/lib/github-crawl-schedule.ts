@@ -3,7 +3,7 @@ export interface WorkflowRunSummary {
   created_at: string;
 }
 
-const BACKUP_LOOKBACK_MS = 60 * 60 * 1000;
+const BACKUP_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 
 export function hasRecentScheduledRun(
   runs: WorkflowRunSummary[],
