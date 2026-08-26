@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Schedule the daily crawl for 12:07 HKT with a deduplicated Cloudflare backup at 12:20 HKT.
+**Goal:** Schedule the crawl every three hours, beginning at 12:07 HKT, with a deduplicated Cloudflare backup 23 minutes later.
 
-**Architecture:** GitHub Actions remains the primary scheduler. A testable helper inspects recent workflow runs, and the Worker's later cron dispatches only when no recent scheduled run exists.
+**Architecture:** GitHub Actions remains the primary scheduler. A testable helper inspects scheduled runs from the previous two hours, and the Worker's later cron dispatches only when no recent scheduled run exists.
 
 **Tech Stack:** GitHub Actions YAML, Cloudflare Workers, TypeScript, Node test runner, Wrangler
 
@@ -28,8 +28,8 @@
 - Modify: `src/worker-entry.ts`
 - Modify: `wrangler.jsonc`
 
-- [ ] Change the primary cron to `7 4 * * *`.
-- [ ] Change the backup cron to `20 4 * * *`.
+- [ ] Change the primary cron to `7 1,4,7,10,13,16,19,22 * * *`.
+- [ ] Change the backup cron to `30 1,4,7,10,13,16,19,22 * * *`.
 - [ ] Query recent workflow runs before dispatch and fail open on lookup errors.
 - [ ] Throw on failed dispatch responses for observability.
 
