@@ -9,6 +9,8 @@ import {
   resolvePreset,
   validateTranscodeOutput,
   transcodeVideoFile,
+  shouldTranscodeInput,
+  VIDEO_TRANSCODE_MIN_INPUT_BYTES,
   VIDEO_TRANSCODE_MIN_SAVINGS_RATIO,
 } from '../scripts/video-transcoder.mjs';
 
@@ -65,19 +67,42 @@ test('validateTranscodeOutput enforces duration, codec, and size sanity', () => 
   assert.equal(validateTranscodeOutput(orig, tinyFile).valid, false);
 });
 
+test('only inputs of at least 5 MiB are eligible for transcoding', () => {
+  assert.equal(shouldTranscodeInput(VIDEO_TRANSCODE_MIN_INPUT_BYTES - 1), false);
+  assert.equal(shouldTranscodeInput(VIDEO_TRANSCODE_MIN_INPUT_BYTES), true);
+});
+
+test('transcodeVideoFile skips inputs smaller than 5 MiB before probing or FFmpeg', async () => {
+  const tempDir = createTempDir();
+  const smallInputPath = path.join(tempDir, 'small.mp4');
+  fs.writeFileSync(smallInputPath, Buffer.alloc(1024));
+
+  try {
+    const result = await transcodeVideoFile(smallInputPath);
+
+    assert.equal(result.transcoded, false);
+    assert.equal(result.chosenPath, smallInputPath);
+    assert.equal(result.reason, 'Input below 5 MiB threshold');
+    assert.ok(fs.existsSync(smallInputPath));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('transcodeVideoFile: saves > 15% on high-bitrate video, returns transcoded path', async () => {
   const tempDir = createTempDir();
   const rawInputPath = path.join(tempDir, 'sample_high_bitrate.mp4');
 
   try {
-    // Generate a 1-second synthetic video with high entropy / low CRF (CRF 12)
+    // Generate a 4-second synthetic video with high entropy / low CRF (CRF 12).
+    // It must be eligible for the 5 MiB input gate before testing transcoding.
     execSync(
-      `ffmpeg -y -f lavfi -i "nullsrc=s=320x240:d=1,geq=random(1)*255:128:128" -c:v libx264 -crf 12 -preset ultrafast -pix_fmt yuv420p "${rawInputPath}"`,
+      `ffmpeg -y -f lavfi -i "nullsrc=s=320x240:d=4,geq=random(1)*255:128:128" -c:v libx264 -crf 12 -preset ultrafast -pix_fmt yuv420p "${rawInputPath}"`,
       { stdio: 'ignore' }
     );
 
     const origSize = fs.statSync(rawInputPath).size;
-    assert.ok(origSize > 0, 'Synthetic input file must exist');
+    assert.ok(origSize >= VIDEO_TRANSCODE_MIN_INPUT_BYTES, 'Synthetic input must meet the 5 MiB input threshold');
 
     const limiter = new ConcurrencyLimiter(1);
     const result = await transcodeVideoFile(rawInputPath, {
@@ -98,18 +123,20 @@ test('transcodeVideoFile: saves > 15% on high-bitrate video, returns transcoded 
   }
 });
 
-test('transcodeVideoFile: skips and retains original when savings < 15% (Size Guard)', async () => {
+test('transcodeVideoFile: rejects an eligible input when savings miss the configured Size Guard threshold', async () => {
   const tempDir = createTempDir();
   const rawInputPath = path.join(tempDir, 'sample_low_bitrate.mp4');
 
   try {
-    // Generate an already heavily compressed 1-second synthetic video
+    // Generate an eligible high-entropy input. The 80% requirement below is
+    // intentionally higher than the transcoder can achieve for this fixture.
     execSync(
-      `ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=30 -c:v libx264 -crf 35 -pix_fmt yuv420p "${rawInputPath}"`,
+      `ffmpeg -y -f lavfi -i "nullsrc=s=320x240:d=4,geq=random(1)*255:128:128" -c:v libx264 -crf 12 -preset ultrafast -pix_fmt yuv420p "${rawInputPath}"`,
       { stdio: 'ignore' }
     );
 
     const origSize = fs.statSync(rawInputPath).size;
+    assert.ok(origSize >= VIDEO_TRANSCODE_MIN_INPUT_BYTES, 'Synthetic input must meet the 5 MiB input threshold');
     const origContent = fs.readFileSync(rawInputPath);
 
     const limiter = new ConcurrencyLimiter(1);
@@ -122,6 +149,7 @@ test('transcodeVideoFile: skips and retains original when savings < 15% (Size Gu
 
     assert.equal(result.transcoded, false, 'Should be rejected by Size Guard');
     assert.equal(result.chosenPath, rawInputPath, 'Chosen path must be original path');
+    assert.equal(result.reason, 'Savings below 80%');
     assert.ok(fs.existsSync(rawInputPath), 'Original file must still exist');
     assert.equal(fs.statSync(rawInputPath).size, origSize, 'Original size must match exactly');
     assert.deepEqual(fs.readFileSync(rawInputPath), origContent, 'Original file content must remain completely intact');
@@ -136,7 +164,7 @@ test('transcodeVideoFile: non-destructive fallback when FFmpeg fails on corrupte
 
   try {
     // Write fake/corrupted non-video binary data
-    const fakeData = Buffer.from('NOT_A_REAL_VIDEO_HEADER_DATA_1234567890');
+    const fakeData = Buffer.alloc(VIDEO_TRANSCODE_MIN_INPUT_BYTES, 0xff);
     fs.writeFileSync(corruptInputPath, fakeData);
 
     const limiter = new ConcurrencyLimiter(1);
@@ -147,6 +175,7 @@ test('transcodeVideoFile: non-destructive fallback when FFmpeg fails on corrupte
 
     assert.equal(result.transcoded, false, 'Should fail gracefully');
     assert.equal(result.chosenPath, corruptInputPath, 'Should return original path');
+    assert.match(result.error, /ffmpeg exited with code/);
     assert.ok(fs.existsSync(corruptInputPath), 'Original corrupted file must not be destroyed');
     assert.deepEqual(fs.readFileSync(corruptInputPath), fakeData, 'Original content must remain intact');
   } finally {
