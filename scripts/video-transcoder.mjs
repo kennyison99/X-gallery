@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 export const VIDEO_TRANSCODE_CRF = 22;
 export const VIDEO_TRANSCODE_MAXRATE = '3000k';
 export const VIDEO_TRANSCODE_BUFSIZE = '6000k';
+export const VIDEO_TRANSCODE_MIN_INPUT_BYTES = 5 * 1024 * 1024;
 export const VIDEO_TRANSCODE_MIN_SAVINGS_RATIO = 0.15; // Must save >= 15% to justify lossy generation
 export const VIDEO_TRANSCODE_TIMEOUT_MS = 180_000; // 3 minutes timeout per video
 export const DEFAULT_TRANSCODE_CONCURRENCY = 1; // Limit concurrent CPU-heavy FFmpeg processes
@@ -28,6 +29,10 @@ const ALLOWED_PRESETS = new Set([
 export function resolvePreset(envPreset = process.env.VIDEO_TRANSCODE_PRESET) {
   const normalized = (envPreset ?? 'medium').trim().toLowerCase();
   return ALLOWED_PRESETS.has(normalized) ? normalized : 'medium';
+}
+
+export function shouldTranscodeInput(inputBytes) {
+  return inputBytes >= VIDEO_TRANSCODE_MIN_INPUT_BYTES;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +228,14 @@ export async function transcodeVideoFile(
   // Clean up any stale leftover file from earlier aborted run
   if (fs.existsSync(transcodedPath)) {
     try { fs.unlinkSync(transcodedPath); } catch {}
+  }
+
+  if (!shouldTranscodeInput(origSize)) {
+    return {
+      chosenPath: mediaPath,
+      transcoded: false,
+      reason: `Input below ${(VIDEO_TRANSCODE_MIN_INPUT_BYTES / 1024 / 1024).toFixed(0)} MiB threshold`,
+    };
   }
 
   return await limiter.run(async () => {
