@@ -292,8 +292,8 @@ export function fetchR2ImageBufferWrangler({ r2Key, bucketName = R2_BUCKET_NAME 
 export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME }) {
   if (pendingIds.length === 0) return { updated_count: 0 };
   const idsStr = pendingIds.join(',');
-  const sql = `UPDATE images SET published = 0, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
-  const cmd = `npx wrangler d1 execute ${dbName} --remote --command='${sql}' --json`;
+  const sql = `UPDATE images SET published = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
+  const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
   execSync(cmd, {
     encoding: 'utf-8',
     shell: 'powershell.exe',
