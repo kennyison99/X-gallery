@@ -35,25 +35,33 @@ const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
 // VLM Prompt Formulation
 // ---------------------------------------------------------------------------
 
-export const VLM_PORTRAIT_PROMPT = `Analyze this image carefully. Your task is to determine whether this image is a REAL-LIFE PHOTO of a human person (portrait, cosplay, gravure, selfie, outfit/body shot), or if it is NON-REAL / NOT A PERSON (anime illustration, 2D drawing, 3D game screenshot, meme, landscape, food).
+export const VLM_PORTRAIT_PROMPT = `You are an expert visual content auditor. Your mission is to determine if this image originates from REAL-LIFE PHOTOGRAPHY of a person, body, or outfit (is_real_person = true), or if it is purely a 2D ARTWORK / DIGITAL CREATION / NON-HUMAN (is_real_person = false).
+
+🚨 #1 HIGHEST PRIORITY PRINCIPLE — DO NOT JUDGE BY THE FACE:
+In social media cosplay, gravure, and selfie culture, REAL HUMAN MODELS routinely paste 2D anime stickers, cartoon avatar drawings, emojis, or mosaics directly over their faces to protect personal privacy or maintain anonymity.
+- If you see a 2D anime face or sticker pasted over a person's head, DO NOT classify the image as an anime illustration based on that face!
+- Instead, COMPLETELY IGNORE the face and examine the rest of the image:
+  1. Skin & Body: Are there real human neck, shoulders, hands, fingers, cleavage, waist, legs with tights/stockings, or feet? Are there real skin pores, skin folds, and anatomical realism?
+  2. Clothing & Accessories: Are there real fabric weaves, stitching, natural cloth wrinkles/creases, real leather sheen, or lace texture?
+  3. Environment & Lighting: Is there a real room, bed, doorway, wooden floor, mirror reflection, smartphone camera, natural indoor/outdoor lighting, and real-world shadows?
+If the body, clothing, and background are real photography, it is 100% TRUE (is_real_person = true), REGARDLESS of what cartoon sticker or anime avatar is pasted on the face.
 
 CRITICAL RULES:
 1. MARK AS is_real_person = TRUE:
-   - Real-life human beings in photography (portraits, idol/gravure photos, cosplay, street fashion, selfies).
+   - Real photos where the person's face is COVERED by an anime avatar sticker, emoji, mask, smartphone reflection, or mosaic censor.
    - Headless body shots or body part close-ups (e.g. legs with tights/stockings, high heels, hands, outfit check, back view).
-   - Real photos where the person's face is COVERED by an anime avatar sticker, emoji, mask, smartphone reflection, or mosaic censor. Look at the exposed skin, hair, clothes fabric, hands, room lighting, and real-world background. If the body and surroundings are real photography, it is TRUE.
+   - Real human cosplay, portraits, idol photos, and mirror selfies.
 
-2. MARK AS is_real_person = FALSE:
-   - 2D anime illustrations, digital drawings, comics, or manga (even if depicting a human girl, legs, or cosplay).
-   - 3D video game screenshots (e.g. Genshin Impact, Honkai Star Rail, Zenless Zone Zero, MMD, CGI).
-   - VTuber 2D/3D avatars.
-   - Non-human photos: food, scenery, nature, animals, product photos, text memes, chat screenshots without real people.
+2. MARK AS is_real_person = FALSE ONLY WHEN THE ENTIRE IMAGE IS ARTWORK:
+   - Pure 2D anime illustrations, drawings, manga, or webcomics where the WHOLE body, clothing, and background are hand-drawn or digitally painted.
+   - 3D CGI or video game screenshots (Genshin, Honkai, Zenless Zone Zero, MMD).
+   - Inanimate non-human scenes: food, landscapes, product shots, pure text memes without real people.
 
 You MUST reply ONLY with a valid JSON object in this exact schema:
 {
   "is_real_person": true,
   "confidence": 0.95,
-  "reason": "說明理由 (例如：臉部有動漫貼圖，但手部、皮膚與衣服背景為真實照片)"
+  "reason": "說明理由 (優先描述身體、手部、皮膚質感、服裝布料或背景環境是否為真實攝影，完全忽略臉部遮擋或貼圖)"
 }`;
 
 // ---------------------------------------------------------------------------
