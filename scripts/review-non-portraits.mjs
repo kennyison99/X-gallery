@@ -17,7 +17,7 @@ function getArgValue(prefix, fallback) {
 
 const APPLY = process.argv.includes('--apply');
 const LOCAL_FILE = getArgValue('--file=', '');
-const MODEL_NAME = getArgValue('--model=', process.env.VLM_MODEL || 'qwen2.5-vl:3b');
+const MODEL_NAME = getArgValue('--model=', process.env.VLM_MODEL || 'qwen3-vl:4b');
 const ENDPOINT = getArgValue('--endpoint=', process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
 const SITE_URL = (getArgValue('--site-url=', process.env.SITE_URL || 'http://localhost:4321')).replace(/\/$/, '');
 const CRAWL_API_KEY = getArgValue('--api-key=', process.env.CRAWL_API_KEY || '');
@@ -136,7 +136,10 @@ export async function classifyImageWithVlm({
 
       if (response.ok) {
         const data = await response.json();
-        return parseVlmResponse(data.response);
+        const raw = (data.response && data.response.trim() !== '{}' && data.response.trim().length > 2)
+          ? data.response
+          : (data.thinking || data.response || '');
+        return parseVlmResponse(raw);
       }
     } catch {
       // Fall through to OpenAI-compatible endpoint
@@ -177,7 +180,10 @@ export async function classifyImageWithVlm({
     }
 
     const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content ?? '';
+    const msg = data.choices?.[0]?.message;
+    const rawContent = (msg?.content && msg.content.trim() !== '{}' && msg.content.trim().length > 2)
+      ? msg.content
+      : (msg?.thinking || msg?.content || '');
     return parseVlmResponse(rawContent);
   } catch (err) {
     if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
