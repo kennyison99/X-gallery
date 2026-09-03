@@ -19,7 +19,7 @@ function getArgValue(prefix, fallback) {
 
 const APPLY = process.argv.includes('--apply');
 const LOCAL_FILE = getArgValue('--file=', '');
-const MODEL_NAME = getArgValue('--model=', process.env.VLM_MODEL || 'qwen3-vl:4b');
+const MODEL_NAME = getArgValue('--model=', process.env.VLM_MODEL || 'qwen3.5:4b');
 const ENDPOINT = getArgValue('--endpoint=', process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
 const SITE_URL = (getArgValue('--site-url=', process.env.SITE_URL || '')).replace(/\/$/, '');
 const CRAWL_API_KEY = getArgValue('--api-key=', process.env.CRAWL_API_KEY || '');
@@ -161,17 +161,22 @@ export async function classifyImageWithVlm({
   const base64 = optimizedBuffer.toString('base64');
   const normalizedEndpoint = endpoint.replace(/\/$/, '');
 
-  // Try Ollama native /api/generate first
+  // Try Ollama native /api/chat first
   if (!normalizedEndpoint.includes('/v1')) {
     try {
-      const response = await fetch(`${normalizedEndpoint}/api/generate`, {
+      const response = await fetch(`${normalizedEndpoint}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
           model,
-          prompt: VLM_PORTRAIT_PROMPT,
-          images: [base64],
+          messages: [
+            {
+              role: 'user',
+              content: VLM_PORTRAIT_PROMPT,
+              images: [base64],
+            },
+          ],
           stream: false,
           format: 'json',
           options: {
@@ -182,9 +187,11 @@ export async function classifyImageWithVlm({
 
       if (response.ok) {
         const data = await response.json();
-        const raw = (data.response && data.response.trim() !== '{}' && data.response.trim().length > 2)
-          ? data.response
-          : (data.thinking || data.response || '');
+        const content = data.message?.content;
+        const thinking = data.message?.thinking;
+        const raw = (content && content.trim() !== '{}' && content.trim().length > 2)
+          ? content
+          : (thinking || content || '');
         return parseVlmResponse(raw);
       }
     } catch {
