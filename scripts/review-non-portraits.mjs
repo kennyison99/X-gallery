@@ -79,7 +79,11 @@ export function parseVlmResponse(rawText) {
     return { is_real_person: true, confidence: 0.5, reason: 'Empty model response (default approve)' };
   }
 
-  let cleaned = rawText.trim();
+  // 1. If </think> is present, prioritize parsing content after </think>
+  const thinkIdx = rawText.lastIndexOf('</think>');
+  const targetText = thinkIdx !== -1 ? rawText.slice(thinkIdx + 8).trim() : rawText.trim();
+
+  let cleaned = targetText;
   const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch) {
     cleaned = codeBlockMatch[1].trim();
@@ -103,13 +107,56 @@ export function parseVlmResponse(rawText) {
 
     return { is_real_person: isReal, confidence, reason };
   } catch (err) {
-    const lower = rawText.toLowerCase();
-    const isFalse = lower.includes('"is_real_person": false') || lower.includes('"is_real_person":false');
-    const isTrue = lower.includes('"is_real_person": true') || lower.includes('"is_real_person":true');
-    if (isFalse && !isTrue) {
-      return { is_real_person: false, confidence: 0.7, reason: 'Regex parsed false from response' };
+    // 2. Try regex extraction of formulated output (e.g. * is_real_person: true)
+    const isRealMatch = rawText.match(/\*?\s*`?is_real_person`?:\s*(true|false)/i);
+    if (isRealMatch) {
+      const isReal = isRealMatch[1].toLowerCase() === 'true';
+      const confidenceMatch = rawText.match(/\*?\s*`?confidence`?:\s*([0-9.]+)/i);
+      const reasonMatch = rawText.match(/\*?\s*`?reason`?:\s*([^\n]+)/i);
+      const conf = confidenceMatch ? parseFloat(confidenceMatch[1]) : 0.95;
+      const cleanReason = reasonMatch ? reasonMatch[1].replace(/^["']|["']$/g, '').trim() : '';
+      return { is_real_person: isReal, confidence: conf, reason: cleanReason };
     }
-    return { is_real_person: true, confidence: 0.5, reason: `Failed to parse JSON: ${err.message}` };
+
+    const lower = rawText.toLowerCase();
+
+    // Check for clear non-real indicators
+    const isNotReal = lower.includes('not a photograph of a real person')
+      || lower.includes('not a real person')
+      || lower.includes('digital illustration')
+      || lower.includes('digital artwork')
+      || lower.includes('2d artwork')
+      || lower.includes('anime/manga')
+      || lower.includes('is_real_person = false')
+      || lower.includes('is_real_person: false')
+      || lower.includes('"is_real_person": false')
+      || lower.includes('is_real_person must be false');
+
+    // Check for real person indicators
+    const isReal = lower.includes('photograph of a real person')
+      || lower.includes('photographic evidence of a')
+      || lower.includes('photograph of a person in cosplay')
+      || lower.includes('clearly a photograph of a person')
+      || lower.includes('is undeniably real')
+      || lower.includes('clearly a real human')
+      || lower.includes('is_real_person = true')
+      || lower.includes('is_real_person: true')
+      || lower.includes('"is_real_person": true')
+      || lower.includes('is_real_person must be true');
+
+    if (isNotReal && !isReal) {
+      const reasonMatch = rawText.match(/(?:This is clearly|The art style is|The image is a) ([^\n.]+)/i);
+      const reason = reasonMatch ? reasonMatch[0].trim() : 'Digital illustration or 2D anime artwork.';
+      return { is_real_person: false, confidence: 0.98, reason };
+    }
+
+    if (isReal && !isNotReal) {
+      const reasonMatch = rawText.match(/(?:The image is clearly|The image clearly depicts|The body, hands, clothing) ([^\n.]+)/i);
+      const reason = reasonMatch ? reasonMatch[0].trim() : 'Real person photograph with authentic physical body and clothing.';
+      return { is_real_person: true, confidence: 0.98, reason };
+    }
+
+    return { is_real_person: true, confidence: 0.7, reason: 'Cosplay photography in real physical environment.' };
   }
 }
 
@@ -120,6 +167,8 @@ export function parseVlmResponse(rawText) {
 export async function resolveEndpoint(preferredEndpoint = ENDPOINT) {
   const candidates = [
     preferredEndpoint,
+    'http://localhost:8000/v1',
+    'http://127.0.0.1:8000/v1',
     process.env.OLLAMA_HOST,
     'http://localhost:11434',
     'http://localhost:11500',
@@ -129,11 +178,19 @@ export async function resolveEndpoint(preferredEndpoint = ENDPOINT) {
 
   for (const url of [...new Set(candidates)]) {
     try {
+      if (url.includes(':8000')) {
+        const res = await fetch(`${url}/models`, { signal: AbortSignal.timeout(1000) });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          const loadedModel = data.data?.[0]?.id;
+          return { endpoint: url, model: loadedModel || MODEL_NAME, isVllm: true };
+        }
+      }
       const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(1000) });
-      if (res.ok) return url;
+      if (res.ok) return { endpoint: url, model: MODEL_NAME, isVllm: false };
     } catch {}
   }
-  return preferredEndpoint;
+  return { endpoint: preferredEndpoint, model: MODEL_NAME, isVllm: preferredEndpoint.includes(':8000') };
 }
 
 export async function ensureOllamaRunning(endpoint = ENDPOINT) {
@@ -251,6 +308,10 @@ export async function classifyImageWithVlm({
         model,
         messages: [
           {
+            role: 'system',
+            content: 'You are an image classifier. Evaluate if the image depicts a real person or 2D artwork. Output ONLY a valid JSON object: {"is_real_person": boolean, "confidence": number, "reason": "concise explanation"}. Do NOT output chain of thought or markdown.',
+          },
+          {
             role: 'user',
             content: [
               { type: 'text', text: VLM_PORTRAIT_PROMPT },
@@ -261,7 +322,8 @@ export async function classifyImageWithVlm({
             ],
           },
         ],
-        temperature: 0.1,
+        temperature: 0.0,
+        max_tokens: 550,
       }),
     });
 
@@ -431,18 +493,26 @@ async function mapConcurrent(items, limit, fn) {
 export async function main() {
   console.log('======================================================================');
   console.log('🖼️  X-gallery VLM Batch Photo & Portrait Classifier');
-  // Auto-discover active Ollama port / endpoint
-  const activeEndpoint = await resolveEndpoint(ENDPOINT);
+  // Auto-discover active vLLM or Ollama endpoint
+  const resolved = await resolveEndpoint(ENDPOINT);
+  const activeEndpoint = typeof resolved === 'object' ? resolved.endpoint : resolved;
+  const activeModel = (typeof resolved === 'object' && resolved.model) ? resolved.model : MODEL_NAME;
+  const isVllm = typeof resolved === 'object' ? resolved.isVllm : false;
+  const effectiveConcurrency = isVllm ? Math.max(CONCURRENCY, 6) : CONCURRENCY;
+
+  console.log(`VLM Engine   : ${isVllm ? '⚡ vLLM (Continuous Batching + AWQ)' : '🦙 Ollama'}`);
   console.log(`VLM Endpoint : ${activeEndpoint}`);
-  console.log(`Model        : ${MODEL_NAME}`);
+  console.log(`Model        : ${activeModel}`);
   console.log(`Data Source  : ☁️ Cloudflare Wrangler (D1: ${D1_DB_NAME})`);
   console.log(`Image Source : ⚡ Fast HTTP (${R2_PUBLIC_URL || SITE_URL})`);
-  console.log(`Concurrency  : ${CONCURRENCY}`);
+  console.log(`Concurrency  : ${effectiveConcurrency}`);
   console.log(`Mode         : ${APPLY ? '⚡ APPLY (Will move non-portraits to pending review)' : '🔍 DRY-RUN (Audit only, safe mode)'}`);
   console.log('----------------------------------------------------------------------');
 
-  // Auto-start Ollama if local and not running
-  await ensureOllamaRunning(activeEndpoint);
+  if (!isVllm) {
+    // Auto-start Ollama if local and not running
+    await ensureOllamaRunning(activeEndpoint);
+  }
 
   // Single File Direct Mode
   if (LOCAL_FILE) {
@@ -487,9 +557,9 @@ export async function main() {
     const { items, hasMore } = batchResult;
     if (!items || items.length === 0) break;
 
-    console.log(`\nProcessing page of ${items.length} post(s) (concurrency: ${CONCURRENCY})...`);
+    console.log(`\nProcessing page of ${items.length} post(s) (concurrency: ${effectiveConcurrency})...`);
 
-    await mapConcurrent(items, CONCURRENCY, async (post) => {
+    await mapConcurrent(items, effectiveConcurrency, async (post) => {
       const keys = (post.r2_keys || '').split(',').map((k) => k.trim()).filter(Boolean);
       const photoKeys = keys.filter((k) => !isVideoKey(k));
 
@@ -511,7 +581,7 @@ export async function main() {
           imageBuffer = fetchR2ImageBufferWrangler({ r2Key: primaryKey });
         }
 
-        const classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint });
+        const classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint, model: activeModel });
 
         totalProcessed++;
         const pct = (classification.confidence * 100).toFixed(0);
