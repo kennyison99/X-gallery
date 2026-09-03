@@ -250,6 +250,10 @@ try {
   const bulkDeleteProgress = document.getElementById('bulk-delete-progress');
   const bulkDeleteProgressBar = document.getElementById('bulk-delete-progress-bar') as HTMLProgressElement | null;
   const bulkDeleteProgressText = document.getElementById('bulk-delete-progress-text');
+  const bulkApproveBtn = document.getElementById('bulk-approve-btn') as HTMLButtonElement | null;
+  const bulkApproveProgress = document.getElementById('bulk-approve-progress');
+  const bulkApproveProgressBar = document.getElementById('bulk-approve-progress-bar') as HTMLProgressElement | null;
+  const bulkApproveProgressText = document.getElementById('bulk-approve-progress-text');
 
   const tabPublished = document.getElementById('tab-published');
   const tabPending = document.getElementById('tab-pending');
@@ -340,6 +344,11 @@ try {
     // Bulk delete button
     if (bulkDeleteBtn) {
       bulkDeleteBtn.disabled = selectedIds.size === 0;
+    }
+
+    // Bulk approve button
+    if (bulkApproveBtn) {
+      bulkApproveBtn.disabled = selectedIds.size === 0;
     }
 
     // Selected count display
@@ -1206,6 +1215,8 @@ try {
           });
           const data = await response.json();
           if (response.ok && data.success) {
+            const idInt = parseInt(imgId, 10);
+            if (!isNaN(idInt)) selectedIds.delete(idInt);
             loadPosts(currentPage);
           } else {
             alert(`核准失敗：${data.error || '未知錯誤'}`);
@@ -1581,6 +1592,7 @@ try {
     if (!confirmed) return;
 
     bulkDeleteBtn.disabled = true;
+    if (bulkApproveBtn) bulkApproveBtn.disabled = true;
     bulkDeleteBtn.textContent = '刪除中...';
     let deletedCount = 0;
     updateOperationProgress(
@@ -1629,11 +1641,75 @@ try {
     }
   });
 
+  // Bulk approve action handler
+  bulkApproveBtn?.addEventListener('click', async () => {
+    const ids = Array.from(selectedIds);
+
+    if (ids.length === 0) return;
+
+    const confirmed = confirm(`確定要核准這 ${ids.length} 筆照片嗎？\n核准後將會公開發佈到畫廊！`);
+    if (!confirmed) return;
+
+    bulkApproveBtn.disabled = true;
+    if (bulkDeleteBtn) bulkDeleteBtn.disabled = true;
+    bulkApproveBtn.textContent = '核准中...';
+    let approvedCount = 0;
+    updateOperationProgress(
+      bulkApproveProgress,
+      bulkApproveProgressBar,
+      bulkApproveProgressText,
+      0,
+      ids.length,
+      `已核准 0 / ${ids.length}`
+    );
+
+    try {
+      approvedCount = await runSequentialBatches(ids, 50, async (batch) => {
+        const response = await fetch('/api/admin/bulk-approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: batch })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || '核准失敗');
+        }
+        return Number(data.count ?? batch.length);
+      }, (completed) => {
+        approvedCount = completed;
+        updateOperationProgress(
+          bulkApproveProgress,
+          bulkApproveProgressBar,
+          bulkApproveProgressText,
+          approvedCount,
+          ids.length,
+          `已核准 ${approvedCount} / ${ids.length}`
+        );
+      });
+
+      alert(`成功核准 ${approvedCount} 筆照片！`);
+      selectedIds.clear();
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Error in bulk approve:', err);
+      if (bulkApproveProgressText) {
+        bulkApproveProgressText.textContent = `失敗：已核准 ${approvedCount} / ${ids.length}。${err.message}`;
+      }
+      alert(`批次核准中斷。\n已核准 ${approvedCount} / ${ids.length} 筆。\n${err.message}`);
+      window.location.reload();
+    }
+  });
+
   // =========== Tab switching listeners ===========
-  function switchTab(newTab: 'published' | 'pending') {
+  function switchTab(newTab: 'published' | 'pending', page: number = 1) {
     if (activeTab === newTab) return;
     activeTab = newTab;
+    sessionStorage.setItem('admin-post-tab', activeTab);
     selectedIds.clear(); // 切換 Tab 時清空選取
+
+    if (bulkApproveBtn) {
+      bulkApproveBtn.style.display = activeTab === 'pending' ? 'inline-block' : 'none';
+    }
 
     if (tabPublished && tabPending) {
       if (activeTab === 'published') {
@@ -1659,11 +1735,11 @@ try {
       }
     }
 
-    loadPosts(1);
+    loadPosts(page);
   }
 
-  tabPublished?.addEventListener('click', () => switchTab('published'));
-  tabPending?.addEventListener('click', () => switchTab('pending'));
+  tabPublished?.addEventListener('click', () => switchTab('published', 1));
+  tabPending?.addEventListener('click', () => switchTab('pending', 1));
 
   // 同步初始化篩選器 DOM 狀態
   if (searchInput) searchInput.value = sessionStorage.getItem('admin-filter-search') || '';
@@ -1685,6 +1761,12 @@ try {
     if (gridViewEl) gridViewEl.style.display = 'none';
   }
 
-  // Initialize — load saved page of posts
-  loadPosts(currentPage);
+  // 初始化 Tab 狀態（若有記憶中的待審查狀態則還原）
+  const savedPostTab = sessionStorage.getItem('admin-post-tab');
+  if (savedPostTab === 'pending') {
+    switchTab('pending', currentPage);
+  } else {
+    if (bulkApproveBtn) bulkApproveBtn.style.display = 'none';
+    loadPosts(currentPage);
+  }
 </script>

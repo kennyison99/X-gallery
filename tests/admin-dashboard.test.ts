@@ -75,6 +75,9 @@ test('admin subcomponents retain element IDs, metadata inputs, crawler controls,
   assert.ok(postManagerContent.includes('id="select-all-checkbox"'), 'Must include select-all-checkbox');
   assert.ok(postManagerContent.includes('id="select-page-btn"'), 'Must include select-page-btn');
   assert.ok(postManagerContent.includes('id="clear-selection-btn"'), 'Must include clear-selection-btn');
+  assert.ok(postManagerContent.includes('id="bulk-delete-btn"'), 'Must include bulk-delete-btn');
+  assert.ok(postManagerContent.includes('id="bulk-approve-btn"'), 'Must include bulk-approve-btn');
+  assert.ok(postManagerContent.includes('id="bulk-approve-progress"'), 'Must include bulk-approve-progress');
   assert.ok(postManagerContent.includes('id="admin-empty-state"'), 'Must include admin-empty-state');
   assert.ok(postManagerContent.includes('資料庫目前無照片'), 'Must include empty state wording');
 
