@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 import sharp from 'sharp';
 import { isVideoKey } from '../src/lib/media-classifier.ts';
 
@@ -19,12 +21,15 @@ const APPLY = process.argv.includes('--apply');
 const LOCAL_FILE = getArgValue('--file=', '');
 const MODEL_NAME = getArgValue('--model=', process.env.VLM_MODEL || 'qwen3-vl:4b');
 const ENDPOINT = getArgValue('--endpoint=', process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
-const SITE_URL = (getArgValue('--site-url=', process.env.SITE_URL || 'http://localhost:4321')).replace(/\/$/, '');
+const SITE_URL = (getArgValue('--site-url=', process.env.SITE_URL || '')).replace(/\/$/, '');
 const CRAWL_API_KEY = getArgValue('--api-key=', process.env.CRAWL_API_KEY || '');
 const LIMIT_ARG = getArgValue('--limit=', '50');
 const MAX_POSTS = LIMIT_ARG.toLowerCase() === 'all' ? 0 : Math.max(1, parseInt(LIMIT_ARG, 10) || 50);
 const OFFSET_START = Math.max(0, parseInt(getArgValue('--offset=', '0'), 10) || 0);
 const CONCURRENCY = Math.max(1, Math.min(8, parseInt(getArgValue('--concurrency=', '2'), 10) || 2));
+const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !process.env.SITE_URL);
+const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
+const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
 
 // ---------------------------------------------------------------------------
 // VLM Prompt Formulation
@@ -91,6 +96,47 @@ export function parseVlmResponse(rawText) {
       return { is_real_person: false, confidence: 0.7, reason: 'Regex parsed false from response' };
     }
     return { is_real_person: true, confidence: 0.5, reason: `Failed to parse JSON: ${err.message}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ollama Auto-Start & Readiness
+// ---------------------------------------------------------------------------
+
+export async function ensureOllamaRunning(endpoint = ENDPOINT) {
+  if (!endpoint.includes('localhost') && !endpoint.includes('127.0.0.1')) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${endpoint}/api/version`, { signal: AbortSignal.timeout(1500) });
+    if (res.ok) return;
+  } catch {}
+
+  console.log('🤖 Starting local Ollama service in the background...');
+  const localAppData = process.env.LOCALAPPDATA || '';
+  const candidates = [
+    path.join(localAppData, 'Programs', 'Ollama', 'ollama.exe'),
+    'ollama',
+  ];
+
+  for (const bin of candidates) {
+    try {
+      const child = spawn(bin, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.unref();
+      break;
+    } catch {}
+  }
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      const res = await fetch(`${endpoint}/api/version`, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) {
+        console.log('✅ Local Ollama service is online.');
+        return;
+      }
+    } catch {}
   }
 }
 
@@ -194,10 +240,58 @@ export async function classifyImageWithVlm({
 }
 
 // ---------------------------------------------------------------------------
-// Network & Gallery API Helpers
+// Wrangler Direct Integration (D1 + R2)
 // ---------------------------------------------------------------------------
 
-export async function fetchPublishedBatch({ siteUrl = SITE_URL, offset = 0, limit = 48 }) {
+export function fetchPublishedBatchWrangler({ offset = 0, limit = 48, dbName = D1_DB_NAME }) {
+  const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ORDER BY id DESC LIMIT ${limit} OFFSET ${offset};`;
+  const cmd = `npx wrangler d1 execute ${dbName} --remote --command='${sql}' --json`;
+  const stdout = execSync(cmd, {
+    encoding: 'utf-8',
+    shell: 'powershell.exe',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const parsed = JSON.parse(stdout);
+  const items = parsed[0]?.results || [];
+  return { items, hasMore: items.length === limit };
+}
+
+export function fetchR2ImageBufferWrangler({ r2Key, bucketName = R2_BUCKET_NAME }) {
+  const tmpDir = os.tmpdir();
+  const tmpFile = path.join(tmpDir, `vlm_r2_${Date.now()}_${Math.random().toString(36).slice(2)}_${path.basename(r2Key)}`);
+  try {
+    const cmd = `npx wrangler r2 object get "${bucketName}/${r2Key}" --file "${tmpFile}" --remote`;
+    execSync(cmd, {
+      encoding: 'utf-8',
+      shell: 'powershell.exe',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return fs.readFileSync(tmpFile);
+  } finally {
+    if (fs.existsSync(tmpFile)) {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  }
+}
+
+export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME }) {
+  if (pendingIds.length === 0) return { updated_count: 0 };
+  const idsStr = pendingIds.join(',');
+  const sql = `UPDATE images SET published = 0, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
+  const cmd = `npx wrangler d1 execute ${dbName} --remote --command='${sql}' --json`;
+  execSync(cmd, {
+    encoding: 'utf-8',
+    shell: 'powershell.exe',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return { updated_count: pendingIds.length };
+}
+
+// ---------------------------------------------------------------------------
+// HTTP & Gallery API Helpers
+// ---------------------------------------------------------------------------
+
+export async function fetchPublishedBatchHttp({ siteUrl = SITE_URL, offset = 0, limit = 48 }) {
   const url = `${siteUrl}/api/images?limit=${limit}&offset=${offset}&sort=newest`;
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) {
@@ -208,7 +302,7 @@ export async function fetchPublishedBatch({ siteUrl = SITE_URL, offset = 0, limi
   return { items, hasMore };
 }
 
-export async function fetchR2ImageBuffer({ siteUrl = SITE_URL, r2Key, retries = 2 }) {
+export async function fetchR2ImageBufferHttp({ siteUrl = SITE_URL, r2Key, retries = 2 }) {
   const url = `${siteUrl}/api/r2/${encodeURIComponent(r2Key)}`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -227,7 +321,7 @@ export async function fetchR2ImageBuffer({ siteUrl = SITE_URL, r2Key, retries = 
   }
 }
 
-export async function applyPendingPosts({ siteUrl = SITE_URL, apiKey = CRAWL_API_KEY, pendingIds = [] }) {
+export async function applyPendingPostsHttp({ siteUrl = SITE_URL, apiKey = CRAWL_API_KEY, pendingIds = [] }) {
   if (pendingIds.length === 0) return { updated_count: 0 };
   const url = `${siteUrl}/api/phash-scan?action=apply_pending`;
   const response = await fetch(url, {
@@ -270,9 +364,12 @@ export async function main() {
   console.log('======================================================================');
   console.log(`VLM Endpoint : ${ENDPOINT}`);
   console.log(`Model        : ${MODEL_NAME}`);
-  console.log(`Site URL     : ${SITE_URL}`);
+  console.log(`Data Source  : ${USE_WRANGLER ? `☁️ Cloudflare Wrangler (D1: ${D1_DB_NAME}, R2: ${R2_BUCKET_NAME})` : `🌐 HTTP API (${SITE_URL})`}`);
   console.log(`Mode         : ${APPLY ? '⚡ APPLY (Will move non-portraits to pending review)' : '🔍 DRY-RUN (Audit only, safe mode)'}`);
   console.log('----------------------------------------------------------------------');
+
+  // Auto-start Ollama if local and not running
+  await ensureOllamaRunning(ENDPOINT);
 
   // Single File Direct Mode
   if (LOCAL_FILE) {
@@ -304,7 +401,11 @@ export async function main() {
 
     let batchResult;
     try {
-      batchResult = await fetchPublishedBatch({ siteUrl: SITE_URL, offset: currentOffset, limit: batchLimit });
+      if (USE_WRANGLER) {
+        batchResult = fetchPublishedBatchWrangler({ offset: currentOffset, limit: batchLimit });
+      } else {
+        batchResult = await fetchPublishedBatchHttp({ siteUrl: SITE_URL, offset: currentOffset, limit: batchLimit });
+      }
     } catch (err) {
       console.error(`Failed to fetch batch at offset ${currentOffset}: ${err.message}`);
       break;
@@ -326,7 +427,13 @@ export async function main() {
 
       const primaryKey = photoKeys[0];
       try {
-        const imageBuffer = await fetchR2ImageBuffer({ siteUrl: SITE_URL, r2Key: primaryKey });
+        let imageBuffer;
+        if (USE_WRANGLER) {
+          imageBuffer = fetchR2ImageBufferWrangler({ r2Key: primaryKey });
+        } else {
+          imageBuffer = await fetchR2ImageBufferHttp({ siteUrl: SITE_URL, r2Key: primaryKey });
+        }
+
         const classification = await classifyImageWithVlm({ buffer: imageBuffer });
 
         totalProcessed++;
@@ -364,13 +471,22 @@ export async function main() {
 
   if (APPLY && flaggedPosts.length > 0) {
     console.log('\nApplying changes to D1 database (moving flagged posts to pending review)...');
-    if (!CRAWL_API_KEY) {
-      console.error('Error: CRAWL_API_KEY is required to apply changes to the database. Provide via --api-key=<key> or CRAWL_API_KEY env.');
-      process.exit(1);
-    }
     const idsToPending = flaggedPosts.map((f) => f.post.id);
-    const updateResult = await applyPendingPosts({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
-    console.log(`✅ Successfully updated ${updateResult.updated_count ?? idsToPending.length} post(s) to published = 0 (Review).`);
+    let updateCount = idsToPending.length;
+
+    if (USE_WRANGLER) {
+      const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
+      updateCount = updateResult.updated_count;
+    } else {
+      if (!CRAWL_API_KEY) {
+        console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
+        process.exit(1);
+      }
+      const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
+      updateCount = updateResult.updated_count ?? idsToPending.length;
+    }
+
+    console.log(`✅ Successfully updated ${updateCount} post(s) to published = 0 (Review).`);
   } else if (!APPLY && flaggedPosts.length > 0) {
     console.log('\n💡 Notice: Running in DRY-RUN mode. No database records were modified.');
     console.log('To move the flagged posts to pending review, re-run with --apply:');
