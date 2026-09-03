@@ -114,6 +114,7 @@ export function parseVlmResponse(rawText) {
       const isReal = isRealMatch[1].toLowerCase() === 'true';
       const confidenceMatch = tail.match(/confidence[^\w]*([0-9.]+)/i);
       const reasonMatch = tail.match(/reason[^\w]*([^\n]+)/i);
+      const conf = confidenceMatch ? parseFloat(confidenceMatch[1]) : 0.95;
       const cleanReason = (reasonMatch && reasonMatch[1].trim())
         ? reasonMatch[1].replace(/^[:\s"'`]+|["'`]+$/g, '').trim()
         : (isReal ? 'Real person photograph with authentic physical body and clothing.' : '2D anime drawing, illustration, or CGI render.');
