@@ -31,6 +31,10 @@ const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !proce
 const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
 const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
 
+const IS_WIN = process.platform === 'win32';
+const IS_MAC = process.platform === 'darwin';
+const CLI_SHELL = IS_WIN ? 'powershell.exe' : true;
+
 // ---------------------------------------------------------------------------
 // VLM Prompt Formulation
 // ---------------------------------------------------------------------------
@@ -124,8 +128,13 @@ export async function ensureOllamaRunning(endpoint = ENDPOINT) {
   console.log('🤖 Starting local Ollama service in the background...');
   const localAppData = process.env.LOCALAPPDATA || '';
   const candidates = [
-    path.join(localAppData, 'Programs', 'Ollama', 'ollama.exe'),
     'ollama',
+    ...(IS_WIN ? [path.join(localAppData, 'Programs', 'Ollama', 'ollama.exe')] : []),
+    ...(IS_MAC ? [
+      '/opt/homebrew/bin/ollama',
+      '/usr/local/bin/ollama',
+      '/Applications/Ollama.app/Contents/Resources/ollama',
+    ] : []),
   ];
 
   for (const bin of candidates) {
@@ -260,10 +269,10 @@ export async function classifyImageWithVlm({
 
 export function fetchPublishedBatchWrangler({ offset = 0, limit = 48, dbName = D1_DB_NAME }) {
   const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ORDER BY id DESC LIMIT ${limit} OFFSET ${offset};`;
-  const cmd = `npx wrangler d1 execute ${dbName} --remote --command='${sql}' --json`;
+  const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
   const stdout = execSync(cmd, {
     encoding: 'utf-8',
-    shell: 'powershell.exe',
+    shell: CLI_SHELL,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const parsed = JSON.parse(stdout);
@@ -278,7 +287,7 @@ export function fetchR2ImageBufferWrangler({ r2Key, bucketName = R2_BUCKET_NAME 
     const cmd = `npx wrangler r2 object get "${bucketName}/${r2Key}" --file "${tmpFile}" --remote`;
     execSync(cmd, {
       encoding: 'utf-8',
-      shell: 'powershell.exe',
+      shell: CLI_SHELL,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return fs.readFileSync(tmpFile);
@@ -296,7 +305,7 @@ export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME
   const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
   execSync(cmd, {
     encoding: 'utf-8',
-    shell: 'powershell.exe',
+    shell: CLI_SHELL,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { updated_count: pendingIds.length };
