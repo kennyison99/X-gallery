@@ -52,9 +52,20 @@ In social media cosplay, gravure, and selfie culture, REAL HUMAN MODELS routinel
   3. Environment & Lighting: Is there a real room, bed, doorway, wooden floor, mirror reflection, smartphone camera, natural indoor/outdoor lighting, and real-world shadows?
 If the body, clothing, and background are real photography, it is 100% TRUE (is_real_person = true), REGARDLESS of what cartoon sticker or anime avatar is pasted on the face.
 
+🚨 #2 CRITICAL PRINCIPLE — ANIME STICKERS, INSET CUTOUTS, PLUSHIES, OR POSTERS IN REAL PHOTOS:
+In cosplay and gravure photo sharing:
+- Real human models frequently paste 2D anime stickers anywhere on the photo (over face, legs, hips, body, or background as censors, watermarks, or cute decorations).
+- Real human models frequently hold anime plushies/dolls, anime figures, acrylic standees, or stand in front of anime posters/wallpapers.
+- Cosplayers frequently include a small side-by-side or picture-in-picture reference cutout of the 2D anime character they are portraying.
+
+👉 ABSOLUTE PRINCIPLE: If you can see ANY real physical human body parts (real hands, fingers, legs with tights, skin texture, real cloth wrinkles, real room/floor/furniture), this is 100% A REAL PHOTOGRAPH (is_real_person = true)!
+The presence of 2D anime stickers, anime characters, or anime props NEVER makes a real photo non-real!
+ONLY mark as is_real_person = false if the ENTIRE image from edge to edge is 100% a hand-drawn illustration or 3D CGI with ZERO real physical human elements.
+
 CRITICAL RULES:
 1. MARK AS is_real_person = TRUE:
    - Real photos where the person's face is COVERED by an anime avatar sticker, emoji, mask, smartphone reflection, or mosaic censor.
+   - Real photos containing 2D anime character stickers, watermarks, inset character reference cutouts, or plushies.
    - Headless body shots or body part close-ups (e.g. legs with tights/stockings, high heels, hands, outfit check, back view).
    - Real human cosplay, portraits, idol photos, and mirror selfies.
 
@@ -63,7 +74,7 @@ CRITICAL RULES:
    - 3D CGI or video game screenshots (Genshin, Honkai, Zenless Zone Zero, MMD).
    - Inanimate non-human scenes: food, landscapes, product shots, pure text memes without real people.
 
-You MUST reply ONLY with a valid JSON object in this exact schema:
+You MUST reply with a valid JSON object in this exact schema after </think>:
 {
   "is_real_person": true,
   "confidence": 0.95,
@@ -123,17 +134,19 @@ export function parseVlmResponse(rawText) {
 
     const lower = rawText.toLowerCase();
 
-    // Check for clear non-real indicators
+    // Check for clear, unambiguous non-real conclusion indicators
     const isNotReal = lower.includes('not a photograph of a real person')
       || lower.includes('not a real person')
-      || lower.includes('digital illustration')
-      || lower.includes('digital artwork')
-      || lower.includes('2d artwork')
-      || lower.includes('anime/manga')
-      || lower.includes('is_real_person = false')
+      || lower.includes('is not a photograph')
+      || lower.includes('pure 2d anime illustration')
+      || lower.includes('purely a 2d illustration')
+      || lower.includes('entire image is a 2d')
+      || lower.includes('entirely a 2d drawing')
       || lower.includes('is_real_person: false')
+      || lower.includes('is_real_person = false')
       || lower.includes('"is_real_person": false')
-      || lower.includes('is_real_person must be false');
+      || lower.includes('is_real_person must be false')
+      || lower.includes('is_real_person should be false');
 
     // Check for real person indicators
     const isReal = lower.includes('photograph of a real person')
@@ -142,10 +155,11 @@ export function parseVlmResponse(rawText) {
       || lower.includes('clearly a photograph of a person')
       || lower.includes('is undeniably real')
       || lower.includes('clearly a real human')
-      || lower.includes('is_real_person = true')
       || lower.includes('is_real_person: true')
+      || lower.includes('is_real_person = true')
       || lower.includes('"is_real_person": true')
-      || lower.includes('is_real_person must be true');
+      || lower.includes('is_real_person must be true')
+      || lower.includes('is_real_person should be true');
 
     if (isNotReal && !isReal) {
       const reasonMatch = rawText.match(/(?:This is clearly|The art style is|The image is a) ([^\n.]+)/i);
@@ -159,7 +173,8 @@ export function parseVlmResponse(rawText) {
       return { is_real_person: true, confidence: 0.98, reason };
     }
 
-    return { is_real_person: true, confidence: 0.7, reason: 'Cosplay photography in real physical environment.' };
+    // Default to true (Safe-keep real person photos)
+    return { is_real_person: true, confidence: 0.7, reason: 'Real photograph or cosplay photo in physical environment.' };
   }
 }
 
@@ -326,7 +341,7 @@ export async function classifyImageWithVlm({
           },
         ],
         temperature: 0.0,
-        max_tokens: 550,
+        max_tokens: 750,
       }),
     });
 
