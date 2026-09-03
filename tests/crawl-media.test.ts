@@ -40,3 +40,31 @@ test('crawler script delegates video conversion to video-transcoder module', asy
   assert.match(crawlerScript, /await transcodeVideoFile\(mediaPath\)/);
 });
 
+test('crawl-upload uses instr instead of LIKE to avoid SQLite 50-byte pattern limit', async () => {
+  const fs = await import('node:fs');
+  const uploadApiSource = fs.readFileSync('src/pages/api/crawl-upload.ts', 'utf8');
+
+  assert.match(uploadApiSource, /instr\(\s*r2_keys\s*,\s*\?\s*\)\s*>\s*0/);
+  assert.doesNotMatch(uploadApiSource, /r2_keys\s+LIKE\s+\?/i);
+});
+
+test('SQLite instr correctly matches r2_keys exceeding 50 bytes', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE images (id INTEGER PRIMARY KEY, author TEXT, r2_keys TEXT);');
+
+  const author = 'silva_siufabing';
+  const longKey = 'silva_siufabing_2093637112830808447_1.transcoded.mp4'; // 52 characters
+
+  const insert = db.prepare('INSERT INTO images (id, author, r2_keys) VALUES (?, ?, ?)');
+  insert.run(1, author, longKey);
+
+  const query = db.prepare('SELECT id FROM images WHERE author = ? AND instr(r2_keys, ?) > 0');
+  const found = query.get(author, longKey) as { id: number } | undefined;
+  assert.equal(found?.id, 1);
+
+  const notFound = query.get(author, 'silva_siufabing_9999999999999999999_1.transcoded.mp4');
+  assert.equal(notFound, undefined);
+});
+
+

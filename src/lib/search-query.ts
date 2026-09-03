@@ -101,21 +101,21 @@ export function buildSearchQuery(params: SearchParams) {
   }
 
   if (params.q) {
-    const qPattern = `%${params.q}%`;
+    const qLower = params.q.toLowerCase();
     whereClauses.push(`
       (
-        i.title LIKE ?
-        OR i.description LIKE ?
-        OR i.author LIKE ?
-        OR i.author_display_name LIKE ?
+        instr(LOWER(i.title), ?) > 0
+        OR instr(LOWER(i.description), ?) > 0
+        OR instr(LOWER(i.author), ?) > 0
+        OR instr(LOWER(i.author_display_name), ?) > 0
         OR EXISTS (
           SELECT 1 FROM image_tags it_q
           JOIN tags t_q ON it_q.tag_id = t_q.id
-          WHERE it_q.image_id = i.id AND t_q.name LIKE ?
+          WHERE it_q.image_id = i.id AND instr(LOWER(t_q.name), ?) > 0
         )
       )
     `);
-    bindings.push(qPattern, qPattern, qPattern, qPattern, qPattern);
+    bindings.push(qLower, qLower, qLower, qLower, qLower);
   }
 
   if (decodedCursor) {

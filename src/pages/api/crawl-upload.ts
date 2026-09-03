@@ -103,8 +103,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Check for duplicate: same author + same original filename pattern
     const existingCheck = await env.DB.prepare(
-      'SELECT id FROM images WHERE author = ? AND r2_keys LIKE ?'
-    ).bind(authorInput.handle, `%${firstFileName}%`).first();
+      'SELECT id FROM images WHERE author = ? AND instr(r2_keys, ?) > 0'
+    ).bind(authorInput.handle, firstFileName).first();
 
     if (existingCheck) {
       return new Response(JSON.stringify({

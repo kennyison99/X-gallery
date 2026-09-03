@@ -62,9 +62,8 @@ export function buildAdminPostsQuery(params: AdminPostsQueryParams, mediaCountsR
   const bindings: unknown[] = [params.published];
 
   if (params.search) {
-    conditions.push('(LOWER(i.title) LIKE ? OR LOWER(i.author) LIKE ? OR LOWER(i.description) LIKE ? OR LOWER(i.author_display_name) LIKE ?)');
-    const pat = `%${params.search}%`;
-    bindings.push(pat, pat, pat, pat);
+    conditions.push('(instr(LOWER(i.title), ?) > 0 OR instr(LOWER(i.author), ?) > 0 OR instr(LOWER(i.description), ?) > 0 OR instr(LOWER(i.author_display_name), ?) > 0)');
+    bindings.push(params.search, params.search, params.search, params.search);
   }
 
   if (params.author) {
