@@ -1,5 +1,6 @@
 import { buildFilterKey, decodeCursor, encodeCursor, generateCursorWhereClause } from './cursor.ts';
-import { getDirectoryData } from './directory-data.ts';
+import { getDirectoryData, type DirectoryData } from './directory-data.ts';
+import { queryCache, type QueryCacheKv } from './query-cache.ts';
 
 export interface SearchParams {
   q?: string;
@@ -30,6 +31,12 @@ export interface SearchBatchResult {
   items: SearchResultItem[];
   hasMore: boolean;
   nextCursor: string | null;
+}
+
+export interface SearchCacheOptions {
+  kv?: QueryCacheKv;
+  version?: number;
+  directory?: DirectoryData;
 }
 
 export function parseSearchParams(params: URLSearchParams): SearchParams {
@@ -160,37 +167,52 @@ export function buildSearchQuery(params: SearchParams) {
   return { sql, bindings, filterKey };
 }
 
-export async function fetchSearchBatch(db: any, params: SearchParams): Promise<SearchBatchResult> {
+export async function fetchSearchBatch(
+  db: any,
+  params: SearchParams,
+  cacheOptions: SearchCacheOptions = {},
+): Promise<SearchBatchResult> {
   const { sql, bindings, filterKey } = buildSearchQuery(params);
-  const { results = [] } = await db.prepare(sql).bind(...bindings).all<SearchResultItem>();
+  const load = async (): Promise<SearchBatchResult> => {
+    const { results = [] } = await db.prepare(sql).bind(...bindings).all<SearchResultItem>();
 
-  const hasMore = results.length > params.limit;
-  const pageRows = hasMore ? results.slice(0, params.limit) : results;
+    const hasMore = results.length > params.limit;
+    const pageRows = hasMore ? results.slice(0, params.limit) : results;
 
-  let nextCursor: string | null = null;
-  if (hasMore && pageRows.length > 0) {
-    const last = pageRows.at(-1)!;
-    nextCursor = encodeCursor({
-      v: 1,
-      sort: params.sort,
-      createdAt: last.created_at,
-      id: last.id,
-      filterKey,
-    });
-  }
+    let nextCursor: string | null = null;
+    if (hasMore && pageRows.length > 0) {
+      const last = pageRows.at(-1)!;
+      nextCursor = encodeCursor({
+        v: 1,
+        sort: params.sort,
+        createdAt: last.created_at,
+        id: last.id,
+        filterKey,
+      });
+    }
 
-  // Use cached directory data to sanitize author handles from tags
-  const directory = await getDirectoryData(db, 'public');
-  const sanitizedItems = pageRows.map((img) => ({
-    ...img,
-    tags: img.tags_list
-      ? img.tags_list.split(',').filter((tag) => !directory.canonicalAuthorSet.has(tag.trim().toLowerCase()))
-      : [],
-  }));
+    const directory = cacheOptions.directory ?? await getDirectoryData(db, 'public');
+    const sanitizedItems = pageRows.map((img) => ({
+      ...img,
+      tags: img.tags_list
+        ? img.tags_list.split(',').filter((tag) => !directory.canonicalAuthorSet.has(tag.trim().toLowerCase()))
+        : [],
+    }));
 
-  return {
-    items: sanitizedItems as any[],
-    hasMore,
-    nextCursor,
+    return {
+      items: sanitizedItems as any[],
+      hasMore,
+      nextCursor,
+    };
   };
+
+  if (!cacheOptions.kv && cacheOptions.version === undefined) return load();
+
+  return queryCache.getOrLoad({
+    kv: cacheOptions.kv,
+    key: `search:${filterKey}&version=${cacheOptions.version ?? 'ttl'}&cursor=${params.cursorStr ?? ''}&offset=${params.offset}&limit=${params.limit}`,
+    memoryTtlMs: 30_000,
+    kvTtlSeconds: params.q ? 1_800 : 300,
+    load,
+  });
 }

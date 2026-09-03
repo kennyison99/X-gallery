@@ -29,6 +29,10 @@
 		{
 			"binding": "SESSION",
 			"id": "b36c33a70d0648618f617d7eceacae17"
+		},
+		{
+			"binding": "CACHE",
+			"id": "0e3b86c466d04d679d7c6f0a6cf505d4"
 		}
 	],
 	"r2_buckets": [

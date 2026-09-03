@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseSearchParams, buildSearchQuery } from '../src/lib/search-query.ts';
+import { parseSearchParams, buildSearchQuery, fetchSearchBatch } from '../src/lib/search-query.ts';
 
 test('parseSearchParams clamps limit and parses search filters', () => {
   const params = new URLSearchParams({ q: '原神', limit: '200', sort: 'newest' });
@@ -41,5 +41,40 @@ test('buildSearchQuery uses instr and executes cleanly on queries exceeding 50 b
   const stmt = db.prepare(sql);
   const rows = stmt.all(...bindings);
   assert.equal(Array.isArray(rows), true);
+});
+
+test('repeated keyword searches reuse cached results instead of repeating the full D1 scan', async () => {
+  let d1Reads = 0;
+  const db = {
+    prepare(sql: string) {
+      const all = async () => {
+        d1Reads++;
+        return { results: [] };
+      };
+      return {
+        bind() {
+          return { all };
+        },
+        async first() {
+          d1Reads++;
+          return sql.includes('directory_version') ? { directory_version: 23 } : null;
+        },
+        all,
+      };
+    },
+  };
+  const params = parseSearchParams(new URLSearchParams({ q: 'cache_test_keyword_20260903' }));
+  const directory = {
+    version: 23,
+    authors: [],
+    tags: [],
+    canonicalAuthorSet: new Set<string>(),
+  };
+
+  const first = await fetchSearchBatch(db, params, { version: 23, directory });
+  const second = await fetchSearchBatch(db, params, { version: 23, directory });
+
+  assert.deepEqual(second, first);
+  assert.equal(d1Reads, 1);
 });
 

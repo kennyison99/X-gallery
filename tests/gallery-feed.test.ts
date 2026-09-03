@@ -7,6 +7,7 @@ const parseGalleryBatchParams = feed.parseGalleryBatchParams ?? (() => undefined
 const takeGalleryBatch = feed.takeGalleryBatch ?? (() => undefined);
 const buildGalleryQuery = feed.buildGalleryQuery ?? (() => ({ sql: '', bindings: [] }));
 const buildGalleryBatchSearchParams = feed.buildGalleryBatchSearchParams ?? (() => undefined);
+const fetchGalleryBatch = feed.fetchGalleryBatch ?? (() => undefined);
 
 test('parses a valid oldest batch and caps its limit at 48', () => {
   const params = new URLSearchParams('sort=oldest&media=video&offset=48&limit=100&tag=art&author=alice');
@@ -102,10 +103,48 @@ test('uses different cursor filter keys for different media filters', () => {
   assert.notEqual(allQuery.filterKey, videoQuery.filterKey);
 });
 
+test('repeated gallery batches reuse cached results instead of reading D1 again', async () => {
+  let d1Reads = 0;
+  const db = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async all() {
+              d1Reads++;
+              return {
+                results: [{
+                  id: 81,
+                  title: 'cached',
+                  r2_keys: 'cached.jpg',
+                  author: 'cache_test_gallery',
+                  author_url: '',
+                  post_url: '',
+                  description: '',
+                  likes: 0,
+                  created_at: '2026-09-03 10:00:00',
+                }],
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  const options = parseGalleryBatchParams(new URLSearchParams('author=cache_test_gallery'));
+  const cacheOptions = { version: 17 };
+
+  const first = await fetchGalleryBatch(db, options, cacheOptions);
+  const second = await fetchGalleryBatch(db, options, cacheOptions);
+
+  assert.deepEqual(second, first);
+  assert.equal(d1Reads, 1);
+});
+
 test('the homepage renders its initial cards through the bounded feed query', () => {
   const source = readFileSync(new URL('../src/pages/index.astro', import.meta.url), 'utf8');
 
-  assert.match(source, /fetchGalleryBatch\(env\.DB, batchOptions\)/);
+  assert.match(source, /fetchGalleryBatch\(env\.DB, batchOptions,/);
   assert.match(source, /const initialParams = new URLSearchParams\(\)/);
   assert.doesNotMatch(source, /let images = \[\]/);
 });

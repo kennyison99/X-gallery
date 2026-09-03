@@ -16,10 +16,11 @@ let batchResult;
 let directory;
 try {
   options = parseGalleryBatchParams(Astro.url.searchParams);
-  [batchResult, directory] = await Promise.all([
-    fetchGalleryBatch(env.DB, options),
-    getDirectoryData(env.DB, 'public'),
-  ]);
+  directory = await getDirectoryData(env.DB, 'public');
+  batchResult = await fetchGalleryBatch(env.DB, options, {
+    kv: env.CACHE,
+    version: directory.version,
+  });
 } catch (error) {
   const status = error instanceof InvalidCursorError ? 400 : (error instanceof Error && error.message.startsWith('Invalid') ? 400 : 500);
   return new Response(error instanceof Error ? error.message : 'Invalid request', { status });

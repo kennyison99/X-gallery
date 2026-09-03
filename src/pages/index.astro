@@ -24,7 +24,10 @@ const initialParams = new URLSearchParams();
 if (activeTag) initialParams.set('tag', activeTag);
 if (activeAuthor) initialParams.set('author', activeAuthor);
 const batchOptions = parseGalleryBatchParams(initialParams);
-const { items: images, hasMore, nextCursor } = await fetchGalleryBatch(env.DB, batchOptions);
+const { items: images, hasMore, nextCursor } = await fetchGalleryBatch(env.DB, batchOptions, {
+  kv: env.CACHE,
+  version: directory.version,
+});
 
 const formattedImages = images.map((img: any) => ({
   ...img,

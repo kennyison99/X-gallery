@@ -1,4 +1,5 @@
 import { buildFilterKey, decodeCursor, encodeCursor, generateCursorWhereClause } from './cursor.ts';
+import { queryCache, type QueryCacheKv } from './query-cache.ts';
 
 export const INITIAL_GALLERY_LIMIT = 48;
 export const GALLERY_BATCH_LIMIT = 24;
@@ -30,6 +31,11 @@ export interface GalleryRow {
   tags_list?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface GalleryCacheOptions {
+  kv?: QueryCacheKv;
+  version?: number;
 }
 
 interface GalleryDatabase {
@@ -193,27 +199,40 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
 export async function fetchGalleryBatch(
   db: GalleryDatabase,
   options: GalleryBatchParams,
+  cacheOptions: GalleryCacheOptions = {},
 ): Promise<{ items: GalleryRow[]; hasMore: boolean; nextCursor: string | null }> {
   const { sql, bindings, filterKey } = buildGalleryQuery(options);
-  const { results = [] } = await db
-    .prepare(sql)
-    .bind(...bindings)
-    .all<GalleryRow>();
+  const load = async () => {
+    const { results = [] } = await db
+      .prepare(sql)
+      .bind(...bindings)
+      .all<GalleryRow>();
 
-  const { items, hasMore } = takeGalleryBatch(results, options.limit);
-  let nextCursor: string | null = null;
-  if (hasMore && items.length > 0) {
-    const last = items.at(-1)!;
-    if (last.created_at) {
-      nextCursor = encodeCursor({
-        v: 1,
-        sort: options.sort,
-        createdAt: last.created_at,
-        id: last.id,
-        filterKey,
-      });
+    const { items, hasMore } = takeGalleryBatch(results, options.limit);
+    let nextCursor: string | null = null;
+    if (hasMore && items.length > 0) {
+      const last = items.at(-1)!;
+      if (last.created_at) {
+        nextCursor = encodeCursor({
+          v: 1,
+          sort: options.sort,
+          createdAt: last.created_at,
+          id: last.id,
+          filterKey,
+        });
+      }
     }
-  }
 
-  return { items, hasMore, nextCursor };
+    return { items, hasMore, nextCursor };
+  };
+
+  if (!cacheOptions.kv && cacheOptions.version === undefined) return load();
+
+  return queryCache.getOrLoad({
+    kv: cacheOptions.kv,
+    key: `gallery:${filterKey}&version=${cacheOptions.version ?? 'ttl'}&cursor=${options.cursorStr ?? ''}&offset=${options.offset}&limit=${options.limit}`,
+    memoryTtlMs: 30_000,
+    kvTtlSeconds: 300,
+    load,
+  });
 }

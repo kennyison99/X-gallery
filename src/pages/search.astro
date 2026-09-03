@@ -76,7 +76,11 @@ if (q || filterTag || filterWork || filterAuthor) {
   else if (filterAuthor) searchHeading = `👤 博主篩選：@${filterAuthor}`;
 
   try {
-    const batch = await fetchSearchBatch(env.DB, searchParams);
+    const batch = await fetchSearchBatch(env.DB, searchParams, {
+      kv: env.CACHE,
+      version: directory.version,
+      directory,
+    });
     formattedImages = batch.items;
     hasMore = batch.hasMore;
     nextCursor = batch.nextCursor;

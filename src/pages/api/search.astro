@@ -2,6 +2,7 @@
 import { env } from 'cloudflare:workers';
 import ImageCard from '../../components/ImageCard.astro';
 import { parseSearchParams, fetchSearchBatch } from '../../lib/search-query';
+import { getDirectoryData } from '../../lib/directory-data';
 
 import { InvalidCursorError } from '../../lib/cursor';
 
@@ -12,7 +13,12 @@ if (!env?.DB) {
 let batchResult;
 try {
   const params = parseSearchParams(Astro.url.searchParams);
-  batchResult = await fetchSearchBatch(env.DB, params);
+  const directory = await getDirectoryData(env.DB, 'public');
+  batchResult = await fetchSearchBatch(env.DB, params, {
+    kv: env.CACHE,
+    version: directory.version,
+    directory,
+  });
 } catch (error) {
   const status = error instanceof InvalidCursorError ? 400 : (error instanceof Error && error.message.startsWith('Invalid') ? 400 : 500);
   return new Response(error instanceof Error ? error.message : 'Invalid request', { status });
