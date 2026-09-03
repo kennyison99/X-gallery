@@ -30,6 +30,7 @@ const CONCURRENCY = Math.max(1, Math.min(8, parseInt(getArgValue('--concurrency=
 const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !process.env.SITE_URL);
 const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
 const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
+const R2_PUBLIC_URL = (getArgValue('--r2-url=', process.env.R2_PUBLIC_URL || 'https://pub-876dce7204cc44d6910a2b283a13aebe.r2.dev')).replace(/\/$/, '');
 
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
@@ -345,11 +346,14 @@ export async function fetchPublishedBatchHttp({ siteUrl = SITE_URL, offset = 0, 
   return { items, hasMore };
 }
 
-export async function fetchR2ImageBufferHttp({ siteUrl = SITE_URL, r2Key, retries = 2 }) {
-  const url = `${siteUrl}/api/r2/${encodeURIComponent(r2Key)}`;
+export async function fetchR2ImageBufferHttp({ siteUrl = SITE_URL || R2_PUBLIC_URL, r2Key, retries = 2 }) {
+  const cleanBase = siteUrl.replace(/\/$/, '');
+  const url = cleanBase.includes('r2.dev')
+    ? `${cleanBase}/${encodeURIComponent(r2Key)}`
+    : `${cleanBase}/api/r2/${encodeURIComponent(r2Key)}`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} for image "${r2Key}"`);
       }
@@ -408,7 +412,8 @@ export async function main() {
   const activeEndpoint = await resolveEndpoint(ENDPOINT);
   console.log(`VLM Endpoint : ${activeEndpoint}`);
   console.log(`Model        : ${MODEL_NAME}`);
-  console.log(`Data Source  : ${USE_WRANGLER ? `☁️ Cloudflare Wrangler (D1: ${D1_DB_NAME}, R2: ${R2_BUCKET_NAME})` : `🌐 HTTP API (${SITE_URL})`}`);
+  console.log(`Data Source  : ☁️ Cloudflare Wrangler (D1: ${D1_DB_NAME})`);
+  console.log(`Image Source : ⚡ Fast HTTP (${R2_PUBLIC_URL || SITE_URL})`);
   console.log(`Concurrency  : ${CONCURRENCY}`);
   console.log(`Mode         : ${APPLY ? '⚡ APPLY (Will move non-portraits to pending review)' : '🔍 DRY-RUN (Audit only, safe mode)'}`);
   console.log('----------------------------------------------------------------------');
@@ -473,10 +478,14 @@ export async function main() {
       const primaryKey = photoKeys[0];
       try {
         let imageBuffer;
-        if (USE_WRANGLER) {
-          imageBuffer = fetchR2ImageBufferWrangler({ r2Key: primaryKey });
+        if (SITE_URL || R2_PUBLIC_URL) {
+          try {
+            imageBuffer = await fetchR2ImageBufferHttp({ siteUrl: SITE_URL || R2_PUBLIC_URL, r2Key: primaryKey });
+          } catch {
+            imageBuffer = fetchR2ImageBufferWrangler({ r2Key: primaryKey });
+          }
         } else {
-          imageBuffer = await fetchR2ImageBufferHttp({ siteUrl: SITE_URL, r2Key: primaryKey });
+          imageBuffer = fetchR2ImageBufferWrangler({ r2Key: primaryKey });
         }
 
         const classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint });
