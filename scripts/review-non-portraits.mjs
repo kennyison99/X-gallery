@@ -26,7 +26,7 @@ const CRAWL_API_KEY = getArgValue('--api-key=', process.env.CRAWL_API_KEY || '')
 const LIMIT_ARG = getArgValue('--limit=', '50');
 const MAX_POSTS = LIMIT_ARG.toLowerCase() === 'all' ? 0 : Math.max(1, parseInt(LIMIT_ARG, 10) || 50);
 const OFFSET_START = Math.max(0, parseInt(getArgValue('--offset=', '0'), 10) || 0);
-const CONCURRENCY = Math.max(1, Math.min(8, parseInt(getArgValue('--concurrency=', '2'), 10) || 2));
+const CONCURRENCY = Math.max(1, Math.min(8, parseInt(getArgValue('--concurrency=', '4'), 10) || 4));
 const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !process.env.SITE_URL);
 const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
 const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
@@ -114,6 +114,25 @@ export function parseVlmResponse(rawText) {
 // ---------------------------------------------------------------------------
 // Ollama Auto-Start & Readiness
 // ---------------------------------------------------------------------------
+
+export async function resolveEndpoint(preferredEndpoint = ENDPOINT) {
+  const candidates = [
+    preferredEndpoint,
+    process.env.OLLAMA_HOST,
+    'http://localhost:11434',
+    'http://localhost:11500',
+    'http://127.0.0.1:11434',
+    'http://127.0.0.1:11500',
+  ].filter(Boolean).map((e) => (e.startsWith('http') ? e : `http://${e}`)).map((e) => e.replace(/\/$/, ''));
+
+  for (const url of [...new Set(candidates)]) {
+    try {
+      const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) return url;
+    } catch {}
+  }
+  return preferredEndpoint;
+}
 
 export async function ensureOllamaRunning(endpoint = ENDPOINT) {
   if (!endpoint.includes('localhost') && !endpoint.includes('127.0.0.1')) {
@@ -385,15 +404,17 @@ async function mapConcurrent(items, limit, fn) {
 export async function main() {
   console.log('======================================================================');
   console.log('🖼️  X-gallery VLM Batch Photo & Portrait Classifier');
-  console.log('======================================================================');
-  console.log(`VLM Endpoint : ${ENDPOINT}`);
+  // Auto-discover active Ollama port / endpoint
+  const activeEndpoint = await resolveEndpoint(ENDPOINT);
+  console.log(`VLM Endpoint : ${activeEndpoint}`);
   console.log(`Model        : ${MODEL_NAME}`);
   console.log(`Data Source  : ${USE_WRANGLER ? `☁️ Cloudflare Wrangler (D1: ${D1_DB_NAME}, R2: ${R2_BUCKET_NAME})` : `🌐 HTTP API (${SITE_URL})`}`);
+  console.log(`Concurrency  : ${CONCURRENCY}`);
   console.log(`Mode         : ${APPLY ? '⚡ APPLY (Will move non-portraits to pending review)' : '🔍 DRY-RUN (Audit only, safe mode)'}`);
   console.log('----------------------------------------------------------------------');
 
   // Auto-start Ollama if local and not running
-  await ensureOllamaRunning(ENDPOINT);
+  await ensureOllamaRunning(activeEndpoint);
 
   // Single File Direct Mode
   if (LOCAL_FILE) {
@@ -458,7 +479,7 @@ export async function main() {
           imageBuffer = await fetchR2ImageBufferHttp({ siteUrl: SITE_URL, r2Key: primaryKey });
         }
 
-        const classification = await classifyImageWithVlm({ buffer: imageBuffer });
+        const classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint });
 
         totalProcessed++;
         const pct = (classification.confidence * 100).toFixed(0);
