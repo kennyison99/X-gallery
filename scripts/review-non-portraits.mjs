@@ -107,14 +107,16 @@ export function parseVlmResponse(rawText) {
 
     return { is_real_person: isReal, confidence, reason };
   } catch (err) {
-    // 2. Try regex extraction of formulated output (e.g. * is_real_person: true)
-    const isRealMatch = rawText.match(/\*?\s*`?is_real_person`?:\s*(true|false)/i);
+    // 2. Try regex extraction of formulated output (inspect last 1500 chars to target the final conclusion)
+    const tail = rawText.slice(-1500);
+    const isRealMatch = tail.match(/is_real_person[^\w]*(?:(?:must|should|is)\s*(?:be\s*)?)?(true|false)/i);
     if (isRealMatch) {
       const isReal = isRealMatch[1].toLowerCase() === 'true';
-      const confidenceMatch = rawText.match(/\*?\s*`?confidence`?:\s*([0-9.]+)/i);
-      const reasonMatch = rawText.match(/\*?\s*`?reason`?:\s*([^\n]+)/i);
-      const conf = confidenceMatch ? parseFloat(confidenceMatch[1]) : 0.95;
-      const cleanReason = reasonMatch ? reasonMatch[1].replace(/^["']|["']$/g, '').trim() : '';
+      const confidenceMatch = tail.match(/confidence[^\w]*([0-9.]+)/i);
+      const reasonMatch = tail.match(/reason[^\w]*([^\n]+)/i);
+      const cleanReason = (reasonMatch && reasonMatch[1].trim())
+        ? reasonMatch[1].replace(/^[:\s"'`]+|["'`]+$/g, '').trim()
+        : (isReal ? 'Real person photograph with authentic physical body and clothing.' : '2D anime drawing, illustration, or CGI render.');
       return { is_real_person: isReal, confidence: conf, reason: cleanReason };
     }
 
