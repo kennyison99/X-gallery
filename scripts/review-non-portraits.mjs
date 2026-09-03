@@ -368,9 +368,17 @@ export async function classifyImageWithVlm({
 // Wrangler Direct Integration (D1 + R2)
 // ---------------------------------------------------------------------------
 
-export function fetchPublishedBatchWrangler({ offset = 0, limit = 48, dbName = D1_DB_NAME, includeReviewed = INCLUDE_REVIEWED }) {
+export function fetchPublishedBatchWrangler({
+  offset = 0,
+  limit = 48,
+  dbName = D1_DB_NAME,
+  includeReviewed = INCLUDE_REVIEWED,
+  cursorId = null,
+}) {
   const reviewedClause = includeReviewed ? '' : 'AND reviewed = 0';
-  const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ${reviewedClause} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset};`;
+  const cursorClause = cursorId ? `AND id < ${cursorId}` : '';
+  const offsetClause = cursorId ? '' : (offset > 0 ? `OFFSET ${offset}` : '');
+  const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ${reviewedClause} ${cursorClause} ORDER BY id DESC LIMIT ${limit} ${offsetClause};`;
   const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
   const stdout = execSync(cmd, {
     encoding: 'utf-8',
@@ -550,11 +558,12 @@ export async function main() {
 
   // Gallery Batch Mode
   let currentOffset = OFFSET_START;
+  let cursorId = null;
   let totalProcessed = 0;
   const flaggedPosts = [];
   const passedPosts = [];
 
-  console.log(`Fetching published posts from gallery (batch offset: ${currentOffset})...`);
+  console.log(`Fetching published posts from gallery (batch mode: ${USE_WRANGLER ? '⚡ D1 Index Cursor Seek' : 'HTTP Offset'})...`);
 
   while (true) {
     const batchLimit = MAX_POSTS > 0 ? Math.min(48, MAX_POSTS - totalProcessed) : 48;
@@ -563,17 +572,21 @@ export async function main() {
     let batchResult;
     try {
       if (USE_WRANGLER) {
-        batchResult = fetchPublishedBatchWrangler({ offset: currentOffset, limit: batchLimit });
+        batchResult = fetchPublishedBatchWrangler({ limit: batchLimit, cursorId, offset: currentOffset });
       } else {
         batchResult = await fetchPublishedBatchHttp({ siteUrl: SITE_URL, offset: currentOffset, limit: batchLimit });
       }
     } catch (err) {
-      console.error(`Failed to fetch batch at offset ${currentOffset}: ${err.message}`);
+      console.error(`Failed to fetch batch at cursor ${cursorId || currentOffset}: ${err.message}`);
       break;
     }
 
     const { items, hasMore } = batchResult;
     if (!items || items.length === 0) break;
+
+    // Track minimum ID in this batch to advance the cursor for next query
+    const minId = Math.min(...items.map((it) => it.id));
+    cursorId = minId;
 
     console.log(`\nProcessing page of ${items.length} post(s) (concurrency: ${effectiveConcurrency})...`);
 
