@@ -22,7 +22,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     const batchResults = await env.DB.batch([
       createConditionalBumpDirectoryVersionStmt(env.DB, 'SELECT 1 FROM images WHERE id = ? AND published = 0', [id]),
-      env.DB.prepare('UPDATE images SET published = 1 WHERE id = ? AND published = 0').bind(id),
+      env.DB.prepare("UPDATE images SET published = 1, reviewed = 1, updated_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id = ? AND published = 0").bind(id),
     ]);
 
     const approveResult = batchResults[1];

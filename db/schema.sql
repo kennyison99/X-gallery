@@ -19,6 +19,7 @@ CREATE TABLE images (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT,               -- 最後編輯時間
   published INTEGER DEFAULT 1,
+  reviewed INTEGER NOT NULL DEFAULT 0,
   photo_bytes INTEGER DEFAULT 0,
   video_bytes INTEGER DEFAULT 0,
   photo_count INTEGER NOT NULL DEFAULT 0,

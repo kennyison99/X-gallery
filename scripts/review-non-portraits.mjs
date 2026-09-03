@@ -18,6 +18,7 @@ function getArgValue(prefix, fallback) {
 }
 
 const APPLY = process.argv.includes('--apply');
+const INCLUDE_REVIEWED = process.argv.includes('--include-reviewed');
 const LOCAL_FILE = getArgValue('--file=', '');
 const MODEL_NAME = getArgValue('--model=', process.env.VLM_MODEL || 'qwen3.5:4b');
 const ENDPOINT = getArgValue('--endpoint=', process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/$/, '');
@@ -287,8 +288,9 @@ export async function classifyImageWithVlm({
 // Wrangler Direct Integration (D1 + R2)
 // ---------------------------------------------------------------------------
 
-export function fetchPublishedBatchWrangler({ offset = 0, limit = 48, dbName = D1_DB_NAME }) {
-  const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ORDER BY id DESC LIMIT ${limit} OFFSET ${offset};`;
+export function fetchPublishedBatchWrangler({ offset = 0, limit = 48, dbName = D1_DB_NAME, includeReviewed = INCLUDE_REVIEWED }) {
+  const reviewedClause = includeReviewed ? '' : 'AND reviewed = 0';
+  const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ${reviewedClause} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset};`;
   const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
   const stdout = execSync(cmd, {
     encoding: 'utf-8',
@@ -320,15 +322,36 @@ export function fetchR2ImageBufferWrangler({ r2Key, bucketName = R2_BUCKET_NAME 
 
 export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME }) {
   if (pendingIds.length === 0) return { updated_count: 0 };
-  const idsStr = pendingIds.join(',');
-  const sql = `UPDATE images SET published = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
-  const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
-  execSync(cmd, {
-    encoding: 'utf-8',
-    shell: CLI_SHELL,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const chunkSize = 100;
+  for (let i = 0; i < pendingIds.length; i += chunkSize) {
+    const chunk = pendingIds.slice(i, i + chunkSize);
+    const idsStr = chunk.join(',');
+    const sql = `UPDATE images SET published = 0, reviewed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
+    const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
+    execSync(cmd, {
+      encoding: 'utf-8',
+      shell: CLI_SHELL,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
   return { updated_count: pendingIds.length };
+}
+
+export function applyApprovedPostsWrangler({ approvedIds = [], dbName = D1_DB_NAME }) {
+  if (approvedIds.length === 0) return { updated_count: 0 };
+  const chunkSize = 100;
+  for (let i = 0; i < approvedIds.length; i += chunkSize) {
+    const chunk = approvedIds.slice(i, i + chunkSize);
+    const idsStr = chunk.join(',');
+    const sql = `UPDATE images SET reviewed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr});`;
+    const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
+    execSync(cmd, {
+      encoding: 'utf-8',
+      shell: CLI_SHELL,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+  return { updated_count: approvedIds.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -523,27 +546,38 @@ export async function main() {
     console.log(flaggedPosts.map((f) => f.post.id).join(', '));
   }
 
-  if (APPLY && flaggedPosts.length > 0) {
-    console.log('\nApplying changes to D1 database (moving flagged posts to pending review)...');
-    const idsToPending = flaggedPosts.map((f) => f.post.id);
-    let updateCount = idsToPending.length;
+  if (APPLY) {
+    if (flaggedPosts.length > 0) {
+      console.log('\nApplying changes to D1 database (moving flagged posts to pending review)...');
+      const idsToPending = flaggedPosts.map((f) => f.post.id);
+      let updateCount = idsToPending.length;
 
-    if (USE_WRANGLER) {
-      const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
-      updateCount = updateResult.updated_count;
-    } else {
-      if (!CRAWL_API_KEY) {
-        console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
-        process.exit(1);
+      if (USE_WRANGLER) {
+        const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
+        updateCount = updateResult.updated_count;
+      } else {
+        if (!CRAWL_API_KEY) {
+          console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
+          process.exit(1);
+        }
+        const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
+        updateCount = updateResult.updated_count ?? idsToPending.length;
       }
-      const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
-      updateCount = updateResult.updated_count ?? idsToPending.length;
+
+      console.log(`✅ Successfully updated ${updateCount} post(s) to Review (published = 0, reviewed = 1).`);
     }
 
-    console.log(`✅ Successfully updated ${updateCount} post(s) to published = 0 (Review).`);
-  } else if (!APPLY && flaggedPosts.length > 0) {
+    if (passedPosts.length > 0) {
+      console.log(`\nMarking ${passedPosts.length} real portrait post(s) as reviewed in D1 (reviewed = 1)...`);
+      const passedIds = passedPosts.map((p) => p.id);
+      if (USE_WRANGLER) {
+        applyApprovedPostsWrangler({ approvedIds: passedIds });
+      }
+      console.log(`✅ Successfully marked ${passedIds.length} post(s) as reviewed (will never be re-scanned).`);
+    }
+  } else if (!APPLY && (flaggedPosts.length > 0 || passedPosts.length > 0)) {
     console.log('\n💡 Notice: Running in DRY-RUN mode. No database records were modified.');
-    console.log('To move the flagged posts to pending review, re-run with --apply:');
+    console.log('To move flagged posts to Review and mark evaluated posts as reviewed, re-run with --apply:');
     console.log(`node scripts/review-non-portraits.mjs --apply --limit=${LIMIT_ARG}`);
   }
 }
