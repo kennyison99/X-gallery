@@ -639,8 +639,11 @@ export async function main() {
       const keys = (post.r2_keys || '').split(',').map((k) => k.trim()).filter(Boolean);
       const photoKeys = keys.filter((k) => !isVideoKey(k));
 
-      // Skip video-only posts
+      // Auto-keep video-only posts without re-evaluating
       if (photoKeys.length === 0) {
+        passedPosts.push(post);
+        uncommittedPassed.push(post);
+        totalProcessed++;
         return;
       }
 
@@ -657,7 +660,18 @@ export async function main() {
           imageBuffer = fetchR2ImageBufferWrangler({ r2Key: primaryKey });
         }
 
-        const classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint, model: activeModel });
+        let classification;
+        try {
+          classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint, model: activeModel });
+        } catch (vlmErr) {
+          if (vlmErr.message?.includes('Could not connect to VLM') || vlmErr.cause?.code === 'ECONNREFUSED' || vlmErr.message?.includes('fetch failed')) {
+            console.warn(`  ⏳ VLM server disconnected, waiting 5s before retry...`);
+            await new Promise((r) => setTimeout(r, 5000));
+            classification = await classifyImageWithVlm({ buffer: imageBuffer, endpoint: activeEndpoint, model: activeModel });
+          } else {
+            throw vlmErr;
+          }
+        }
 
         totalProcessed++;
         const pct = (classification.confidence * 100).toFixed(0);
