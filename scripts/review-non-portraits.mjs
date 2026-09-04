@@ -75,11 +75,12 @@ CRITICAL RULES:
    - 3D CGI or video game screenshots (Genshin, Honkai, Zenless Zone Zero, MMD).
    - Inanimate non-human scenes: food, landscapes, product shots, pure text memes without real people.
 
-You MUST reply with a valid JSON object in this exact schema after </think>:
+CRITICAL INSTRUCTION: Keep the "reason" field ultra-concise and under 15 words.
+You MUST reply with a valid JSON object in this exact schema:
 {
   "is_real_person": true,
   "confidence": 0.95,
-  "reason": "說明理由 (優先描述身體、手部、皮膚質感、服裝布料或背景環境是否為真實攝影，完全忽略臉部遮擋或貼圖)"
+  "reason": "說明理由 (精簡於 15 字以內，描述身體/服裝/環境是否為真實攝影)"
 }`;
 
 // ---------------------------------------------------------------------------
@@ -341,8 +342,11 @@ export async function classifyImageWithVlm({
             ],
           },
         ],
+        chat_template_kwargs: {
+          enable_thinking: false,
+        },
         temperature: 0.0,
-        max_tokens: 750,
+        max_tokens: 250,
       }),
     });
 
