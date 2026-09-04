@@ -49,6 +49,10 @@ export interface GetAdminOverviewStatsOptions {
   cache?: any;
   cacheBaseUrl?: string;
   mediaCountsReady?: boolean;
+  kv?: {
+    get<T>(key: string, type: 'json'): Promise<T | null>;
+    put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
+  };
 }
 
 // Bounded single-entry in-memory cache per scope to avoid memory leaks
@@ -58,6 +62,9 @@ const memoryCache: Record<'public' | 'admin', { version: number; data: Directory
 };
 
 let adminOverviewMemoryCache: { version: number; data: AdminOverviewStats } | null = null;
+
+const ADMIN_OVERVIEW_KV_KEY = 'admin-overview:v1';
+const ADMIN_OVERVIEW_KV_TTL_SECONDS = 3_600;
 
 export function clearDirectoryMemoryCache(): void {
   memoryCache.public = null;
@@ -220,6 +227,21 @@ export async function getAdminOverviewStats(
   // 2. Check in-memory single-entry version cache
   if (adminOverviewMemoryCache && adminOverviewMemoryCache.version === resolvedVersion) {
     return adminOverviewMemoryCache.data;
+  }
+
+  // Use a fixed KV key so frequent image writes do not force another full-table
+  // aggregation. Admin overview numbers may be stale for at most one hour.
+  if (options.kv) {
+    try {
+      const cached = await options.kv.get<AdminOverviewStats>(ADMIN_OVERVIEW_KV_KEY, 'json');
+      if (cached) {
+        const data = { ...cached, version: resolvedVersion };
+        adminOverviewMemoryCache = { version: resolvedVersion, data };
+        return data;
+      }
+    } catch (error) {
+      console.error('Admin overview KV read failed:', error);
+    }
   }
 
   // 3. Fail-open Cache API check
@@ -385,6 +407,16 @@ export async function getAdminOverviewStats(
 
   // Update in-memory cache
   adminOverviewMemoryCache = { version: resolvedVersion, data };
+
+  if (options.kv) {
+    try {
+      await options.kv.put(ADMIN_OVERVIEW_KV_KEY, JSON.stringify(data), {
+        expirationTtl: ADMIN_OVERVIEW_KV_TTL_SECONDS,
+      });
+    } catch (error) {
+      console.error('Admin overview KV write failed:', error);
+    }
+  }
 
   // Fail-open Cache API write
   if (cache) {

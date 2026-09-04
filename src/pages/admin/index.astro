@@ -37,7 +37,7 @@ let overviewStats = {
 };
 
 try {
-  overviewStats = await getAdminOverviewStats(env.DB, directoryVersion, { mediaCountsReady });
+  overviewStats = await getAdminOverviewStats(env.DB, directoryVersion, { mediaCountsReady, kv: env.CACHE });
 } catch (err) {
   console.error('Error fetching admin overview stats:', err);
 }

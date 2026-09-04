@@ -96,6 +96,24 @@ describe('Admin Overview Stats & Directory Cache Consolidation Suite', () => {
     return adapter;
   }
 
+  function createMemoryKv() {
+    const values = new Map<string, string>();
+    const writes: Array<{ key: string; expirationTtl: number }> = [];
+
+    return {
+      writes,
+      async get<T>(key: string, type: 'json'): Promise<T | null> {
+        assert.equal(type, 'json');
+        const value = values.get(key);
+        return value === undefined ? null : JSON.parse(value) as T;
+      },
+      async put(key: string, value: string, options: { expirationTtl: number }): Promise<void> {
+        values.set(key, value);
+        writes.push({ key, expirationTtl: options.expirationTtl });
+      },
+    };
+  }
+
   it('getAdminOverviewStats consolidates author aggregation and JS reduction into exact global totals', async () => {
     const mockDb = createD1Adapter(db);
 
@@ -147,6 +165,31 @@ describe('Admin Overview Stats & Directory Cache Consolidation Suite', () => {
     const stats2 = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true });
     assert.equal(mockDb.getQueryCount(), 0);
     assert.deepEqual(stats1, stats2);
+  });
+
+  it('fixed KV cache prevents a full images scan when directory_version changes', async () => {
+    const mockDb = createD1Adapter(db);
+    const kv = createMemoryKv();
+
+    const first = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true, kv });
+    assert.equal(first.totalPosts, 6);
+    assert.equal(kv.writes.length, 1);
+    assert.equal(kv.writes[0].expirationTtl, 3_600);
+
+    db.prepare('UPDATE storage_stats SET directory_version = 2 WHERE id = 1').run();
+    db.prepare(`
+      INSERT INTO images (
+        id, title, r2_keys, author, author_display_name, description, created_at, published, photo_bytes, video_bytes, photo_count, video_count, media_count_version
+      ) VALUES (7, 'Bob 3', 'b3.jpg', 'bob', 'Bob Builder', 'desc 7', '2026-08-07 10:00:00', 1, 2000, 0, 1, 0, 1)
+    `).run();
+
+    clearDirectoryMemoryCache();
+    mockDb.resetCounts();
+    const cached = await getAdminOverviewStats(mockDb, 2, { mediaCountsReady: true, kv });
+
+    assert.equal(mockDb.getQueryCount(), 0, 'KV hit must avoid every D1 query');
+    assert.equal(cached.version, 2, 'cached stats should adopt the current directory version');
+    assert.equal(cached.totalPosts, 6, 'stats may remain stale only for the bounded KV TTL');
   });
 
   it('getDirectoryData reuses passed version and adminAuthors to eliminate redundant version & author queries', async () => {

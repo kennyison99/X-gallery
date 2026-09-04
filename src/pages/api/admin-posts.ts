@@ -83,7 +83,7 @@ export const GET: APIRoute = async ({ url }) => {
   let overview: AdminOverviewStats | null = null;
 
   if (canUseOverviewCount(params)) {
-    overview = await getAdminOverviewStats(env.DB);
+    overview = await getAdminOverviewStats(env.DB, undefined, { kv: env.CACHE });
     total = getOverviewCount(params, overview);
   } else {
     const countRow = await env.DB.prepare(countSql).bind(...countBindings).first<{ total: number }>();
