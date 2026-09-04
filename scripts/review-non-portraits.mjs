@@ -27,7 +27,8 @@ const CRAWL_API_KEY = getArgValue('--api-key=', process.env.CRAWL_API_KEY || '')
 const LIMIT_ARG = getArgValue('--limit=', '50');
 const MAX_POSTS = LIMIT_ARG.toLowerCase() === 'all' ? 0 : Math.max(1, parseInt(LIMIT_ARG, 10) || 50);
 const OFFSET_START = Math.max(0, parseInt(getArgValue('--offset=', '0'), 10) || 0);
-const CONCURRENCY = Math.max(1, Math.min(8, parseInt(getArgValue('--concurrency=', '4'), 10) || 4));
+const CONCURRENCY = Math.max(1, Math.min(16, parseInt(getArgValue('--concurrency=', '6'), 10) || 6));
+const CHECKPOINT_SIZE = Math.max(10, parseInt(getArgValue('--checkpoint=', '500'), 10) || 500);
 const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !process.env.SITE_URL);
 const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
 const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
@@ -560,10 +561,54 @@ export async function main() {
   let currentOffset = OFFSET_START;
   let cursorId = null;
   let totalProcessed = 0;
+  let checkpointNum = 1;
   const flaggedPosts = [];
   const passedPosts = [];
+  let uncommittedFlagged = [];
+  let uncommittedPassed = [];
 
-  console.log(`Fetching published posts from gallery (batch mode: ${USE_WRANGLER ? '⚡ D1 Index Cursor Seek' : 'HTTP Offset'})...`);
+  const commitCheckpoint = async (isFinal = false) => {
+    if (!APPLY) return;
+    const toFlag = uncommittedFlagged;
+    const toPass = uncommittedPassed;
+    if (toFlag.length === 0 && toPass.length === 0) return;
+
+    console.log(`\n======================================================================`);
+    console.log(`💾 Checkpoint #${checkpointNum++} ${isFinal ? '(Final Batch)' : `(Every ${CHECKPOINT_SIZE} items)`} — Saving to D1...`);
+
+    if (toFlag.length > 0) {
+      const idsToPending = toFlag.map((f) => f.post.id);
+      let updateCount = idsToPending.length;
+      if (USE_WRANGLER) {
+        const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
+        updateCount = updateResult.updated_count;
+      } else {
+        if (!CRAWL_API_KEY) {
+          console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
+          process.exit(1);
+        }
+        const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
+        updateCount = updateResult.updated_count ?? idsToPending.length;
+      }
+      console.log(`  ✓ Successfully updated ${updateCount} post(s) to Review (published = 0, reviewed = 1).`);
+    }
+
+    if (toPass.length > 0) {
+      const passedIds = toPass.map((p) => p.id);
+      if (USE_WRANGLER) {
+        applyApprovedPostsWrangler({ approvedIds: passedIds });
+      }
+      console.log(`  ✓ Successfully marked ${passedIds.length} real portrait post(s) as reviewed in D1 (reviewed = 1).`);
+    }
+
+    console.log(`✅ Checkpoint saved! Cumulative evaluated so far: ${totalProcessed} posts.`);
+    console.log(`======================================================================\n`);
+
+    uncommittedFlagged = [];
+    uncommittedPassed = [];
+  };
+
+  console.log(`Fetching published posts from gallery (batch mode: ${USE_WRANGLER ? '⚡ D1 Index Cursor Seek' : 'HTTP Offset'}, checkpoint: every ${CHECKPOINT_SIZE} posts)...`);
 
   while (true) {
     const batchLimit = MAX_POSTS > 0 ? Math.min(48, MAX_POSTS - totalProcessed) : 48;
@@ -619,9 +664,12 @@ export async function main() {
 
         if (classification.is_real_person) {
           passedPosts.push(post);
+          uncommittedPassed.push(post);
           console.log(`  ✓ [ID: ${post.id}] @${post.author}: REAL PERSON (${pct}%) - "${classification.reason}"`);
         } else {
-          flaggedPosts.push({ post, classification });
+          const entry = { post, classification };
+          flaggedPosts.push(entry);
+          uncommittedFlagged.push(entry);
           console.log(`  ✗ [ID: ${post.id}] @${post.author}: NON-REAL (${pct}%) - "${classification.reason}"`);
         }
       } catch (err) {
@@ -629,10 +677,20 @@ export async function main() {
       }
     });
 
+    // Checkpoint commit to D1 if threshold reached
+    if (uncommittedFlagged.length + uncommittedPassed.length >= CHECKPOINT_SIZE) {
+      await commitCheckpoint(false);
+    }
+
     currentOffset += items.length;
     if (!hasMore || (MAX_POSTS > 0 && totalProcessed >= MAX_POSTS)) {
       break;
     }
+  }
+
+  // Commit any remaining uncommitted results
+  if (APPLY) {
+    await commitCheckpoint(true);
   }
 
   console.log('\n======================================================================');
@@ -646,37 +704,7 @@ export async function main() {
     console.log('\nFlagged Post IDs:');
     console.log(flaggedPosts.map((f) => f.post.id).join(', '));
   }
-
-  if (APPLY) {
-    if (flaggedPosts.length > 0) {
-      console.log('\nApplying changes to D1 database (moving flagged posts to pending review)...');
-      const idsToPending = flaggedPosts.map((f) => f.post.id);
-      let updateCount = idsToPending.length;
-
-      if (USE_WRANGLER) {
-        const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
-        updateCount = updateResult.updated_count;
-      } else {
-        if (!CRAWL_API_KEY) {
-          console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
-          process.exit(1);
-        }
-        const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
-        updateCount = updateResult.updated_count ?? idsToPending.length;
-      }
-
-      console.log(`✅ Successfully updated ${updateCount} post(s) to Review (published = 0, reviewed = 1).`);
-    }
-
-    if (passedPosts.length > 0) {
-      console.log(`\nMarking ${passedPosts.length} real portrait post(s) as reviewed in D1 (reviewed = 1)...`);
-      const passedIds = passedPosts.map((p) => p.id);
-      if (USE_WRANGLER) {
-        applyApprovedPostsWrangler({ approvedIds: passedIds });
-      }
-      console.log(`✅ Successfully marked ${passedIds.length} post(s) as reviewed (will never be re-scanned).`);
-    }
-  } else if (!APPLY && (flaggedPosts.length > 0 || passedPosts.length > 0)) {
+  if (!APPLY && (flaggedPosts.length > 0 || passedPosts.length > 0)) {
     console.log('\n💡 Notice: Running in DRY-RUN mode. No database records were modified.');
     console.log('To move flagged posts to Review and mark evaluated posts as reviewed, re-run with --apply:');
     console.log(`node scripts/review-non-portraits.mjs --apply --limit=${LIMIT_ARG}`);
