@@ -27,7 +27,7 @@ const CRAWL_API_KEY = getArgValue('--api-key=', process.env.CRAWL_API_KEY || '')
 const LIMIT_ARG = getArgValue('--limit=', '50');
 const MAX_POSTS = LIMIT_ARG.toLowerCase() === 'all' ? 0 : Math.max(1, parseInt(LIMIT_ARG, 10) || 50);
 const OFFSET_START = Math.max(0, parseInt(getArgValue('--offset=', '0'), 10) || 0);
-const CONCURRENCY = Math.max(1, Math.min(16, parseInt(getArgValue('--concurrency=', '6'), 10) || 6));
+const CONCURRENCY = Math.max(1, Math.min(32, parseInt(getArgValue('--concurrency=', '6'), 10) || 6));
 const CHECKPOINT_SIZE = Math.max(10, parseInt(getArgValue('--checkpoint=', '500'), 10) || 500);
 const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !process.env.SITE_URL);
 const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
