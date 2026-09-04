@@ -369,6 +369,23 @@ export async function classifyImageWithVlm({
 // Wrangler Direct Integration (D1 + R2)
 // ---------------------------------------------------------------------------
 
+export function execSyncWithRetry(cmd, options = {}, maxRetries = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return execSync(cmd, options);
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const waitMs = attempt * 3000;
+        console.warn(`  ⚠️ D1 command transient error (attempt ${attempt}/${maxRetries}), retrying in ${waitMs / 1000}s...`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      }
+    }
+  }
+  throw lastError;
+}
+
 export function fetchPublishedBatchWrangler({
   offset = 0,
   limit = 48,
@@ -381,7 +398,7 @@ export function fetchPublishedBatchWrangler({
   const offsetClause = cursorId ? '' : (offset > 0 ? `OFFSET ${offset}` : '');
   const sql = `SELECT id, r2_keys, author, title FROM images WHERE published = 1 ${reviewedClause} ${cursorClause} ORDER BY id DESC LIMIT ${limit} ${offsetClause};`;
   const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
-  const stdout = execSync(cmd, {
+  const stdout = execSyncWithRetry(cmd, {
     encoding: 'utf-8',
     shell: CLI_SHELL,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -396,7 +413,7 @@ export function fetchR2ImageBufferWrangler({ r2Key, bucketName = R2_BUCKET_NAME 
   const tmpFile = path.join(tmpDir, `vlm_r2_${Date.now()}_${Math.random().toString(36).slice(2)}_${path.basename(r2Key)}`);
   try {
     const cmd = `npx wrangler r2 object get "${bucketName}/${r2Key}" --file "${tmpFile}" --remote`;
-    execSync(cmd, {
+    execSyncWithRetry(cmd, {
       encoding: 'utf-8',
       shell: CLI_SHELL,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -417,7 +434,7 @@ export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME
     const idsStr = chunk.join(',');
     const sql = `UPDATE images SET published = 0, reviewed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
     const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
-    execSync(cmd, {
+    execSyncWithRetry(cmd, {
       encoding: 'utf-8',
       shell: CLI_SHELL,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -434,7 +451,7 @@ export function applyApprovedPostsWrangler({ approvedIds = [], dbName = D1_DB_NA
     const idsStr = chunk.join(',');
     const sql = `UPDATE images SET reviewed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr});`;
     const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
-    execSync(cmd, {
+    execSyncWithRetry(cmd, {
       encoding: 'utf-8',
       shell: CLI_SHELL,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -576,36 +593,40 @@ export async function main() {
     console.log(`\n======================================================================`);
     console.log(`💾 Checkpoint #${checkpointNum++} ${isFinal ? '(Final Batch)' : `(Every ${CHECKPOINT_SIZE} items)`} — Saving to D1...`);
 
-    if (toFlag.length > 0) {
-      const idsToPending = toFlag.map((f) => f.post.id);
-      let updateCount = idsToPending.length;
-      if (USE_WRANGLER) {
-        const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
-        updateCount = updateResult.updated_count;
-      } else {
-        if (!CRAWL_API_KEY) {
-          console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
-          process.exit(1);
+    try {
+      if (toFlag.length > 0) {
+        const idsToPending = toFlag.map((f) => f.post.id);
+        let updateCount = idsToPending.length;
+        if (USE_WRANGLER) {
+          const updateResult = applyPendingPostsWrangler({ pendingIds: idsToPending });
+          updateCount = updateResult.updated_count;
+        } else {
+          if (!CRAWL_API_KEY) {
+            console.error('Error: CRAWL_API_KEY is required to apply changes via HTTP API.');
+            process.exit(1);
+          }
+          const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
+          updateCount = updateResult.updated_count ?? idsToPending.length;
         }
-        const updateResult = await applyPendingPostsHttp({ siteUrl: SITE_URL, apiKey: CRAWL_API_KEY, pendingIds: idsToPending });
-        updateCount = updateResult.updated_count ?? idsToPending.length;
+        console.log(`  ✓ Successfully updated ${updateCount} post(s) to Review (published = 0, reviewed = 1).`);
       }
-      console.log(`  ✓ Successfully updated ${updateCount} post(s) to Review (published = 0, reviewed = 1).`);
-    }
 
-    if (toPass.length > 0) {
-      const passedIds = toPass.map((p) => p.id);
-      if (USE_WRANGLER) {
-        applyApprovedPostsWrangler({ approvedIds: passedIds });
+      if (toPass.length > 0) {
+        const passedIds = toPass.map((p) => p.id);
+        if (USE_WRANGLER) {
+          applyApprovedPostsWrangler({ approvedIds: passedIds });
+        }
+        console.log(`  ✓ Successfully marked ${passedIds.length} real portrait post(s) as reviewed in D1 (reviewed = 1).`);
       }
-      console.log(`  ✓ Successfully marked ${passedIds.length} real portrait post(s) as reviewed in D1 (reviewed = 1).`);
+
+      console.log(`✅ Checkpoint saved! Cumulative evaluated so far: ${totalProcessed} posts.`);
+      console.log(`======================================================================\n`);
+
+      uncommittedFlagged = [];
+      uncommittedPassed = [];
+    } catch (err) {
+      console.warn(`  ⚠️ Checkpoint save encountered transient error: ${err.message}. Retaining items in buffer for next cycle...`);
     }
-
-    console.log(`✅ Checkpoint saved! Cumulative evaluated so far: ${totalProcessed} posts.`);
-    console.log(`======================================================================\n`);
-
-    uncommittedFlagged = [];
-    uncommittedPassed = [];
   };
 
   console.log(`Fetching published posts from gallery (batch mode: ${USE_WRANGLER ? '⚡ D1 Index Cursor Seek' : 'HTTP Offset'}, checkpoint: every ${CHECKPOINT_SIZE} posts)...`);
