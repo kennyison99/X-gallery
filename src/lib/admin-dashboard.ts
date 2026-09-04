@@ -105,11 +105,25 @@ export function buildAdminPostsQuery(params: AdminPostsQueryParams, mediaCountsR
     orderBy = '(COALESCE(i.photo_bytes, 0) + COALESCE(i.video_bytes, 0)) ASC, i.created_at DESC, i.id DESC';
   }
 
+  let indexHint = '';
+  const hasNonIndexableFilter = Boolean(params.search || params.tag || params.media);
+  if (!hasNonIndexableFilter) {
+    if (params.author && params.sort === 'size_desc') {
+      indexHint = 'INDEXED BY idx_images_published_author_nocase_size_desc';
+    } else if (params.author && (params.sort === 'newest' || params.sort === 'oldest')) {
+      indexHint = 'INDEXED BY idx_images_published_author_nocase_created_id';
+    } else if (!params.author && params.sort === 'size_desc') {
+      indexHint = 'INDEXED BY idx_images_published_size_desc';
+    } else if (!params.author && (params.sort === 'newest' || params.sort === 'oldest')) {
+      indexHint = 'INDEXED BY idx_images_published_created';
+    }
+  }
+
   const pageBindings = [...bindings, params.limit, params.offset];
   const pageSql = `
     WITH page AS (
       SELECT i.id
-      FROM images i
+      FROM images i ${indexHint}
       WHERE ${where}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?

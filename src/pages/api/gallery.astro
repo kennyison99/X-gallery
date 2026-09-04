@@ -16,7 +16,7 @@ let batchResult;
 let directory;
 try {
   options = parseGalleryBatchParams(Astro.url.searchParams);
-  directory = await getDirectoryData(env.DB, 'public');
+  directory = await getDirectoryData(env.DB, 'public', { kv: env.CACHE });
   batchResult = await fetchGalleryBatch(env.DB, options, {
     kv: env.CACHE,
     version: directory.version,

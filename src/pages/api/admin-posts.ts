@@ -101,8 +101,9 @@ export const GET: APIRoute = async ({ url }) => {
           author: r.author,
           author_display_name: r.author_display_name,
         })),
+        kv: env.CACHE,
       })
-    : await getDirectoryData(env.DB, 'admin');
+    : await getDirectoryData(env.DB, 'admin', { kv: env.CACHE });
   const authorSet = directory.canonicalAuthorSet;
 
   // Build HTML

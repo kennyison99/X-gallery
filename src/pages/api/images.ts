@@ -37,10 +37,12 @@ export const GET: APIRoute = async ({ url }) => {
       });
     }
 
-    const { items, hasMore, nextCursor } = await fetchGalleryBatch(env.DB, batchParams);
-
-    // Fetch cached directory data to sanitize tag lists (1 D1 row read on cache hit)
-    const directory = await getDirectoryData(env.DB, 'public');
+    // Resolve the directory first so both directory and gallery reads can use KV.
+    const directory = await getDirectoryData(env.DB, 'public', { kv: env.CACHE });
+    const { items, hasMore, nextCursor } = await fetchGalleryBatch(env.DB, batchParams, {
+      kv: env.CACHE,
+      version: directory.version,
+    });
 
     const formattedImages = items.map((img: any) => ({
       ...img,

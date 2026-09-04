@@ -168,7 +168,7 @@ export const PUT: APIRoute = async ({ request }) => {
                author_url = ?,
                post_url = replace(replace(post_url, ?, ?), ?, ?),
                title = replace(title, ?, ?)
-           WHERE lower(author) = ?`
+           WHERE author = ? COLLATE NOCASE`
         ).bind(
           newUsername,
           `https://x.com/${newUsername}`,

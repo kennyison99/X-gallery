@@ -25,5 +25,7 @@ test('crawler account API can rename account handles and existing posts', () => 
   assert.match(source, /new_username/);
   assert.match(source, /UPDATE crawl_accounts SET username = \?/);
   assert.match(source, /UPDATE images/);
+  assert.match(source, /WHERE author = \? COLLATE NOCASE/);
+  assert.doesNotMatch(source, /WHERE lower\(author\) = \?/);
   assert.match(source, /post_url = replace\(replace\(post_url/);
 });

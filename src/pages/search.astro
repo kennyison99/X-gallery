@@ -15,7 +15,7 @@ const searchParams = parseSearchParams(Astro.url.searchParams);
 const { q, tag: filterTag, work: filterWork, author: filterAuthor } = searchParams;
 
 // 2. Fetch cached directory data for authors and tags listing (1 D1 row read on cache hit)
-const directory = await getDirectoryData(env.DB, 'public');
+const directory = await getDirectoryData(env.DB, 'public', { kv: env.CACHE });
 const allAuthors = directory.authors.map(author => ({ author, author_url: `https://x.com/${author}` }));
 const authorSet = directory.canonicalAuthorSet;
 

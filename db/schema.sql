@@ -90,3 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_images_pending_created_id ON images(created_at, i
 CREATE INDEX IF NOT EXISTS idx_images_published_author_nocase_created_id ON images(published, author COLLATE NOCASE, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_images_published_size_desc ON images(published, (COALESCE(photo_bytes, 0) + COALESCE(video_bytes, 0)) DESC, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_images_published_author_nocase_size_desc ON images(published, author COLLATE NOCASE, (COALESCE(photo_bytes, 0) + COALESCE(video_bytes, 0)) DESC, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_crawl_accounts_username_lower ON crawl_accounts(lower(username));
+CREATE INDEX IF NOT EXISTS idx_images_reviewed_published_id ON images(reviewed, published, id DESC);
+
+PRAGMA optimize;

@@ -51,7 +51,11 @@ const adminAuthors = authorStats.map((r) => ({
 }));
 
 // 4. Fetch cached directory data for admin scope (reuses version and adminAuthors)
-const directory = await getDirectoryData(env.DB, 'admin', { version: directoryVersion, adminAuthors });
+const directory = await getDirectoryData(env.DB, 'admin', {
+  version: directoryVersion,
+  adminAuthors,
+  kv: env.CACHE,
+});
 const authorSet = directory.canonicalAuthorSet;
 
 // 5. Prepare tags and authors for filter dropdown

@@ -13,7 +13,7 @@ if (!env?.DB) {
 let batchResult;
 try {
   const params = parseSearchParams(Astro.url.searchParams);
-  const directory = await getDirectoryData(env.DB, 'public');
+  const directory = await getDirectoryData(env.DB, 'public', { kv: env.CACHE });
   batchResult = await fetchSearchBatch(env.DB, params, {
     kv: env.CACHE,
     version: directory.version,

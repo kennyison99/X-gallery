@@ -138,11 +138,14 @@ export function buildSearchQuery(params: SearchParams) {
   if (!decodedCursor && params.offset > 0) {
     offsetClause = `OFFSET ?`;
   }
+  const indexHint = params.author
+    ? 'INDEXED BY idx_images_published_author_nocase_created_id'
+    : 'INDEXED BY idx_images_published_created';
 
   const sql = `
     WITH paged_ids AS (
       SELECT i.id, i.created_at
-      FROM images i
+      FROM images i ${indexHint}
       WHERE ${whereSql}
       ORDER BY i.created_at ${orderDirection}, i.id ${orderDirection}
       LIMIT ? ${offsetClause}
@@ -191,7 +194,10 @@ export async function fetchSearchBatch(
       });
     }
 
-    const directory = cacheOptions.directory ?? await getDirectoryData(db, 'public');
+    const directory = cacheOptions.directory ?? await getDirectoryData(db, 'public', {
+      kv: cacheOptions.kv,
+      version: cacheOptions.version,
+    });
     const sanitizedItems = pageRows.map((img) => ({
       ...img,
       tags: img.tags_list
@@ -210,7 +216,7 @@ export async function fetchSearchBatch(
 
   return queryCache.getOrLoad({
     kv: cacheOptions.kv,
-    key: `search:${filterKey}&version=${cacheOptions.version ?? 'ttl'}&cursor=${params.cursorStr ?? ''}&offset=${params.offset}&limit=${params.limit}`,
+    key: `search:${filterKey}&cursor=${params.cursorStr ?? ''}&offset=${params.offset}&limit=${params.limit}`,
     memoryTtlMs: 30_000,
     kvTtlSeconds: params.q ? 1_800 : 300,
     load,

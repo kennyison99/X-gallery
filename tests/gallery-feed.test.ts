@@ -141,6 +141,30 @@ test('repeated gallery batches reuse cached results instead of reading D1 again'
   assert.equal(d1Reads, 1);
 });
 
+test('gallery cache remains reusable when an unrelated upload changes directory version', async () => {
+  let d1Reads = 0;
+  const db = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async all() {
+              d1Reads++;
+              return { results: [] };
+            },
+          };
+        },
+      };
+    },
+  };
+  const options = parseGalleryBatchParams(new URLSearchParams('author=cache_test_cross_version_gallery'));
+
+  await fetchGalleryBatch(db, options, { version: 31 });
+  await fetchGalleryBatch(db, options, { version: 32 });
+
+  assert.equal(d1Reads, 1, 'bounded TTL should absorb unrelated directory-version bumps');
+});
+
 test('the homepage renders its initial cards through the bounded feed query', () => {
   const source = readFileSync(new URL('../src/pages/index.astro', import.meta.url), 'utf8');
 

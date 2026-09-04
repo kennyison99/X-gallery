@@ -13,6 +13,11 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
     // CTE should only select i.id
     assert.match(query.sql, /WITH page_images AS\s*\(\s*SELECT i\.id\s+FROM images i/i);
     assert.doesNotMatch(query.sql, /WITH page_images AS\s*\(\s*SELECT i\.\*/i);
+    assert.match(
+      query.sql,
+      /FROM images i INDEXED BY idx_images_published_created/i,
+      'unfiltered gallery feed must pin the order-compatible index',
+    );
 
     // Outer query joins images table on p.id = i.id
     assert.match(query.sql, /FROM page_images p\s+JOIN images i ON p\.id = i\.id/i);
@@ -30,6 +35,14 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
     assert.match(photoQuery.pageSql, /WITH page AS\s*\(\s*SELECT i\.id\s+FROM images i\s+WHERE/i);
     assert.match(photoQuery.pageSql, /FROM page p\s+JOIN images i ON p\.id = i\.id/i);
     assert.match(photoQuery.where, /i\.photo_count > 0 AND i\.video_count = 0/);
+
+    const defaultParams = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&sort=newest&limit=10'));
+    const defaultQuery = buildAdminPostsQuery(defaultParams, true);
+    assert.match(
+      defaultQuery.pageSql,
+      /FROM images i INDEXED BY idx_images_published_created/i,
+      'default admin page must pin the order-compatible index',
+    );
 
     const videoParams = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&media=video&limit=10'));
     const videoQuery = buildAdminPostsQuery(videoParams, true);
@@ -113,6 +126,11 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
       if (i % 2 === 0) insertLinkStmt.run(i, ((i + 1) % tags.length) + 1);
     }
 
+    // Reproduce production schema drift: existing indexes had statistics, while this
+    // newer index did not, and it started hijacking published-only feed queries.
+    db.exec('ANALYZE');
+    db.exec('CREATE INDEX idx_images_published_reviewed ON images(published, reviewed, id DESC)');
+
     // 1. Test Gallery Query execution on SQLite
     const galleryParams = parseGalleryBatchParams(new URLSearchParams('sort=newest&limit=10'));
     const galleryQ = buildGalleryQuery(galleryParams);
@@ -147,6 +165,19 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
     assert.ok(adminRows.length > 0);
     // Strict photo-only: no video files
     assert.ok(adminRows.every(r => r.photo_count > 0 && r.video_count === 0));
+
+    const adminDefaultParams = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=1&sort=newest&limit=10&offset=0'));
+    const adminDefaultQ = buildAdminPostsQuery(adminDefaultParams, true);
+    const adminDefaultPlan = db.prepare(`EXPLAIN QUERY PLAN ${adminDefaultQ.pageSql}`).all(...adminDefaultQ.pageBindings) as any[];
+    const adminDefaultPlanDetails = adminDefaultPlan.map(p => p.detail).join('; ');
+    assert.ok(
+      adminDefaultPlanDetails.includes('idx_images_published_created'),
+      `default admin query plan must use idx_images_published_created, got: ${adminDefaultPlanDetails}`
+    );
+    assert.ok(
+      !adminDefaultPlanDetails.includes('idx_images_published_reviewed'),
+      `default admin query plan must not use the reviewed index, got: ${adminDefaultPlanDetails}`
+    );
 
     // Test Admin Count Query
     const adminCountRows = db.prepare(adminQ.countSql).all(...adminQ.countBindings) as any[];
@@ -212,6 +243,43 @@ describe('D1 Row-Read & Query Optimization Suite', () => {
     const authorSizeRows = db.prepare(authorSizeDescQ.pageSql).all(...authorSizeDescQ.pageBindings) as any[];
     assert.ok(authorSizeRows.length > 0);
     assert.ok(authorSizeRows.every(r => r.author.toLowerCase() === 'artist_alice'));
+
+    // 9. Frequent crawl completion updates must not scan every configured account.
+    const crawlUpdatePlan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      UPDATE crawl_accounts
+      SET last_crawled_at = datetime('now')
+      WHERE lower(username) = lower(?)
+    `).all('artist_alice') as any[];
+    const crawlUpdatePlanDetails = crawlUpdatePlan.map(p => p.detail).join('; ');
+    assert.ok(
+      crawlUpdatePlanDetails.includes('idx_crawl_accounts_username_lower'),
+      `crawl account update must use normalized username index, got: ${crawlUpdatePlanDetails}`
+    );
+
+    // 10. The reviewed-first index serves moderation without competing with
+    // published-only feed ordering.
+    const reviewedIndexColumns = db.prepare(`
+      SELECT name FROM pragma_index_info('idx_images_reviewed_published_id') ORDER BY seqno
+    `).all() as Array<{ name: string }>;
+    assert.deepEqual(
+      reviewedIndexColumns.map((column) => column.name),
+      ['reviewed', 'published', 'id'],
+    );
+
+    db.exec('DROP INDEX idx_images_published_reviewed');
+    const reviewedPlan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id FROM images
+      WHERE reviewed = 0 AND published = 1
+      ORDER BY id DESC
+      LIMIT 50
+    `).all() as any[];
+    const reviewedPlanDetails = reviewedPlan.map(p => p.detail).join('; ');
+    assert.ok(
+      reviewedPlanDetails.includes('idx_images_reviewed_published_id'),
+      `moderation query must use reviewed-first index, got: ${reviewedPlanDetails}`
+    );
 
     db.close();
   });

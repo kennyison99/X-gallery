@@ -14,7 +14,7 @@ const activeTag = Astro.url.searchParams.get('tag');
 const activeAuthor = Astro.url.searchParams.get('author');
 
 // Fetch cached directory data for public scope (1 D1 row read on cache hit)
-const directory = await getDirectoryData(env.DB, 'public');
+const directory = await getDirectoryData(env.DB, 'public', { kv: env.CACHE });
 const authorsList = directory.authors;
 const authorSet = directory.canonicalAuthorSet;
 const tagsList = directory.tags.map((t) => t.name).filter((name) => !authorSet.has(name.toLowerCase()));

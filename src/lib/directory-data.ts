@@ -43,6 +43,10 @@ export interface GetDirectoryDataOptions {
   cacheBaseUrl?: string;
   version?: number;
   adminAuthors?: AdminAuthorItem[];
+  kv?: {
+    get<T>(key: string, type: 'json'): Promise<T | null>;
+    put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
+  };
 }
 
 export interface GetAdminOverviewStatsOptions {
@@ -65,6 +69,7 @@ let adminOverviewMemoryCache: { version: number; data: AdminOverviewStats } | nu
 
 const ADMIN_OVERVIEW_KV_KEY = 'admin-overview:v1';
 const ADMIN_OVERVIEW_KV_TTL_SECONDS = 3_600;
+const DIRECTORY_KV_TTL_SECONDS = 3_600;
 
 export function clearDirectoryMemoryCache(): void {
   memoryCache.public = null;
@@ -112,6 +117,30 @@ export async function getDirectoryData(
     return cachedMem.data;
   }
 
+  // Use a fixed KV key so uploads do not invalidate the complete author/tag
+  // directory. The bounded TTL trades at most one hour of staleness for avoiding
+  // repeated full directory reads during active crawls.
+  if (options.kv) {
+    try {
+      const cached = await options.kv.get<{
+        authors: string[];
+        adminAuthors?: AdminAuthorItem[];
+        tags: TagItem[];
+      }>(`directory:v1:${scope}`, 'json');
+      if (cached) {
+        const data: DirectoryData = {
+          ...cached,
+          version,
+          canonicalAuthorSet: new Set(cached.authors.map((author) => author.toLowerCase())),
+        };
+        memoryCache[scope] = { version, data };
+        return data;
+      }
+    } catch (error) {
+      console.error('Directory KV read failed:', error);
+    }
+  }
+
   // 3. Fail-open Cache API check if available
   const cache = options.cache ?? (typeof caches !== 'undefined' ? (caches as any).default : undefined);
   const baseUrl = options.cacheBaseUrl ?? 'http://localhost';
@@ -140,7 +169,7 @@ export async function getDirectoryData(
 
   if (scope === 'public') {
     const { results = [] } = await db
-      .prepare('SELECT DISTINCT author FROM images WHERE published = 1 ORDER BY author ASC')
+      .prepare('SELECT DISTINCT author FROM images INDEXED BY idx_images_published_author WHERE published = 1 ORDER BY author ASC')
       .all<{ author: string }>();
     authors = results.map((r: { author: string }) => r.author);
   } else {
@@ -173,6 +202,20 @@ export async function getDirectoryData(
 
   // Update in-memory cache (replacing old version)
   memoryCache[scope] = { version, data };
+
+  if (options.kv) {
+    try {
+      await options.kv.put(`directory:v1:${scope}`, JSON.stringify({
+        authors: data.authors,
+        adminAuthors: data.adminAuthors,
+        tags: data.tags,
+      }), {
+        expirationTtl: DIRECTORY_KV_TTL_SECONDS,
+      });
+    } catch (error) {
+      console.error('Directory KV write failed:', error);
+    }
+  }
 
   // Fail-open Cache API write
   if (cache) {

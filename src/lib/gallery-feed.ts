@@ -169,12 +169,17 @@ export function buildGalleryQuery(options: GalleryBatchParams): {
   const tagJoin = options.tag
     ? `JOIN image_tags selected_it ON i.id = selected_it.image_id JOIN tags selected_tag ON selected_it.tag_id = selected_tag.id`
     : '';
+  const indexHint = options.tag
+    ? ''
+    : options.author
+      ? 'INDEXED BY idx_images_published_author'
+      : 'INDEXED BY idx_images_published_created';
 
   return {
     sql: `
       WITH page_images AS (
         SELECT i.id
-        FROM images i
+        FROM images i ${indexHint}
         ${tagJoin}
         WHERE ${whereSql}
         ORDER BY i.created_at ${direction}, i.id ${direction}
@@ -230,7 +235,7 @@ export async function fetchGalleryBatch(
 
   return queryCache.getOrLoad({
     kv: cacheOptions.kv,
-    key: `gallery:${filterKey}&version=${cacheOptions.version ?? 'ttl'}&cursor=${options.cursorStr ?? ''}&offset=${options.offset}&limit=${options.limit}`,
+    key: `gallery:${filterKey}&cursor=${options.cursorStr ?? ''}&offset=${options.offset}&limit=${options.limit}`,
     memoryTtlMs: 30_000,
     kvTtlSeconds: 300,
     load,

@@ -20,6 +20,14 @@ test('buildSearchQuery generates page-first CTE with EXISTS clause for keyword t
   assert.ok(bindings.length > 0);
 });
 
+test('buildSearchQuery pins order-compatible feed indexes', () => {
+  const unfiltered = buildSearchQuery(parseSearchParams(new URLSearchParams()));
+  assert.match(unfiltered.sql, /FROM images i INDEXED BY idx_images_published_created/);
+
+  const byAuthor = buildSearchQuery(parseSearchParams(new URLSearchParams({ author: 'alice' })));
+  assert.match(byAuthor.sql, /FROM images i INDEXED BY idx_images_published_author_nocase_created_id/);
+});
+
 test('buildSearchQuery uses instr and executes cleanly on queries exceeding 50 bytes', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   const { readFileSync } = await import('node:fs');
@@ -76,5 +84,75 @@ test('repeated keyword searches reuse cached results instead of repeating the fu
 
   assert.deepEqual(second, first);
   assert.equal(d1Reads, 1);
+});
+
+test('search cache remains reusable when an unrelated upload changes directory version', async () => {
+  let d1Reads = 0;
+  const db = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async all() {
+              d1Reads++;
+              return { results: [] };
+            },
+          };
+        },
+      };
+    },
+  };
+  const params = parseSearchParams(new URLSearchParams({ q: 'cache_test_cross_version_search_20260904' }));
+  const directory = {
+    version: 41,
+    authors: [],
+    tags: [],
+    canonicalAuthorSet: new Set<string>(),
+  };
+
+  await fetchSearchBatch(db, params, { version: 41, directory });
+  await fetchSearchBatch(db, params, { version: 42, directory });
+
+  assert.equal(d1Reads, 1, 'bounded TTL should absorb unrelated directory-version bumps');
+});
+
+test('search forwards KV to directory lookup instead of re-reading authors and tags', async () => {
+  let d1Reads = 0;
+  const db = {
+    prepare(sql: string) {
+      const all = async () => {
+        d1Reads++;
+        return { results: [] };
+      };
+      return {
+        bind() {
+          return { all };
+        },
+        async first() {
+          d1Reads++;
+          return sql.includes('directory_version') ? { directory_version: 91 } : null;
+        },
+        all,
+      };
+    },
+  };
+  const kv = {
+    async get<T>(key: string, type: 'json') {
+      assert.equal(type, 'json');
+      if (key === 'directory:v1:public') {
+        return {
+          authors: ['kv_author'],
+          tags: [{ id: 1, name: 'KV Tag' }],
+        } as T;
+      }
+      return null;
+    },
+    async put() {},
+  };
+  const params = parseSearchParams(new URLSearchParams({ q: 'cache_test_directory_forwarding_20260904' }));
+
+  await fetchSearchBatch(db, params, { kv, version: 91 });
+
+  assert.equal(d1Reads, 1, 'only the search query should reach D1');
 });
 
