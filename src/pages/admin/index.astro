@@ -9,6 +9,7 @@ import AdminPostManager from '../../components/admin/AdminPostManager.astro';
 import AdminCrawlerPanel from '../../components/admin/AdminCrawlerPanel.astro';
 import AdminAutoTagPanel from '../../components/admin/AdminAutoTagPanel.astro';
 import { getDirectoryData, getAdminOverviewStats } from '../../lib/directory-data';
+import { getAdminFilteredCount, parseAdminPostsParams } from '../../lib/admin-dashboard';
 
 if (!env || !env.DB) {
   return new Response('D1 DB binding not configured. Please bind your database in wrangler.jsonc.', { status: 500 });
@@ -42,7 +43,13 @@ try {
   console.error('Error fetching admin overview stats:', err);
 }
 
-const { totalPosts, publishedCount, pendingCount, totalPhotos, totalVideos, authorStats } = overviewStats;
+const { totalPhotos, totalVideos, authorStats } = overviewStats;
+// List badges cannot use the intentionally hour-old overview snapshot.
+const [publishedCount, pendingCount] = await Promise.all([1, 0].map((published) => {
+  const params = parseAdminPostsParams(new URL(`/api/admin-posts?published=${published}`, Astro.url));
+  return getAdminFilteredCount(env.DB, params, mediaCountsReady, env.CACHE);
+}));
+const totalPosts = publishedCount + pendingCount;
 
 // 3. Derive admin authors from overview stats to avoid duplicate GROUP BY author scan
 const adminAuthors = authorStats.map((r) => ({
@@ -1117,6 +1124,10 @@ try {
       const data = await res.json();
 
       totalItems = data.total;
+      if (!filters.search && !filters.author && !filters.tag && !filters.media) {
+        if (filters.published === '0' && tabPending) tabPending.textContent = `待審查 (${data.total})`;
+        if (filters.published === '1' && tabPublished) tabPublished.textContent = `已發佈 (${data.total})`;
+      }
 
       const totalPages = Math.ceil(totalItems / perPage) || 1;
       if (currentPage > totalPages) {

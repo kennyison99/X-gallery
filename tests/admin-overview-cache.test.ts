@@ -114,6 +114,36 @@ describe('Admin Overview Stats & Directory Cache Consolidation Suite', () => {
     };
   }
 
+  it('pending pagination counts stay live even when overview and version caches are warm', async () => {
+    const { getAdminFilteredCount, parseAdminPostsParams, buildAdminPostsQuery } = await import('../src/lib/admin-dashboard.ts');
+    const adapter = createD1Adapter(db);
+    const kv = createMemoryKv();
+    const params = parseAdminPostsParams(new URL('https://example.com/api/admin-posts?published=0&limit=25'));
+    db.exec('DELETE FROM images WHERE published = 0');
+    await getAdminOverviewStats(adapter, 1, { mediaCountsReady: true, kv });
+    assert.equal(await getAdminFilteredCount(adapter, params, true, kv), 0);
+    // External moderation can change publication state without bumping metadata.
+    for (let id = 100; id < 126; id++) {
+      db.prepare("INSERT INTO images(id, r2_keys, author, published) VALUES (?, 'test.jpg', 'test', 0)").run(id);
+    }
+    const total = await getAdminFilteredCount(adapter, params, true, kv);
+    const page = buildAdminPostsQuery(params, true);
+    const rows = db.prepare(page.pageSql).all(...page.pageBindings);
+    assert.equal(total, 26);
+    assert.equal(rows.length, 25);
+    assert.equal(rows.length < total, true, 'second page must remain reachable');
+    db.exec('UPDATE images SET published = 1 WHERE published = 0');
+    assert.equal(await getAdminFilteredCount(adapter, params, true, kv), 0);
+  });
+
+  it('post list and SSR badges use list counts instead of stale overview totals', () => {
+    const api = readFileSync(new URL('../src/pages/api/admin-posts.ts', import.meta.url), 'utf8');
+    const page = readFileSync(new URL('../src/pages/admin/index.astro', import.meta.url), 'utf8');
+    assert.ok(!api.includes('total = getOverviewCount('));
+    assert.match(page, /getAdminFilteredCount\(env.DB/);
+    assert.match(page, /tabPending.textContent =/);
+  });
+
   it('getAdminOverviewStats consolidates author aggregation and JS reduction into exact global totals', async () => {
     const mockDb = createD1Adapter(db);
 

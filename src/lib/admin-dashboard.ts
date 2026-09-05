@@ -157,11 +157,17 @@ export async function getAdminFilteredCount(
   mediaCountsReady: boolean,
   kv?: QueryCacheKv,
 ): Promise<number> {
+  const { countSql, countBindings } = buildAdminPostsQuery(params, mediaCountsReady);
+  // The moderation queue must remain live, including external moderation writes
+  // that do not bump directory_version. This seeks the small published=0 range.
+  if (params.published === 0) {
+    const row = await db.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+    return row?.total ?? 0;
+  }
   // One metadata row is cheaper than counting the same matching posts on every
   // page. Use the live version so edits/approvals/deletions invalidate the total.
   const versionRow = await db.prepare('SELECT directory_version FROM storage_stats WHERE id = 1')
     .first<{ directory_version: number }>();
-  const { countSql, countBindings } = buildAdminPostsQuery(params, mediaCountsReady);
   return queryCache.getOrLoad({
     kv,
     key: `admin-count:${JSON.stringify([versionRow?.directory_version ?? 1, countSql, countBindings])}`,
