@@ -167,6 +167,22 @@ describe('Admin Overview Stats & Directory Cache Consolidation Suite', () => {
     assert.deepEqual(stats1, stats2);
   });
 
+  it('overview KV hits avoid D1 even when no version or media readiness was supplied', async () => {
+    const mockDb = createD1Adapter(db);
+    const kv = createMemoryKv();
+    const expected = await getAdminOverviewStats(mockDb, 1, { mediaCountsReady: true, kv });
+    clearDirectoryMemoryCache();
+    const unavailableDb = { prepare() { throw new Error('D1 daily cap exceeded'); } };
+    assert.deepEqual(await getAdminOverviewStats(unavailableDb, undefined, { kv }), expected);
+  });
+
+  it('concurrent overview misses execute only one full-table aggregation', async () => {
+    const adapter = createD1Adapter(db);
+    await Promise.all(Array.from({ length: 20 }, () =>
+      getAdminOverviewStats(adapter, 1, { mediaCountsReady: true })));
+    assert.equal(adapter.getQueriesRun().filter(sql => sql.includes('FROM images')).length, 1);
+  });
+
   it('fixed KV cache prevents a full images scan when directory_version changes', async () => {
     const mockDb = createD1Adapter(db);
     const kv = createMemoryKv();

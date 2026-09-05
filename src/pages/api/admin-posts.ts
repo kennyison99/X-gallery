@@ -8,6 +8,7 @@ import {
   parseAdminPostsParams,
   canUseOverviewCount,
   getOverviewCount,
+  getAdminFilteredCount,
   type AdminPostsQueryParams,
 } from '../../lib/admin-dashboard';
 
@@ -76,7 +77,7 @@ export const GET: APIRoute = async ({ url }) => {
     }
   }
 
-  const { countSql, countBindings, pageSql, pageBindings } = buildAdminPostsQuery(params, mediaCountsReady);
+  const { pageSql, pageBindings } = buildAdminPostsQuery(params, mediaCountsReady);
 
   // Count total matching rows: bypass expensive 18.36k index scan on unfiltered queries by reusing cached overview
   let total: number;
@@ -86,8 +87,7 @@ export const GET: APIRoute = async ({ url }) => {
     overview = await getAdminOverviewStats(env.DB, undefined, { kv: env.CACHE });
     total = getOverviewCount(params, overview);
   } else {
-    const countRow = await env.DB.prepare(countSql).bind(...countBindings).first<{ total: number }>();
-    total = countRow?.total ?? 0;
+    total = await getAdminFilteredCount(env.DB, params, mediaCountsReady, env.CACHE);
   }
 
   // Fetch the current page

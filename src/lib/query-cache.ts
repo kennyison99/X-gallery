@@ -23,8 +23,23 @@ async function boundedCacheKey(rawKey: string): Promise<string> {
   return `query:v1:${hash}`;
 }
 
+/** Coalesce work within an isolate; failed work is always removed for retries. */
+export function createSingleFlight() {
+  const inFlight = new Map<string, Promise<unknown>>();
+  return {
+    run<T>(key: string, load: () => Promise<T>): Promise<T> {
+      const pending = inFlight.get(key);
+      if (pending) return pending as Promise<T>;
+      const loading = Promise.resolve().then(load).finally(() => inFlight.delete(key));
+      inFlight.set(key, loading);
+      return loading;
+    },
+  };
+}
+
 export function createThreeTierCache(maxEntries = 250) {
   const memory = new Map<string, MemoryEntry>();
+  const inFlight = createSingleFlight();
 
   function remember(key: string, value: unknown, ttlMs: number): void {
     if (!memory.has(key) && memory.size >= maxEntries) {
@@ -43,32 +58,34 @@ export function createThreeTierCache(maxEntries = 250) {
       }
       if (memoryEntry) memory.delete(key);
 
-      if (options.kv) {
-        try {
-          const cached = await options.kv.get<T>(key, 'json');
-          if (cached !== null) {
-            remember(key, cached, options.memoryTtlMs);
-            return cached;
+      return inFlight.run(key, async () => {
+        if (options.kv) {
+          try {
+            const cached = await options.kv.get<T>(key, 'json');
+            if (cached !== null) {
+              remember(key, cached, options.memoryTtlMs);
+              return cached;
+            }
+          } catch (error) {
+            console.error('Query cache KV read failed:', error);
           }
-        } catch (error) {
-          console.error('Query cache KV read failed:', error);
         }
-      }
 
-      const fresh = await options.load();
-      remember(key, fresh, options.memoryTtlMs);
+        const fresh = await options.load();
+        remember(key, fresh, options.memoryTtlMs);
 
-      if (options.kv) {
-        try {
-          await options.kv.put(key, JSON.stringify(fresh), {
-            expirationTtl: options.kvTtlSeconds,
-          });
-        } catch (error) {
-          console.error('Query cache KV write failed:', error);
+        if (options.kv) {
+          try {
+            await options.kv.put(key, JSON.stringify(fresh), {
+              expirationTtl: options.kvTtlSeconds,
+            });
+          } catch (error) {
+            console.error('Query cache KV write failed:', error);
+          }
         }
-      }
 
-      return fresh;
+        return fresh;
+      });
     },
   };
 }

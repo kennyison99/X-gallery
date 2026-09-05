@@ -127,3 +127,53 @@ test('getDirectoryData reuses fixed-key KV data across directory version bumps',
   assert.equal(second.version, 102);
   assert.ok(second.canonicalAuthorSet.has('cached_author'));
 });
+
+test('a warm KV directory remains available without consulting a failing D1 database', async () => {
+  clearDirectoryMemoryCache();
+  let dbCalls = 0;
+  const db = { prepare() { dbCalls++; throw new Error('D1 daily cap exceeded'); } };
+  const kv = {
+    async get() { return { version: 7, authors: ['Alice'], tags: [{ id: 1, name: 'Art' }] }; },
+    async put() {},
+  };
+  const data = await getDirectoryData(db, 'public', { kv });
+  assert.deepEqual(data.authors, ['Alice']);
+  assert.ok(data.canonicalAuthorSet.has('alice'));
+  assert.equal(data.version, 7);
+  assert.equal(dbCalls, 0);
+  clearDirectoryMemoryCache();
+});
+
+test('directory memory hits skip D1 but expire even when its version is unchanged', async (t) => {
+  clearDirectoryMemoryCache();
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  let author = 'before';
+  let reads = 0;
+  const db = { prepare(sql: string) { return {
+    async first() { reads++; return { directory_version: 1 }; },
+    async all() { reads++; return { results: sql.includes('FROM images') ? [{ author }] : [] }; },
+  }; } };
+  await getDirectoryData(db, 'public');
+  const coldReads = reads;
+  author = 'after';
+  assert.deepEqual((await getDirectoryData(db, 'public')).authors, ['before']);
+  assert.equal(reads, coldReads);
+  t.mock.timers.tick(3_600_001);
+  assert.deepEqual((await getDirectoryData(db, 'public')).authors, ['after']);
+  clearDirectoryMemoryCache();
+});
+
+test('concurrent directory misses share author and tag queries', async () => {
+  clearDirectoryMemoryCache();
+  let reads = 0;
+  const db = { prepare() { return {
+    async all() {
+      reads++;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return { results: [] };
+    },
+  }; } };
+  await Promise.all(Array.from({ length: 20 }, () => getDirectoryData(db, 'public', { version: 77 })));
+  assert.equal(reads, 2);
+  clearDirectoryMemoryCache();
+});

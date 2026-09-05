@@ -86,7 +86,7 @@ test('dedup endpoint scans cards in pages and merges their tags before deletion'
   );
 
   assert.match(source, /scope === 'cards'/);
-  assert.match(source, /GROUP BY post_url/);
+  assert.match(source, /fetchDuplicateCardPage\(env\.DB, cursor, limit\)/);
   assert.match(source, /buildCardDuplicateFix/);
   assert.match(source, /next_cursor/);
   assert.match(source, /INSERT OR IGNORE INTO image_tags/);

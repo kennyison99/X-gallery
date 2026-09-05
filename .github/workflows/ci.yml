@@ -49,3 +49,12 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: '42262e62f0ff1107d0eb78d92a94d873'
         run: npx wrangler deploy --dry-run
+
+      - name: Preserve verified Worker build for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-build-${{ github.sha }}
+          path: dist/
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error

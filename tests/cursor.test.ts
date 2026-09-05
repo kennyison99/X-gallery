@@ -43,10 +43,10 @@ test('cursor validation throws InvalidCursorError for mismatched filterKey, inva
 
 test('generateCursorWhereClause creates correct SQL predicate for newest and oldest sort', () => {
   const newestClause = generateCursorWhereClause('newest');
-  assert.equal(newestClause.sql, '(i.created_at < ? OR (i.created_at = ? AND i.id < ?))');
-  assert.deepEqual(newestClause.bindings('2026-07-30 12:34:56', 100), ['2026-07-30 12:34:56', '2026-07-30 12:34:56', 100]);
+  assert.equal(newestClause.sql, '(i.created_at, i.id) < (?, ?)');
+  assert.deepEqual(newestClause.bindings('2026-07-30 12:34:56', 100), ['2026-07-30 12:34:56', 100]);
 
   const oldestClause = generateCursorWhereClause('oldest');
-  assert.equal(oldestClause.sql, '(i.created_at > ? OR (i.created_at = ? AND i.id > ?))');
-  assert.deepEqual(oldestClause.bindings('2026-07-30 12:34:56', 100), ['2026-07-30 12:34:56', '2026-07-30 12:34:56', 100]);
+  assert.equal(oldestClause.sql, '(i.created_at, i.id) > (?, ?)');
+  assert.deepEqual(oldestClause.bindings('2026-07-30 12:34:56', 100), ['2026-07-30 12:34:56', 100]);
 });

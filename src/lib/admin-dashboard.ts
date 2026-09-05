@@ -1,3 +1,5 @@
+import { queryCache, type QueryCacheKv } from './query-cache.ts';
+
 export const ADMIN_TABS = ['overview', 'posts', 'upload', 'crawler', 'auto-tag'] as const;
 export type AdminTab = typeof ADMIN_TABS[number];
 
@@ -147,6 +149,29 @@ export function buildAdminPostsQuery(params: AdminPostsQueryParams, mediaCountsR
 
 export function canUseOverviewCount(params: AdminPostsQueryParams): boolean {
   return !params.search && !params.author && !params.tag && !params.media;
+}
+
+export async function getAdminFilteredCount(
+  db: any,
+  params: AdminPostsQueryParams,
+  mediaCountsReady: boolean,
+  kv?: QueryCacheKv,
+): Promise<number> {
+  // One metadata row is cheaper than counting the same matching posts on every
+  // page. Use the live version so edits/approvals/deletions invalidate the total.
+  const versionRow = await db.prepare('SELECT directory_version FROM storage_stats WHERE id = 1')
+    .first<{ directory_version: number }>();
+  const { countSql, countBindings } = buildAdminPostsQuery(params, mediaCountsReady);
+  return queryCache.getOrLoad({
+    kv,
+    key: `admin-count:${JSON.stringify([versionRow?.directory_version ?? 1, countSql, countBindings])}`,
+    memoryTtlMs: 30_000,
+    kvTtlSeconds: 300,
+    load: async () => {
+      const row = await db.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+      return row?.total ?? 0;
+    },
+  });
 }
 
 export function getOverviewCount(

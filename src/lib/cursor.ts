@@ -124,12 +124,12 @@ export function decodeCursor(
 export function generateCursorWhereClause(sort: 'newest' | 'oldest') {
   if (sort === 'oldest') {
     return {
-      sql: '(i.created_at > ? OR (i.created_at = ? AND i.id > ?))',
-      bindings: (createdAt: string, id: number) => [createdAt, createdAt, id],
+      sql: '(i.created_at, i.id) > (?, ?)',
+      bindings: (createdAt: string, id: number) => [createdAt, id],
     };
   }
   return {
-    sql: '(i.created_at < ? OR (i.created_at = ? AND i.id < ?))',
-    bindings: (createdAt: string, id: number) => [createdAt, createdAt, id],
+    sql: '(i.created_at, i.id) < (?, ?)',
+    bindings: (createdAt: string, id: number) => [createdAt, id],
   };
 }

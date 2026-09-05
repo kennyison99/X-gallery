@@ -1,3 +1,5 @@
+import { createSingleFlight } from './query-cache.ts';
+
 export interface TagItem {
   id: number;
   name: string;
@@ -60,16 +62,19 @@ export interface GetAdminOverviewStatsOptions {
 }
 
 // Bounded single-entry in-memory cache per scope to avoid memory leaks
-const memoryCache: Record<'public' | 'admin', { version: number; data: DirectoryData } | null> = {
+const memoryCache: Record<'public' | 'admin', { version: number; data: DirectoryData; expiresAt: number } | null> = {
   public: null,
   admin: null,
 };
 
-let adminOverviewMemoryCache: { version: number; data: AdminOverviewStats } | null = null;
+let adminOverviewMemoryCache: { version: number; data: AdminOverviewStats; expiresAt: number } | null = null;
 
 const ADMIN_OVERVIEW_KV_KEY = 'admin-overview:v1';
 const ADMIN_OVERVIEW_KV_TTL_SECONDS = 3_600;
 const DIRECTORY_KV_TTL_SECONDS = 3_600;
+const DIRECTORY_MEMORY_TTL_MS = 30_000;
+const directoryLoads = createSingleFlight();
+const overviewLoads = createSingleFlight();
 
 export function clearDirectoryMemoryCache(): void {
   memoryCache.public = null;
@@ -97,23 +102,23 @@ export function createConditionalBumpDirectoryVersionStmt(db: any, conditionSql:
  * If options.version is provided, skips querying storage_stats.
  * If scope === 'admin' and options.adminAuthors is provided, avoids duplicate GROUP BY author scan on images.
  */
-export async function getDirectoryData(
+export function getDirectoryData(
+  db: any,
+  scope: 'public' | 'admin' = 'public',
+  options: GetDirectoryDataOptions = {},
+): Promise<DirectoryData> {
+  return directoryLoads.run(`${scope}:${options.version ?? 'latest'}`, () => loadDirectoryData(db, scope, options));
+}
+
+async function loadDirectoryData(
   db: any,
   scope: 'public' | 'admin' = 'public',
   options: GetDirectoryDataOptions = {}
 ): Promise<DirectoryData> {
-  // 1. Determine directory_version (use passed version or query D1 1 row read)
+  // Serve bounded cache entries before consulting D1, including during a D1 outage.
   let version = options.version;
-  if (typeof version !== 'number') {
-    const versionRow = await db
-      .prepare('SELECT directory_version FROM storage_stats WHERE id = 1')
-      .first<{ directory_version: number }>();
-    version = versionRow?.directory_version ?? 1;
-  }
-
-  // 2. Check in-memory single-entry version cache
   const cachedMem = memoryCache[scope];
-  if (cachedMem && cachedMem.version === version) {
+  if (cachedMem && cachedMem.expiresAt > Date.now() && (version === undefined || cachedMem.version === version)) {
     return cachedMem.data;
   }
 
@@ -123,6 +128,7 @@ export async function getDirectoryData(
   if (options.kv) {
     try {
       const cached = await options.kv.get<{
+        version?: number;
         authors: string[];
         adminAuthors?: AdminAuthorItem[];
         tags: TagItem[];
@@ -130,15 +136,22 @@ export async function getDirectoryData(
       if (cached) {
         const data: DirectoryData = {
           ...cached,
-          version,
+          version: version ?? cached.version ?? 1,
           canonicalAuthorSet: new Set(cached.authors.map((author) => author.toLowerCase())),
         };
-        memoryCache[scope] = { version, data };
+        memoryCache[scope] = { version: data.version, data, expiresAt: Date.now() + DIRECTORY_MEMORY_TTL_MS };
         return data;
       }
     } catch (error) {
       console.error('Directory KV read failed:', error);
     }
+  }
+
+  if (typeof version !== 'number') {
+    const versionRow = await db
+      .prepare('SELECT directory_version FROM storage_stats WHERE id = 1')
+      .first<{ directory_version: number }>();
+    version = versionRow?.directory_version ?? 1;
   }
 
   // 3. Fail-open Cache API check if available
@@ -155,7 +168,7 @@ export async function getDirectoryData(
           ...raw,
           canonicalAuthorSet: new Set(raw.authors.map((a: string) => a.toLowerCase())),
         };
-        memoryCache[scope] = { version, data };
+        memoryCache[scope] = { version, data, expiresAt: Date.now() + DIRECTORY_MEMORY_TTL_MS };
         return data;
       }
     } catch {
@@ -201,11 +214,12 @@ export async function getDirectoryData(
   };
 
   // Update in-memory cache (replacing old version)
-  memoryCache[scope] = { version, data };
+  memoryCache[scope] = { version, data, expiresAt: Date.now() + DIRECTORY_MEMORY_TTL_MS };
 
   if (options.kv) {
     try {
       await options.kv.put(`directory:v1:${scope}`, JSON.stringify({
+        version: data.version,
         authors: data.authors,
         adminAuthors: data.adminAuthors,
         tags: data.tags,
@@ -229,7 +243,7 @@ export async function getDirectoryData(
       const res = new Response(JSON.stringify(responsePayload), {
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=86400',
+          'Cache-Control': 'public, max-age=3600',
         },
       });
       await cache.put(cacheKey, res);
@@ -246,29 +260,25 @@ export async function getDirectoryData(
  * Performs at most ONE single images table GROUP BY aggregation on cache miss,
  * deriving global totals via JS reduction without a second full table scan.
  */
-export async function getAdminOverviewStats(
+export function getAdminOverviewStats(
+  db: any,
+  version?: number,
+  options: GetAdminOverviewStatsOptions = {},
+): Promise<AdminOverviewStats> {
+  return overviewLoads.run(`${version ?? 'latest'}:${options.mediaCountsReady ?? 'unknown'}`,
+    () => loadAdminOverviewStats(db, version, options));
+}
+
+async function loadAdminOverviewStats(
   db: any,
   version?: number,
   options: GetAdminOverviewStatsOptions = {}
 ): Promise<AdminOverviewStats> {
-  // 1. Determine directory_version and mediaCountsReady
   let mediaCountsReady = options.mediaCountsReady;
   let resolvedVersion = version;
-
-  if (typeof resolvedVersion !== 'number' || typeof mediaCountsReady !== 'boolean') {
-    const statsRow = await db
-      .prepare('SELECT directory_version, media_counts_ready FROM storage_stats WHERE id = 1')
-      .first<{ directory_version: number; media_counts_ready: number }>();
-    if (typeof resolvedVersion !== 'number') {
-      resolvedVersion = statsRow?.directory_version ?? 1;
-    }
-    if (typeof mediaCountsReady !== 'boolean') {
-      mediaCountsReady = statsRow?.media_counts_ready === 1;
-    }
-  }
-
-  // 2. Check in-memory single-entry version cache
-  if (adminOverviewMemoryCache && adminOverviewMemoryCache.version === resolvedVersion) {
+  // Check bounded caches before touching D1, just like the public directory.
+  if (adminOverviewMemoryCache && adminOverviewMemoryCache.expiresAt > Date.now()
+    && (resolvedVersion === undefined || adminOverviewMemoryCache.version === resolvedVersion)) {
     return adminOverviewMemoryCache.data;
   }
 
@@ -278,13 +288,21 @@ export async function getAdminOverviewStats(
     try {
       const cached = await options.kv.get<AdminOverviewStats>(ADMIN_OVERVIEW_KV_KEY, 'json');
       if (cached) {
-        const data = { ...cached, version: resolvedVersion };
-        adminOverviewMemoryCache = { version: resolvedVersion, data };
+        const data = { ...cached, version: resolvedVersion ?? cached.version };
+        adminOverviewMemoryCache = { version: data.version, data, expiresAt: Date.now() + DIRECTORY_MEMORY_TTL_MS };
         return data;
       }
     } catch (error) {
       console.error('Admin overview KV read failed:', error);
     }
+  }
+
+  if (typeof resolvedVersion !== 'number' || typeof mediaCountsReady !== 'boolean') {
+    const statsRow = await db
+      .prepare('SELECT directory_version, media_counts_ready FROM storage_stats WHERE id = 1')
+      .first<{ directory_version: number; media_counts_ready: number }>();
+    resolvedVersion ??= statsRow?.directory_version ?? 1;
+    mediaCountsReady ??= statsRow?.media_counts_ready === 1;
   }
 
   // 3. Fail-open Cache API check
@@ -297,7 +315,7 @@ export async function getAdminOverviewStats(
       const match = await cache.match(cacheKey);
       if (match) {
         const data: AdminOverviewStats = await match.json();
-        adminOverviewMemoryCache = { version: resolvedVersion, data };
+        adminOverviewMemoryCache = { version: resolvedVersion, data, expiresAt: Date.now() + DIRECTORY_MEMORY_TTL_MS };
         return data;
       }
     } catch {
@@ -449,7 +467,7 @@ export async function getAdminOverviewStats(
   };
 
   // Update in-memory cache
-  adminOverviewMemoryCache = { version: resolvedVersion, data };
+  adminOverviewMemoryCache = { version: resolvedVersion, data, expiresAt: Date.now() + DIRECTORY_MEMORY_TTL_MS };
 
   if (options.kv) {
     try {
@@ -467,7 +485,7 @@ export async function getAdminOverviewStats(
       const res = new Response(JSON.stringify(data), {
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=86400',
+          'Cache-Control': 'public, max-age=3600',
         },
       });
       await cache.put(cacheKey, res);

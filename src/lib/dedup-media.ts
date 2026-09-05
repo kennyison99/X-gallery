@@ -9,6 +9,44 @@ export interface DedupObject {
   size: number;
 }
 
+export interface DuplicateCardScanRow extends DedupImageRow {
+  group_cursor: number;
+}
+
+/** Advance over raw IDs, including pages with no duplicates, without regrouping the entire table. */
+export async function fetchDuplicateCardPage(
+  db: any,
+  cursor: number,
+  limit: number,
+): Promise<{ rows: DuplicateCardScanRow[]; nextCursor: number | null }> {
+  const { results: candidates = [] } = await db.prepare(
+    'SELECT id FROM images WHERE id > ? ORDER BY id ASC LIMIT ?',
+  ).bind(cursor, limit + 1).all<{ id: number }>();
+  const page = candidates.slice(0, limit);
+  if (!page.length) return { rows: [], nextCursor: null };
+
+  // Only the earliest card of a post owns its group. Indexed existence probes
+  // find that owner and its siblings, even when they lie on different pages.
+  const { results: rows = [] } = await db.prepare(`
+    SELECT i.id, i.post_url, i.r2_keys, candidate.id AS group_cursor
+    FROM images candidate
+    CROSS JOIN images i INDEXED BY idx_images_post_url
+    WHERE candidate.id IN (SELECT value FROM json_each(?))
+      AND candidate.post_url LIKE '%/status/%'
+      AND i.post_url = candidate.post_url
+      AND NOT EXISTS (
+        SELECT 1 FROM images earlier
+        WHERE earlier.post_url = candidate.post_url AND earlier.id < candidate.id
+      )
+      AND EXISTS (
+        SELECT 1 FROM images later
+        WHERE later.post_url = candidate.post_url AND later.id > candidate.id
+      )
+    ORDER BY candidate.id, i.id
+  `).bind(JSON.stringify(page.map((row: { id: number }) => row.id))).all<DuplicateCardScanRow>();
+  return { rows, nextCursor: candidates.length > limit ? page.at(-1)!.id : null };
+}
+
 export interface CardDuplicateFix {
   kind: 'card';
   post_url: string;

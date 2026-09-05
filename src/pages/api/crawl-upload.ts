@@ -10,6 +10,7 @@ import {
 import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
 import { classifyMediaKeys } from '../../lib/media-classifier';
+import { createImageTagStatements } from '../../lib/image-tags';
 
 
 /**
@@ -203,24 +204,12 @@ export const POST: APIRoute = async ({ request }) => {
       .bind(...bindParams)
       .first();
 
-    // Auto-tagging logic based on description and author
-    if (imageResult?.id) {
-      const autoTags = generateAutoTags(authorInput.handle, description);
-
-      // Save tags to D1 and link them to this image
-      for (const tagName of autoTags) {
-        await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tagName).run();
-        const tagRow = await env.DB.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: number }>();
-        if (tagRow) {
-          await env.DB.prepare('INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)')
-            .bind(imageResult.id, tagRow.id)
-            .run();
-        }
-      }
-    }
+    if (!imageResult?.id) throw new Error('Failed to insert post record into D1');
+    const autoTags = generateAutoTags(authorInput.handle, description);
 
     // Stage 2: Atomically publish and bump directory version, update last_crawled_at
     await env.DB.batch([
+      ...createImageTagStatements(env.DB, Number(imageResult.id), autoTags),
       env.DB.prepare('UPDATE images SET published = 1 WHERE id = ?').bind(imageResult?.id),
       createBumpDirectoryVersionStmt(env.DB),
       env.DB.prepare("UPDATE crawl_accounts SET last_crawled_at = strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE lower(username) = ?").bind(authorInput.handle.toLowerCase()),

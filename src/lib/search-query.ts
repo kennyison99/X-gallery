@@ -87,10 +87,10 @@ export function buildSearchQuery(params: SearchParams) {
 
   if (params.tag) {
     whereClauses.push(`
-      EXISTS (
-        SELECT 1 FROM image_tags it_t
+      i.id IN (
+        SELECT it_t.image_id FROM image_tags it_t
         JOIN tags t_t ON it_t.tag_id = t_t.id
-        WHERE it_t.image_id = i.id AND lower(t_t.name) = lower(?)
+        WHERE lower(t_t.name) = lower(?)
       )
     `);
     bindings.push(params.tag);
@@ -98,10 +98,10 @@ export function buildSearchQuery(params: SearchParams) {
 
   if (params.work) {
     whereClauses.push(`
-      EXISTS (
-        SELECT 1 FROM image_tags it_w
+      i.id IN (
+        SELECT it_w.image_id FROM image_tags it_w
         JOIN tags t_w ON it_w.tag_id = t_w.id
-        WHERE it_w.image_id = i.id AND lower(t_w.name) = lower(?)
+        WHERE lower(t_w.name) = lower(?)
       )
     `);
     bindings.push(params.work);
@@ -138,7 +138,11 @@ export function buildSearchQuery(params: SearchParams) {
   if (!decodedCursor && params.offset > 0) {
     offsetClause = `OFFSET ?`;
   }
-  const indexHint = params.author
+  // Tag membership can seek images by primary key; a forced date index would
+  // instead walk every published image for rare or missing tags.
+  // NOT INDEXED still permits integer-primary-key seeks and keeps stale
+  // statistics on unrelated secondary indexes from turning this into a scan.
+  const indexHint = params.tag || params.work ? 'NOT INDEXED' : params.author
     ? 'INDEXED BY idx_images_published_author_nocase_created_id'
     : 'INDEXED BY idx_images_published_created';
 

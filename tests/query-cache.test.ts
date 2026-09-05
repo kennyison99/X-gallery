@@ -104,3 +104,37 @@ test('KV failures fail open and return fresh D1 data', async () => {
 
   assert.deepEqual(result, { items: [{ id: 9 }] });
 });
+
+test('concurrent misses for one key execute the D1 loader once', async () => {
+  const cache = createThreeTierCache();
+  const kv = new MemoryKv();
+  let loads = 0;
+  const results = await Promise.all(Array.from({ length: 20 }, () => cache.getOrLoad({
+    kv, key: 'concurrent-miss', memoryTtlMs: 30_000, kvTtlSeconds: 300,
+    load: async () => {
+      loads++;
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return { items: [7] };
+    },
+  })));
+  assert.equal(loads, 1);
+  assert.equal(kv.writes.length, 1);
+  assert.ok(results.every(result => result.items[0] === 7));
+});
+
+test('a rejected shared loader is removed so a subsequent request can retry', async () => {
+  const cache = createThreeTierCache();
+  let loads = 0;
+  const options = {
+    key: 'retry-miss', memoryTtlMs: 30_000, kvTtlSeconds: 300,
+    load: async () => {
+      loads++;
+      await new Promise(resolve => setTimeout(resolve, 10));
+      throw new Error('D1 temporarily unavailable');
+    },
+  };
+  const results = await Promise.allSettled([cache.getOrLoad(options), cache.getOrLoad(options)]);
+  assert.ok(results.every(result => result.status === 'rejected'));
+  assert.equal(loads, 1);
+  assert.equal(await cache.getOrLoad({ ...options, load: async () => 42 }), 42);
+});

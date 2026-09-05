@@ -3,6 +3,7 @@ import type { APIRoute } from 'astro';
 import {
   buildCardDuplicateFix,
   buildMediaDuplicateFixes,
+  fetchDuplicateCardPage,
   splitR2Keys,
   type CardDuplicateFix,
   type DedupImageRow,
@@ -58,25 +59,7 @@ async function headKeys(keys: string[]): Promise<Map<string, DedupObject>> {
 }
 
 async function scanCards(cursor: number, limit: number) {
-  const { results = [] } = await env.DB.prepare(`
-    WITH duplicate_posts AS (
-      SELECT post_url, MIN(id) AS group_cursor
-      FROM images
-      WHERE post_url LIKE '%/status/%'
-      GROUP BY post_url
-      HAVING COUNT(*) > 1 AND MIN(id) > ?
-      ORDER BY group_cursor
-      LIMIT ?
-    )
-    SELECT i.id, i.post_url, i.r2_keys, d.group_cursor
-    FROM images i
-    JOIN duplicate_posts d ON d.post_url = i.post_url
-    ORDER BY d.group_cursor, i.id
-  `).bind(cursor, limit + 1).all<CardScanRow>();
-
-  const cursors = [...new Set(results.map((row) => row.group_cursor))];
-  const pageCursors = new Set(cursors.slice(0, limit));
-  const pageRows = results.filter((row) => pageCursors.has(row.group_cursor));
+  const { rows: pageRows, nextCursor } = await fetchDuplicateCardPage(env.DB, cursor, limit);
   const byPost = new Map<string, CardScanRow[]>();
   for (const row of pageRows) {
     const rows = byPost.get(row.post_url);
@@ -91,7 +74,7 @@ async function scanCards(cursor: number, limit: number) {
 
   return {
     duplicates: fixes.filter((fix): fix is CardDuplicateFix => fix !== null),
-    next_cursor: cursors.length > limit ? cursors[limit - 1] : null,
+    next_cursor: nextCursor,
   };
 }
 
