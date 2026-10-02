@@ -3,6 +3,11 @@ import path from "node:path";
 import os from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
+import { uploadMultipartFile } from "./crawl-upload.mjs";
+import { MAX_CRAWL_FILE_BYTES, CRAWL_UPLOAD_PART_BYTES } from "../src/lib/crawl-upload-limits.mjs";
 import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
 import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, newerThanLatest, samePostSignature } from "./media-items.mjs";
 import { transcodeVideoFile } from "./video-transcoder.mjs";
@@ -92,6 +97,9 @@ function parseCookieString(cookieStr) {
 
 
 async function uploadSingleFile(filePath, username) {
+  if (fs.statSync(filePath).size > CRAWL_UPLOAD_PART_BYTES) {
+    return uploadMultipartFile(filePath, username, SITE_URL, CRAWL_API_KEY, fetchWithTimeout);
+  }
   const formData = new FormData();
   formData.append("author", username);
   formData.append("api_key", CRAWL_API_KEY);
@@ -213,7 +221,19 @@ function renderPipelineProgress(doneGroups, totalGroups, stats) {
 
 // Extract media items for one account, paginating via cursor for full history.
 // Returns a flat array of media items: { url, tweet_id, date, type, content, ... }
-async function extractMediaForAccount(username, authToken, { all, previousLatest }) {
+async function extractMediaForAccount(username, authToken, { all, previousLatest, postIds }) {
+  if (postIds) {
+    const media = [];
+    for (const postId of postIds) {
+      const postUrl = `https://x.com/${username}/status/${postId}`;
+      if (await checkUploadExists(username, postUrl)) continue;
+      const response = await runXtractor(postUrl, authToken, ["--type", "all"]);
+      const items = (response.media ?? []).filter((item) => String(item.tweet_id) === postId);
+      if (items.length === 0) throw new Error(`No media returned for recovery post ${postId}`);
+      media.push(...items);
+    }
+    return { media, latest: null, skipped: false };
+  }
   const url = `https://x.com/${username}/media`;
   // --type all returns photo + video + animated_gif so we can support videos
   // and convert animated_gif to animated WebP.
@@ -225,7 +245,7 @@ async function extractMediaForAccount(username, authToken, { all, previousLatest
   const firstResp = await runXtractor(url, authToken, [...baseArgs, "--limit", String(firstLimit)]);
   const firstPageItems = firstResp.media ?? [];
   const latest = latestPostSignature(firstPageItems);
-  if (samePostSignature(latest, previousLatest)) {
+  if (!all && samePostSignature(latest, previousLatest)) {
     return { media: [], latest, skipped: true };
   }
 
@@ -372,11 +392,10 @@ function extForItem(item) {
 async function downloadFile(mediaUrl, outputPath) {
   const res = await fetchWithTimeout(mediaUrl, {
     headers: { "User-Agent": "Twitter-X-Media-Batch-Downloader" },
-  });
+  }, 15 * 60_000);
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${mediaUrl}`);
-  const buf = Buffer.from(await res.arrayBuffer());
   const tmp = `${outputPath}.part`;
-  fs.writeFileSync(tmp, buf);
+  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
   fs.renameSync(tmp, outputPath);
 }
 
@@ -423,7 +442,7 @@ async function convertMediaFile(mediaPath, itemType) {
   return webpPath;
 }
 
-async function processTweetGroup({ key, tasks, username, metaByTweetId, accountNick, archive }) {
+export async function processTweetGroup({ key, tasks, username, metaByTweetId, accountNick, archive }) {
   const stats = { downloaded: 0, skipped: 0, processed: 0, uploaded: 0, failed: 0 };
   const downloadedTasks = [];
 
@@ -461,14 +480,13 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
 
   if (stats.failed > 0) return stats;
 
-  // Check if any single file exceeds Cloudflare's 100MB upload limit
-  const MAX_SINGLE_FILE_SIZE = 95 * 1024 * 1024; // 95 MB safety cap
+  // Large files use R2 multipart uploads, independently of the HTTP body limit.
   let hasTooLargeFile = false;
   for (const filePath of finalFiles) {
     if (filePath && fs.existsSync(filePath)) {
       const size = fs.statSync(filePath).size;
-      if (size > MAX_SINGLE_FILE_SIZE) {
-        console.warn(`  ⚠️ Tweet ${key} skipped: contains a file that is too large (${(size / 1024 / 1024).toFixed(2)} MB), which exceeds Cloudflare 100MB limit.`);
+      if (size > MAX_CRAWL_FILE_BYTES) {
+        console.warn(`  Tweet ${key} failed: file exceeds the 1 GB limit (${size} bytes).`);
         hasTooLargeFile = true;
         break;
       }
@@ -476,11 +494,7 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
   }
 
   if (hasTooLargeFile) {
-    stats.skipped += finalFiles.length;
-    for (const task of downloadedTasks) {
-      archive[task.mediaId] = 1;
-    }
-    saveArchive(archive);
+    stats.failed += finalFiles.length;
     return stats;
   }
 
@@ -507,16 +521,7 @@ async function processTweetGroup({ key, tasks, username, metaByTweetId, accountN
     saveArchive(archive);
   } catch (err) {
     console.error(`  ✗ ${key} upload failed: ${err.message}`);
-    if (err.message.includes("413") || err.message.includes("Payload Too Large")) {
-      console.warn(`  ⚠️ Treating HTTP 413 Payload Too Large as skipped to prevent crawler lockup.`);
-      stats.skipped += finalFiles.length;
-      for (const task of downloadedTasks) {
-        archive[task.mediaId] = 1;
-      }
-      saveArchive(archive);
-    } else {
-      stats.failed++;
-    }
+    stats.failed++;
   }
 
   return stats;
@@ -587,7 +592,11 @@ async function main() {
   }
 
   const { accounts } = await accountsRes.json();
-  const enabledAccounts = accounts.filter((a) => a.enabled);
+  const recoveryPath = process.env.CRAWL_RECOVERY_FILE;
+  const recoveryPosts = recoveryPath ? JSON.parse(fs.readFileSync(recoveryPath, 'utf8')).posts : null;
+  const enabledAccounts = recoveryPosts
+    ? [...new Set(recoveryPosts.map((post) => post.username))].map((username) => ({ username, enabled: true, crawl_all: 1 }))
+    : accounts.filter((a) => a.enabled);
   console.log(`Found ${accounts.length} account(s), ${enabledAccounts.length} enabled.\n`);
 
   if (enabledAccounts.length === 0) {
@@ -621,12 +630,13 @@ async function main() {
   let totalAccountsProcessed = 0;
   let totalImagesDownloaded = 0;
   let totalImagesUploaded = 0;
+  let failedAccounts = 0;
 
   for (let ai = 0; ai < enabledAccounts.length; ai++) {
     const account = enabledAccounts[ai];
     const { username } = account;
     const isCrawlAll = accountCrawlAll(account);
-    const crawlMode = isCrawlAll ? "all" : "latest";
+    const crawlMode = isCrawlAll && !recoveryPosts ? "all" : "latest";
     const discovered = isCrawlAll ? null : discoveredLatest.get(username);
     if (!isCrawlAll && discovered?.skipped) {
       await reportCrawlComplete(username, crawlMode, 0);
@@ -649,7 +659,10 @@ async function main() {
       let latest = null;
       try {
         const extracted = isCrawlAll
-          ? await extractMediaForAccount(username, authToken, { all: true, previousLatest })
+          ? await extractMediaForAccount(username, authToken, {
+            all: true, previousLatest,
+            postIds: recoveryPosts?.filter((post) => post.username === username).map((post) => post.tweetId),
+          })
           : discovered;
         if (!extracted) throw new Error("latest discovery result missing");
         if (extracted?.error) throw extracted.error;
@@ -661,6 +674,7 @@ async function main() {
           continue;
         }
       } catch (extErr) {
+        failedAccounts++;
         console.error(`  ✗ xtractor failed for @${username}: ${extErr.message}`);
         await reportCrawlComplete(username, crawlMode, 0, extErr.message);
         continue;
@@ -671,6 +685,9 @@ async function main() {
         (m) => m && m.url && ACCEPTED_TYPES.has((m.type ?? "").toLowerCase()),
       );
       mediaItems = dedupeMediaItems(mediaItems);
+      if (recoveryPosts) {
+        for (const item of mediaItems) delete archive[mediaIdFromUrl(item.url)];
+      }
       const photoCount = mediaItems.filter((m) => {
         const t = (m.type ?? "").toLowerCase();
         return t === "photo" || t === "image" || t === "";
@@ -757,11 +774,13 @@ async function main() {
         setAccountLatest(archive, username, latest);
         saveArchive(archive);
       } else {
+        failedAccounts++;
         console.warn(`  WARNING: ${accountError}`);
       }
       await reportCrawlComplete(username, crawlMode, accountImagesUploaded, accountError);
       console.log(`  Reported crawl-complete: ${crawlMode} mode, +${accountImagesUploaded} new image(s).`);
     } catch (err) {
+      failedAccounts++;
       console.error(`ERROR processing @${username}: ${err.message}`);
       await reportCrawlComplete(username, crawlMode, accountImagesUploaded, err.message);
     } finally {
@@ -780,9 +799,10 @@ async function main() {
   console.log(`Accounts processed : ${totalAccountsProcessed}`);
   console.log(`Images downloaded  : ${totalImagesDownloaded}`);
   console.log(`Images uploaded    : ${totalImagesUploaded}`);
+  if (recoveryPosts && failedAccounts > 0) throw new Error(`Recovery incomplete: ${failedAccounts} account(s) failed`);
 }
 
-main().catch((err) => {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });

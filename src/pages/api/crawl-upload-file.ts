@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { handleCrawlMultipart } from '../../lib/crawl-multipart';
+import { MAX_CRAWL_FILE_BYTES } from '../../lib/crawl-upload-limits.mjs';
 import {
   contentTypeForFilename,
   wouldExceedStorage,
@@ -20,6 +22,18 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
+    if (new URL(request.url).searchParams.has('action')) {
+      const apiKey = request.headers.get('X-API-Key');
+      const expectedKey = env.CRAWL_API_KEY;
+      if (!apiKey || !expectedKey) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      const encoder = new TextEncoder();
+      const [provided, expected] = await Promise.all([
+        crypto.subtle.digest('SHA-256', encoder.encode(apiKey)),
+        crypto.subtle.digest('SHA-256', encoder.encode(expectedKey)),
+      ]);
+      if (!crypto.subtle.timingSafeEqual(provided, expected)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      return await handleCrawlMultipart(request, env.BUCKET, wouldExceedStorage, addStorageBytes);
+    }
     const formData = await request.formData();
     const apiKey = formData.get('api_key') as string | null;
     const expectedKey = (env as any).CRAWL_API_KEY;
@@ -39,6 +53,8 @@ export const POST: APIRoute = async ({ request }) => {
         headers: { 'Content-Type': 'application/json' }
       });
     }
+
+    if (file.size > MAX_CRAWL_FILE_BYTES) return Response.json({ error: 'File exceeds 1 GB' }, { status: 413 });
 
     if (!author) {
       return new Response(JSON.stringify({ error: 'Author is required' }), {
@@ -78,3 +94,7 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 };
+
+export const PUT = POST;
+
+export const GET: APIRoute = () => Response.json({ multipart: true, maxFileBytes: MAX_CRAWL_FILE_BYTES });

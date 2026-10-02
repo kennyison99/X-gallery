@@ -1,0 +1,2 @@
+export const MAX_CRAWL_FILE_BYTES = 1_000_000_000;
+export const CRAWL_UPLOAD_PART_BYTES = 16 * 1024 * 1024;

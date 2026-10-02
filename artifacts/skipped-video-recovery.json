@@ -1,0 +1,29 @@
+{
+  "posts": [
+    {
+      "username": "silva_siufabing",
+      "tweetId": "2105577785272225980",
+      "runId": 36849625873,
+      "runDate": "2026-10-01T10:31:00Z"
+    },
+    {
+      "username": "admiralblanc",
+      "tweetId": "2074055588024332468",
+      "runId": 30187627385,
+      "runDate": "2026-07-26T04:20:34Z"
+    },
+    {
+      "username": "jiuzi_999i",
+      "tweetId": "2079460944204136553",
+      "runId": 30187627385,
+      "runDate": "2026-07-26T04:20:34Z"
+    }
+  ],
+  "scannedRuns": 447,
+  "unavailableRuns": {
+    "count": 49,
+    "newest": "2026-07-03T17:12:53Z",
+    "note": "Expired logs predate the size-skip logic introduced on 2026-07-12."
+  },
+  "oldestRun": "2026-06-18T10:42:22Z"
+}
