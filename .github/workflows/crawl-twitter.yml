@@ -5,57 +5,65 @@ on:
     branches: [main]
     paths: ['artifacts/skipped-video-recovery.json']
   schedule:
-    # Run every 3 hours at minute 07 UTC (12:07 HKT, then 15:07, etc.).
+    # Run every 3 hours at minute 07 UTC (09:07 HKT, then 12:07, etc.).
     - cron: "7 1,4,7,10,13,16,19,22 * * *"
   workflow_dispatch:
     inputs:
       retry_skipped_videos:
         description: 'Recover posts listed in artifacts/skipped-video-recovery.json'
-        required: false
         type: boolean
         default: false
       crawl_all:
         description: 'Crawl all historical images (ignores the latest-only limit)'
-        required: false
         type: boolean
         default: false
       fix_links:
         description: 'Run post links repair script to fix rounded tweet IDs'
-        required: false
         type: boolean
         default: false
 
+# Lock the whole workflow; its two shards may run together inside this lock.
 concurrency:
   group: gallery-media-mutations
   cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
 
 jobs:
-  crawl:
-    runs-on: ubuntu-latest
+  detect:
+    runs-on: ubuntu-24.04
     environment: env
-
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      count: ${{ steps.detect.outputs.count }}
+      plan_artifact: ${{ steps.plan_artifact.outputs.artifact-id }}
+      xtractor_version: ${{ steps.xtractor_version.outputs.version }}
+    env:
+      TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+      CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
+      CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || inputs.retry_skipped_videos) && 'artifacts/skipped-video-recovery.json' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Cache xtractor dedup archive
-        uses: actions/cache@v4
+        if: ${{ !inputs.fix_links }}
+        uses: actions/cache/restore@v4
         with:
           path: scripts/.xtractor-archive.json
-          key: xtractor-archive-v1-${{ github.run_id }}
+          key: xtractor-archive-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             xtractor-archive-v1-
-
-      - name: Set up Python 3.12
-        if: ${{ github.event.inputs.fix_links != 'true' }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Resolve xtractor version
         id: xtractor_version
@@ -67,28 +75,11 @@ jobs:
           path: scripts/.xtractor-bin
           key: xtractor-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.xtractor_version.outputs.version }}
 
-      - name: Install Pillow
-        if: ${{ github.event.inputs.fix_links != 'true' }}
-        run: pip install Pillow
-
-      - name: Set up FFmpeg
-        if: ${{ github.event.inputs.fix_links != 'true' }}
-        run: |
-          if command -v ffmpeg >/dev/null 2>&1; then
-            echo "FFmpeg already available."
-          else
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq ffmpeg >/dev/null
-          fi
-
-      - name: Run Twitter crawl script
-        if: ${{ github.event.inputs.fix_links != 'true' }}
+      - name: Detect accounts needing updates
+        if: ${{ !inputs.fix_links }}
+        id: detect
         env:
-          TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
-          SITE_URL: ${{ secrets.SITE_URL }}
-          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
-          CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
-          CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || github.event.inputs.retry_skipped_videos == 'true') && 'artifacts/skipped-video-recovery.json' || '' }}
+          CRAWL_ALL: ${{ inputs.crawl_all }}
         run: |
           if [ -n "$CRAWL_RECOVERY_FILE" ]; then
             node --input-type=module -e '
@@ -102,20 +93,163 @@ jobs:
               throw new Error("Multipart upload deployment did not become ready");
             '
           fi
-          if [ "${{ github.event.inputs.crawl_all }}" = "true" ]; then
-            node scripts/crawl-twitter.mjs --all
-          else
-            node scripts/crawl-twitter.mjs
-          fi
+          args=(--detect)
+          if [ "$CRAWL_ALL" = "true" ]; then args+=(--all); fi
+          node scripts/crawl-twitter.mjs "${args[@]}"
+
+      - name: Share detected media and archive baseline
+        if: ${{ !inputs.fix_links }}
+        id: plan_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawl-plan-${{ github.run_attempt }}
+          path: scripts/.crawl-plan.json
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Run links repair script
-        if: ${{ github.event.inputs.fix_links == 'true' }}
-        env:
-          TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
-          SITE_URL: ${{ secrets.SITE_URL }}
-          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+        if: ${{ inputs.fix_links }}
+        run: npm run fix-links
+
+  crawl:
+    needs: detect
+    if: ${{ !inputs.fix_links && needs.detect.outputs.count != '0' }}
+    runs-on: ubuntu-24.04
+    environment: env
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    env:
+      TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+      CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
+      CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || inputs.retry_skipped_videos) && 'artifacts/skipped-video-recovery.json' || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download detected work
+        id: plan_download
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.detect.outputs.plan_artifact }}
+          merge-multiple: true
+          path: scripts/
+
+      - name: Restore xtractor for historical or recovery work
+        if: ${{ matrix.full }}
+        uses: actions/cache/restore@v4
+        with:
+          path: scripts/.xtractor-bin
+          key: xtractor-bin-${{ runner.os }}-${{ runner.arch }}-${{ needs.detect.outputs.xtractor_version }}
+
+      - name: Set up Python 3.12
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore installed Pillow environment
+        id: pillow_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .crawl-venv
+          key: pillow-venv-v1-ubuntu24-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/crawl-requirements.txt') }}
+
+      - name: Install Pillow on cache miss
+        if: ${{ steps.pillow_cache.outputs.cache-hit != 'true' }}
         run: |
-          npm run fix-links
+          python -m venv .crawl-venv
+          .crawl-venv/bin/python -m pip install -r scripts/crawl-requirements.txt
+
+      - name: Save installed Pillow environment
+        if: ${{ steps.pillow_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .crawl-venv
+          key: ${{ steps.pillow_cache.outputs.cache-primary-key }}
+
+      - name: Activate cached Python environment
+        run: echo "$GITHUB_WORKSPACE/.crawl-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Set up FFmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+
+      - name: Crawl assigned accounts
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: node scripts/crawl-twitter.mjs --plan=scripts/.crawl-plan.json --shard="$SHARD"
+
+      - name: Snapshot partial progress
+        if: ${{ always() && steps.plan_download.outcome == 'success' }}
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: node scripts/crawl-plan.mjs --snapshot "$SHARD"
+
+      - name: Preserve shard progress
+        if: ${{ always() && hashFiles('scripts/.crawl-shard-archive.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawl-archive-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: scripts/.crawl-shard-archive.json
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+  finalize:
+    needs: [detect, crawl]
+    if: ${{ always() && needs.detect.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: env
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download archive baseline
+        if: ${{ !inputs.fix_links }}
+        id: plan_download
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.detect.outputs.plan_artifact }}
+          merge-multiple: true
+          path: scripts/
+
+      - name: Download shard progress from all attempts
+        if: ${{ !inputs.fix_links && needs.detect.outputs.count != '0' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: crawl-archive-*
+          path: scripts/.crawl-results/
+
+      - name: Merge completed and partial shard progress
+        if: ${{ always() && !inputs.fix_links && steps.plan_download.outcome == 'success' }}
+        run: node scripts/crawl-plan.mjs --merge
+
+      - name: Save xtractor dedup archive including partial progress
+        if: ${{ always() && !inputs.fix_links && hashFiles('scripts/.xtractor-archive.json') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: scripts/.xtractor-archive.json
+          key: xtractor-archive-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run daily cleanup for pending review images
         env:
@@ -123,10 +257,17 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -n "$SITE_URL" ] && [ -n "$CRON_SECRET" ]; then
-            echo "Triggering daily cleanup..."
-            curl -X POST "${SITE_URL}/api/cron-cleanup" \
+            curl --fail-with-body --show-error --max-time 60 -X POST "${SITE_URL}/api/cron-cleanup" \
               -H "Content-Type: application/json" \
               -H "X-Cron-Secret: ${CRON_SECRET}"
           else
-            echo "Skipping cleanup: SITE_URL or CRON_SECRET is not configured in GitHub Secrets"
+            echo "Skipping cleanup: SITE_URL or CRON_SECRET is not configured"
           fi
+
+      - name: Require all crawl workers to succeed
+        if: ${{ always() && !inputs.fix_links }}
+        env:
+          ACCOUNT_COUNT: ${{ needs.detect.outputs.count }}
+          WORKER_RESULT: ${{ needs.crawl.result }}
+        run: |
+          if [ "$ACCOUNT_COUNT" != "0" ]; then test "$WORKER_RESULT" = success; fi

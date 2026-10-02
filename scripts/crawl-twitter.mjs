@@ -11,6 +11,7 @@ import { MAX_CRAWL_FILE_BYTES, CRAWL_UPLOAD_PART_BYTES } from "../src/lib/crawl-
 import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
 import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, newerThanLatest, samePostSignature } from "./media-items.mjs";
 import { transcodeVideoFile } from "./video-transcoder.mjs";
+import { splitCrawlWork } from "./crawl-plan.mjs";
 
 const execAsync = promisify(exec);
 
@@ -581,33 +582,47 @@ async function main() {
     process.exit(1);
   }
 
-  const xtractor = await ensureXtractor();
-  console.log(`xtractor        : ${xtractor.version} (pipeline concurrency ${PIPELINE_CONCURRENCY})`);
-
-  console.log("Fetching account list…");
-  const accountsRes = await fetchWithTimeout(`${SITE_URL}/api/crawl-accounts`);
-  if (!accountsRes.ok) {
-    console.error(`ERROR: Failed to fetch accounts – HTTP ${accountsRes.status}`);
-    process.exit(1);
+  const planArg = process.argv.find((arg) => arg.startsWith('--plan='));
+  const plan = planArg ? JSON.parse(fs.readFileSync(planArg.slice('--plan='.length), 'utf8')) : null;
+  const shardIndex = Number(process.argv.find((arg) => arg.startsWith('--shard='))?.slice('--shard='.length));
+  if (plan && (!Number.isInteger(shardIndex) || !Array.isArray(plan.shards?.[shardIndex]))) {
+    throw new Error('Invalid or missing crawl shard');
+  }
+  const work = plan?.shards[shardIndex];
+  if (!work || work.some(({ account }) => accountCrawlAll(account))) {
+    const xtractor = await ensureXtractor();
+    console.log(`xtractor        : ${xtractor.version} (pipeline concurrency ${PIPELINE_CONCURRENCY})`);
   }
 
-  const { accounts } = await accountsRes.json();
+  console.log("Fetching account list…");
+  let accounts;
+  if (work) {
+    accounts = work.map(({ account }) => account);
+  } else {
+    const accountsRes = await fetchWithTimeout(`${SITE_URL}/api/crawl-accounts`);
+    if (!accountsRes.ok) throw new Error(`Failed to fetch accounts: HTTP ${accountsRes.status}`);
+    ({ accounts } = await accountsRes.json());
+  }
+
   const recoveryPath = process.env.CRAWL_RECOVERY_FILE;
   const recoveryPosts = recoveryPath ? JSON.parse(fs.readFileSync(recoveryPath, 'utf8')).posts : null;
-  const enabledAccounts = recoveryPosts
+  const enabledAccounts = work ? accounts : recoveryPosts
     ? [...new Set(recoveryPosts.map((post) => post.username))].map((username) => ({ username, enabled: true, crawl_all: 1 }))
     : accounts.filter((a) => a.enabled);
   console.log(`Found ${accounts.length} account(s), ${enabledAccounts.length} enabled.\n`);
 
-  if (enabledAccounts.length === 0) {
+  if (enabledAccounts.length === 0 && !process.argv.includes('--detect')) {
     console.log("Nothing to do.");
     return;
   }
 
-  const archive = loadArchive();
+  const archive = plan ? plan.archive : loadArchive();
   console.log(`Archive has ${countArchivedMedia(archive)} known media item(s).\n`);
   const latestAccounts = enabledAccounts.filter((account) => !accountCrawlAll(account));
-  const discoveredLatest = latestAccounts.length > 0
+  const discoveredLatest = work
+    ? new Map(work.map(({ account, extracted }) => [account.username,
+      extracted?.error ? { ...extracted, error: new Error(extracted.error) } : extracted]))
+    : latestAccounts.length > 0
     ? await discoverLatestAccounts(latestAccounts, authToken, archive)
     : new Map();
   const skippedLatestUsernames = latestAccounts
@@ -625,6 +640,35 @@ async function main() {
     } else {
       console.log("No latest-mode account will be skipped.\n");
     }
+  }
+
+  if (process.argv.includes('--detect')) {
+    const pending = [];
+    for (const account of enabledAccounts) {
+      const all = accountCrawlAll(account);
+      const extracted = discoveredLatest.get(account.username);
+      if (!all && extracted && !extracted.error) {
+        extracted.media = dedupeMediaItems(extracted.media.filter((item) => item?.url
+          && ACCEPTED_TYPES.has((item.type ?? '').toLowerCase()) && !archive[mediaIdFromUrl(item.url)]));
+      }
+      if (!all && extracted && !extracted.error && (extracted.skipped || extracted.media.length === 0)) {
+        setAccountLatest(archive, account.username, extracted.latest);
+        await reportCrawlComplete(account.username, 'latest', 0);
+        continue;
+      }
+      pending.push({
+        account: { ...account, crawl_all: all },
+        extracted: extracted?.error ? { error: String(extracted.error.message ?? extracted.error) } : extracted,
+      });
+    }
+    const shards = splitCrawlWork(pending);
+    fs.writeFileSync('scripts/.crawl-plan.json', JSON.stringify({ archive, shards }));
+    if (process.env.GITHUB_OUTPUT) {
+      const matrix = { include: shards.map((entries, shard) => ({ shard, full: entries.some(({ account }) => account.crawl_all) })) };
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(matrix)}\ncount=${pending.length}\n`);
+    }
+    console.log(`Detected ${pending.length} account(s) needing work; ${shards.length} worker(s).`);
+    return;
   }
 
   let totalAccountsProcessed = 0;
@@ -686,7 +730,12 @@ async function main() {
       );
       mediaItems = dedupeMediaItems(mediaItems);
       if (recoveryPosts) {
-        for (const item of mediaItems) delete archive[mediaIdFromUrl(item.url)];
+        archive.__recoveryTouched ??= [];
+        for (const item of mediaItems) {
+          const mediaId = mediaIdFromUrl(item.url);
+          delete archive[mediaId];
+          archive.__recoveryTouched.push(mediaId);
+        }
       }
       const photoCount = mediaItems.filter((m) => {
         const t = (m.type ?? "").toLowerCase();
@@ -799,7 +848,7 @@ async function main() {
   console.log(`Accounts processed : ${totalAccountsProcessed}`);
   console.log(`Images downloaded  : ${totalImagesDownloaded}`);
   console.log(`Images uploaded    : ${totalImagesUploaded}`);
-  if (recoveryPosts && failedAccounts > 0) throw new Error(`Recovery incomplete: ${failedAccounts} account(s) failed`);
+  if (failedAccounts > 0) throw new Error(`Crawl incomplete: ${failedAccounts} account(s) failed`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((err) => {

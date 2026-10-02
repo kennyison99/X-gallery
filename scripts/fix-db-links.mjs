@@ -65,6 +65,7 @@ async function main() {
   console.log(`Processing ${authors.length} authors...`);
 
   const updates = [];
+  let failedAuthors = 0;
 
   for (let authorIdx = 0; authorIdx < authors.length; authorIdx++) {
     const author = authors[authorIdx];
@@ -110,6 +111,7 @@ async function main() {
       }
       console.log(`Matched @${author}: ${matchCount}/${authorImages.length} links.`);
     } catch (err) {
+      failedAuthors++;
       console.error(`  Failed to process @${author}:`, err.message);
     }
 
@@ -136,7 +138,11 @@ async function main() {
     console.log("\nNo matching links found to repair.");
   }
 
+  if (failedAuthors > 0) throw new Error(`Links repair incomplete: ${failedAuthors} author(s) failed`);
   console.log("All done!");
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

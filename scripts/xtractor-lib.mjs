@@ -274,6 +274,8 @@ async function runXtractor(url, authToken, extraArgs = []) {
   const args = [url, "--auth-token", authToken, "--json", "--metadata", ...extraArgs];
   const child = spawn(XTRACTOR_PATH, args, {
     env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+    timeout: 180_000,
+    killSignal: "SIGKILL",
   });
 
   let stdout = "";
@@ -288,7 +290,7 @@ async function runXtractor(url, authToken, extraArgs = []) {
 
   if (code !== 0) {
     const merged = `${stdout}\n${stderr}`.trim();
-    if (!merged) throw new Error("xtractor process terminated before returning data");
+    if (!merged) throw new Error("xtractor process terminated before returning data (timeout or process failure)");
     throw new Error(parseExtractorError(merged, ""));
   }
 

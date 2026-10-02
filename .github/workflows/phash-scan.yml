@@ -27,6 +27,7 @@ on:
 concurrency:
   group: gallery-media-mutations
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
@@ -35,6 +36,7 @@ jobs:
   phash-scan:
     runs-on: ubuntu-latest
     environment: env
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -49,22 +51,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run pHash scan (Dry-run)
-        if: ${{ !inputs.apply }}
+      - name: Run pHash scan
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
           ENV_LIMIT: ${{ inputs.limit }}
           ENV_THRESHOLD: ${{ inputs.threshold }}
           ENV_CONCURRENCY: ${{ inputs.concurrency }}
-        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --concurrency="${ENV_CONCURRENCY:-12}"
-
-      - name: Run pHash scan and move duplicates to pending review
-        if: ${{ inputs.apply }}
-        env:
-          SITE_URL: ${{ secrets.SITE_URL }}
-          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
-          ENV_LIMIT: ${{ inputs.limit }}
-          ENV_THRESHOLD: ${{ inputs.threshold }}
-          ENV_CONCURRENCY: ${{ inputs.concurrency }}
-        run: npm run phash-scan -- --limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --concurrency="${ENV_CONCURRENCY:-12}" --apply
+          APPLY: ${{ inputs.apply }}
+        run: |
+          args=(--limit="${ENV_LIMIT:-50}" --threshold="${ENV_THRESHOLD:-10}" --concurrency="${ENV_CONCURRENCY:-12}")
+          if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+          npm run phash-scan -- "${args[@]}"
