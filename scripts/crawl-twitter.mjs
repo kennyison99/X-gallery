@@ -27,6 +27,24 @@ const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? "";
 const CRAWL_RUN_TYPE = process.env.CRAWL_RUN_TYPE === "manual" ? "manual" : "auto";
 
+function parseMaxFailedAccounts() {
+  for (let i = 0; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg.startsWith("--max-failed-accounts=") || arg.startsWith("--max-failures=")) {
+      return Number(arg.split("=")[1]);
+    }
+    if ((arg === "--max-failed-accounts" || arg === "--max-failures") && i + 1 < process.argv.length) {
+      return Number(process.argv[i + 1]);
+    }
+  }
+  if (process.env.MAX_FAILED_ACCOUNTS !== undefined && process.env.MAX_FAILED_ACCOUNTS !== "") {
+    return Number(process.env.MAX_FAILED_ACCOUNTS);
+  }
+  return 0;
+}
+const parsedMaxFailures = parseMaxFailedAccounts();
+const MAX_FAILED_ACCOUNTS = Number.isFinite(parsedMaxFailures) ? Math.max(0, parsedMaxFailures) : 0;
+
 // Archive: downloaded media ids plus per-account latest post signatures.
 const ARCHIVE_PATH = path.resolve("scripts/.xtractor-archive.json");
 
@@ -675,6 +693,7 @@ async function main() {
   let totalImagesDownloaded = 0;
   let totalImagesUploaded = 0;
   let failedAccounts = 0;
+  const failedAccountDetails = [];
 
   for (let ai = 0; ai < enabledAccounts.length; ai++) {
     const account = enabledAccounts[ai];
@@ -719,6 +738,7 @@ async function main() {
         }
       } catch (extErr) {
         failedAccounts++;
+        failedAccountDetails.push({ username, error: extErr.message });
         console.error(`  ✗ xtractor failed for @${username}: ${extErr.message}`);
         await reportCrawlComplete(username, crawlMode, 0, extErr.message);
         continue;
@@ -824,12 +844,14 @@ async function main() {
         saveArchive(archive);
       } else {
         failedAccounts++;
+        failedAccountDetails.push({ username, error: accountError });
         console.warn(`  WARNING: ${accountError}`);
       }
       await reportCrawlComplete(username, crawlMode, accountImagesUploaded, accountError);
       console.log(`  Reported crawl-complete: ${crawlMode} mode, +${accountImagesUploaded} new image(s).`);
     } catch (err) {
       failedAccounts++;
+      failedAccountDetails.push({ username, error: err.message });
       console.error(`ERROR processing @${username}: ${err.message}`);
       await reportCrawlComplete(username, crawlMode, accountImagesUploaded, err.message);
     } finally {
@@ -848,7 +870,20 @@ async function main() {
   console.log(`Accounts processed : ${totalAccountsProcessed}`);
   console.log(`Images downloaded  : ${totalImagesDownloaded}`);
   console.log(`Images uploaded    : ${totalImagesUploaded}`);
-  if (failedAccounts > 0) throw new Error(`Crawl incomplete: ${failedAccounts} account(s) failed`);
+  if (failedAccounts > 0) {
+    console.log(`Accounts failed    : ${failedAccounts}`);
+  }
+  if (failedAccounts > MAX_FAILED_ACCOUNTS) {
+    throw new Error(`Crawl incomplete: ${failedAccounts} account(s) failed (allowed threshold: <= ${MAX_FAILED_ACCOUNTS})`);
+  }
+  if (failedAccounts > 0) {
+    const failedList = failedAccountDetails.map((f) => `@${f.username} (${f.error})`).join(", ");
+    const warningMsg = `Crawl completed with ${failedAccounts} failed account(s) (within allowed threshold of ${MAX_FAILED_ACCOUNTS}): ${failedList}`;
+    console.warn(`⚠️  WARNING: ${warningMsg}`);
+    if (process.env.GITHUB_ACTIONS) {
+      console.log(`::warning::${warningMsg}`);
+    }
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((err) => {

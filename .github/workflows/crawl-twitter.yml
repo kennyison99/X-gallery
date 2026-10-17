@@ -21,6 +21,10 @@ on:
         description: 'Run post links repair script to fix rounded tweet IDs'
         type: boolean
         default: false
+      max_failed_accounts:
+        description: 'Allowed number of failed accounts before workflow fails (default: 5)'
+        type: number
+        default: 5
 
 # Lock the whole workflow; its two shards may run together inside this lock.
 concurrency:
@@ -47,6 +51,7 @@ jobs:
       CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
       CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
       CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || inputs.retry_skipped_videos) && 'artifacts/skipped-video-recovery.json' || '' }}
+      MAX_FAILED_ACCOUNTS: ${{ inputs.max_failed_accounts != '' && inputs.max_failed_accounts || 5 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -128,6 +133,7 @@ jobs:
       CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
       CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
       CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || inputs.retry_skipped_videos) && 'artifacts/skipped-video-recovery.json' || '' }}
+      MAX_FAILED_ACCOUNTS: ${{ inputs.max_failed_accounts != '' && inputs.max_failed_accounts || 5 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

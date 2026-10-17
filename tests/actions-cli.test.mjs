@@ -56,6 +56,17 @@ test('maintenance CLIs fail on setup or account errors and succeed on empty resu
           assert.equal(plan.shards.length, failure === 'account' ? 1 : 0);
           if (failure === 'account') assert.equal(plan.shards[0][0].extracted.error, 'account failed');
         }
+        if (script === 'crawl-twitter' && failure === 'account') {
+          const tolerated = spawnSync(process.execPath, ['--input-type=module'], {
+            cwd,
+            input: code,
+            env: { ...process.env, SITE_URL: 'https://example.test', CRAWL_API_KEY: 'test', TWITTER_COOKIES: 'auth_token=test', CRAWL_RECOVERY_FILE: '', MAX_FAILED_ACCOUNTS: '5' },
+            encoding: 'utf8',
+            timeout: 10_000,
+          });
+          assert.ifError(tolerated.error);
+          assert.equal(tolerated.status, 0, `tolerated: ${tolerated.stderr}`);
+        }
         if (script === 'crawl-twitter' && failure === 'none') {
           const planPath = path.join(cwd, 'scripts/.crawl-plan.json');
           writeFileSync(planPath, JSON.stringify({ archive: {}, shards: [[{
