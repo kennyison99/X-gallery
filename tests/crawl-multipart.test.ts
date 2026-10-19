@@ -79,7 +79,7 @@ test('crawler uploads bounded chunks, retries parts, and aborts failed uploads',
     }
   };
   try {
-    assert.equal(await uploadMultipartFile(file, 'silva_siufabing', 'https://example.test', 'secret', fetchImpl), 'silva_siufabing_2105577785272225980_1.mp4');
+    assert.equal(await uploadMultipartFile(file, 'silva_siufabing', 'https://example.test', 'secret', fetchImpl), 'silva_siufabing/2105577785272225980_1.mp4');
     assert.deepEqual(sizes, [CRAWL_UPLOAD_PART_BYTES, 10]);
     fail = true;
     await assert.rejects(uploadMultipartFile(file, 'silva_siufabing', 'https://example.test', 'secret', fetchImpl), /HTTP 503/);

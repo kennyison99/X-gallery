@@ -5,6 +5,18 @@ import { execFileSync, execSync, spawn } from 'node:child_process';
 import sharp from 'sharp';
 import { isVideoKey } from '../src/lib/media-classifier.ts';
 
+// Load .env if present
+if (fs.existsSync('.env')) {
+  for (const line of fs.readFileSync('.env', 'utf-8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const [k, ...v] = trimmed.split('=');
+    if (k && v.length && !process.env[k.trim()]) {
+      process.env[k.trim()] = v.join('=').trim();
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Configuration & Command-line Arguments
 // ---------------------------------------------------------------------------
@@ -33,10 +45,12 @@ const USE_WRANGLER = process.argv.includes('--wrangler') || (!SITE_URL && !proce
 const D1_DB_NAME = getArgValue('--db=', 'gallery-db');
 const R2_BUCKET_NAME = getArgValue('--bucket=', 'gallery-images');
 const R2_PUBLIC_URL = (getArgValue('--r2-url=', process.env.R2_PUBLIC_URL || 'https://pub-876dce7204cc44d6910a2b283a13aebe.r2.dev')).replace(/\/$/, '');
+const TYPESAFE_API_KEY = getArgValue('--typesafe-key=', process.env.TYPESAFE_API_KEY || 'apikey_29891b0d3aeac0b4bc980aa8d2730d891cb_08d634668c8ad02eec7a9cf5c30b4067f17cba13d2a6fb3c94a3d7ad6f617e86');
+const PROVIDER_ARG = getArgValue('--provider=', '');
+const IS_JEV = PROVIDER_ARG.toLowerCase() === 'jev' || MODEL_NAME.toLowerCase().includes('jev') || ENDPOINT.includes('typesafe.ai');
 
 const IS_WIN = process.platform === 'win32';
-const IS_MAC = process.platform === 'darwin';
-const CLI_SHELL = IS_WIN ? 'powershell.exe' : true;
+const CLI_SHELL = IS_WIN ? 'cmd.exe' : true;
 
 // ---------------------------------------------------------------------------
 // VLM Prompt Formulation
@@ -185,6 +199,15 @@ export function parseVlmResponse(rawText) {
 // ---------------------------------------------------------------------------
 
 export async function resolveEndpoint(preferredEndpoint = ENDPOINT) {
+  if (IS_JEV) {
+    return {
+      endpoint: 'https://api.typesafe.ai/v1/systemone',
+      model: MODEL_NAME.toLowerCase().includes('jev') ? MODEL_NAME : 'jev-1.14.0',
+      isVllm: false,
+      isJev: true,
+    };
+  }
+
   const candidates = [
     preferredEndpoint,
     'http://localhost:8000/v1',
@@ -203,14 +226,14 @@ export async function resolveEndpoint(preferredEndpoint = ENDPOINT) {
         if (res.ok) {
           const data = await res.json().catch(() => ({}));
           const loadedModel = data.data?.[0]?.id;
-          return { endpoint: url, model: loadedModel || MODEL_NAME, isVllm: true };
+          return { endpoint: url, model: loadedModel || MODEL_NAME, isVllm: true, isJev: false };
         }
       }
       const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(1000) });
-      if (res.ok) return { endpoint: url, model: MODEL_NAME, isVllm: false };
+      if (res.ok) return { endpoint: url, model: MODEL_NAME, isVllm: false, isJev: false };
     } catch {}
   }
-  return { endpoint: preferredEndpoint, model: MODEL_NAME, isVllm: preferredEndpoint.includes(':8000') };
+  return { endpoint: preferredEndpoint, model: MODEL_NAME, isVllm: preferredEndpoint.includes(':8000'), isJev: false };
 }
 
 export async function ensureOllamaRunning(endpoint = ENDPOINT) {
@@ -260,10 +283,111 @@ export async function ensureOllamaRunning(endpoint = ENDPOINT) {
 // ---------------------------------------------------------------------------
 
 export async function optimizeImageBuffer(rawBuffer) {
-  return await sharp(rawBuffer)
-    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+  const image = sharp(rawBuffer);
+  const metadata = await image.metadata();
+  let width = metadata.width || 512;
+  let height = metadata.height || 512;
+
+  // 1. Scale down so max dimension is at most 1024
+  if (width > 1024 || height > 1024) {
+    const scale = Math.min(1024 / width, 1024 / height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  // 2. TypeSafe Jev requires both dimensions >= 256 and total pixels >= 78400 (280x280)
+  const finalWidth = Math.max(280, width);
+  const finalHeight = Math.max(280, height);
+
+  // If aspect ratio is extreme (< 280 on one dimension), contain/pad with neutral background
+  if (finalWidth !== width || finalHeight !== height) {
+    return await image
+      .resize(finalWidth, finalHeight, {
+        fit: 'contain',
+        background: { r: 128, g: 128, b: 128, alpha: 1 },
+      })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+  }
+
+  return await image
+    .resize(finalWidth, finalHeight, { fit: 'inside' })
     .jpeg({ quality: 85 })
     .toBuffer();
+}
+
+export async function classifyImageWithJev({
+  buffer,
+  apiKey = TYPESAFE_API_KEY,
+  model = MODEL_NAME.includes('jev') ? MODEL_NAME : 'jev-1.14.0',
+  timeoutMs = 30_000,
+}) {
+  const optimizedBuffer = await optimizeImageBuffer(buffer);
+  const base64Data = optimizedBuffer.toString('base64');
+  const assetKey = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const payload = {
+    model,
+    state: {
+      photo: assetKey,
+    },
+    assets: {
+      [assetKey]: {
+        type: 'image',
+        format: 'jpg',
+        data_base64: base64Data,
+      },
+    },
+    questions: {
+      is_real_person: {
+        type: 'noul',
+        instructions: 'Is the `photo` originating from real-life photography of a real human person, body, or outfit, rather than a 2D anime drawing, illustration, or CGI render?',
+        criteria: {
+          true: 'Real human photograph, real body, real clothing, cosplay, gravure, or selfie, even if the face is covered by an emoji, sticker, or censor.',
+          false: 'Pure 2D anime drawing, manga illustration, 3D CGI videogame render, or inanimate scene with no real human body.',
+        },
+      },
+      category: {
+        type: 'choice',
+        instructions: 'What is the primary visual category of `photo`?',
+        criteria: {
+          real_photo: 'Real human photography, cosplay, gravure, or selfie with real physical human elements.',
+          anime_2d: 'Pure 2D anime/manga drawing or digital painting.',
+          cgi_3d: '3D CGI render or video game screenshot.',
+          other: 'Non-human scenery, food, or item with no real human person.',
+        },
+      },
+    },
+  };
+
+  const response = await fetch('https://api.typesafe.ai/v1/systemone', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'TypeSafe-Danger-Zone-Images': 'true',
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`TypeSafe Jev request failed: HTTP ${response.status} - ${text}`);
+  }
+
+  const data = await response.json();
+  const noulVal = data.answers?.is_real_person?.noul ?? 0.5;
+  const choiceVal = data.answers?.category?.choice;
+  const choiceConf = data.answers?.category?.confidence ?? 0.8;
+
+  const isReal = noulVal >= 0.5 || choiceVal === 'real_photo';
+  const confidence = Math.max(Math.abs(noulVal - 0.5) * 2, choiceConf);
+  const reason = isReal
+    ? `Jev 1.14 real photography (p=${noulVal.toFixed(2)}, cat=${choiceVal})`
+    : `Jev 1.14 2D/artwork (p=${noulVal.toFixed(2)}, cat=${choiceVal})`;
+
+  return { is_real_person: isReal, confidence, reason };
 }
 
 export async function classifyImageWithVlm({
@@ -272,9 +396,13 @@ export async function classifyImageWithVlm({
   model = MODEL_NAME,
   timeoutMs = 60_000,
 }) {
+  const normalizedEndpoint = endpoint.replace(/\/$/, '');
+  if (IS_JEV || normalizedEndpoint.includes('typesafe.ai') || model.toLowerCase().includes('jev')) {
+    return await classifyImageWithJev({ buffer, apiKey: TYPESAFE_API_KEY, model: model.toLowerCase().includes('jev') ? model : 'jev-1.14.0', timeoutMs });
+  }
+
   const optimizedBuffer = await optimizeImageBuffer(buffer);
   const base64 = optimizedBuffer.toString('base64');
-  const normalizedEndpoint = endpoint.replace(/\/$/, '');
 
   // Try Ollama native /api/chat first
   if (!normalizedEndpoint.includes('/v1')) {
@@ -436,7 +564,7 @@ export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME
   for (let i = 0; i < pendingIds.length; i += chunkSize) {
     const chunk = pendingIds.slice(i, i + chunkSize);
     const idsStr = chunk.join(',');
-    const sql = `UPDATE images SET published = 0, reviewed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr}); UPDATE storage_stats SET directory_version = directory_version + 1;`;
+    const sql = `UPDATE images SET published = 0, reviewed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idsStr});`;
     const cmd = `npx wrangler d1 execute ${dbName} --remote --command="${sql}" --json`;
     execSyncWithRetry(cmd, {
       encoding: 'utf-8',
@@ -444,6 +572,14 @@ export function applyPendingPostsWrangler({ pendingIds = [], dbName = D1_DB_NAME
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   }
+  try {
+    const bumpCmd = `npx wrangler d1 execute ${dbName} --remote --command="UPDATE storage_stats SET directory_version = directory_version + 1;" --json`;
+    execSyncWithRetry(bumpCmd, {
+      encoding: 'utf-8',
+      shell: CLI_SHELL,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {}
   return { updated_count: pendingIds.length };
 }
 
@@ -481,9 +617,10 @@ export async function fetchPublishedBatchHttp({ siteUrl = SITE_URL, offset = 0, 
 
 export async function fetchR2ImageBufferHttp({ siteUrl = SITE_URL || R2_PUBLIC_URL, r2Key, retries = 2 }) {
   const cleanBase = siteUrl.replace(/\/$/, '');
+  const encodedKey = r2Key.split('/').map(encodeURIComponent).join('/');
   const url = cleanBase.includes('r2.dev')
-    ? `${cleanBase}/${encodeURIComponent(r2Key)}`
-    : `${cleanBase}/api/r2/${encodeURIComponent(r2Key)}`;
+    ? `${cleanBase}/${encodedKey}`
+    : `${cleanBase}/api/r2/${encodedKey}`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
@@ -546,9 +683,14 @@ export async function main() {
   const activeEndpoint = typeof resolved === 'object' ? resolved.endpoint : resolved;
   const activeModel = (typeof resolved === 'object' && resolved.model) ? resolved.model : MODEL_NAME;
   const isVllm = typeof resolved === 'object' ? resolved.isVllm : false;
-  const effectiveConcurrency = isVllm ? Math.max(CONCURRENCY, 6) : CONCURRENCY;
+  const isJev = typeof resolved === 'object' ? resolved.isJev : IS_JEV;
+  const effectiveConcurrency = isJev ? Math.max(CONCURRENCY, 8) : (isVllm ? Math.max(CONCURRENCY, 6) : CONCURRENCY);
 
-  console.log(`VLM Engine   : ${isVllm ? '⚡ vLLM (Continuous Batching + AWQ)' : '🦙 Ollama'}`);
+  const engineName = isJev
+    ? '🌟 TypeSafe System One (Jev 1.14 Cloud)'
+    : (isVllm ? '⚡ vLLM (Continuous Batching + AWQ)' : '🦙 Ollama');
+
+  console.log(`VLM Engine   : ${engineName}`);
   console.log(`VLM Endpoint : ${activeEndpoint}`);
   console.log(`Model        : ${activeModel}`);
   console.log(`Data Source  : ☁️ Cloudflare Wrangler (D1: ${D1_DB_NAME})`);
@@ -557,7 +699,7 @@ export async function main() {
   console.log(`Mode         : ${APPLY ? '⚡ APPLY (Will move non-portraits to pending review)' : '🔍 DRY-RUN (Audit only, safe mode)'}`);
   console.log('----------------------------------------------------------------------');
 
-  if (!isVllm) {
+  if (!isVllm && !isJev) {
     // Auto-start Ollama if local and not running
     await ensureOllamaRunning(activeEndpoint);
   }

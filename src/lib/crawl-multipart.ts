@@ -13,7 +13,7 @@ export async function handleCrawlMultipart(
   if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_CRAWL_FILE_BYTES) {
     return Response.json({ error: 'File must be between 1 byte and 1 GB' }, { status: 413 });
   }
-  if (!/^[a-zA-Z0-9_]{1,15}_\d+_\d+(?:\.transcoded)?\.(?:mp4|webm|mov|m4v|webp|jpg|jpeg|png)$/.test(key)) {
+  if (!/^[a-zA-Z0-9_]{1,15}[/_]\d+_\d+(?:\.transcoded)?\.(?:mp4|webm|mov|m4v|webp|jpg|jpeg|png)$/.test(key)) {
     return Response.json({ error: 'Invalid crawler file key' }, { status: 400 });
   }
   if (action === 'create' && request.method === 'POST') {

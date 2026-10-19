@@ -59,7 +59,7 @@ export const GET: APIRoute = async ({ url }) => {
   const origin = url.origin;
   const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('[::1]');
   const getPreviewUrl = (key: string) => {
-    const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
+    const mediaUrl = `/api/r2/${key.split('/').map(encodeURIComponent).join('/')}`;
     if (isLocal) return mediaUrl;
     return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
   };
@@ -144,7 +144,7 @@ export const GET: APIRoute = async ({ url }) => {
     const authorHandle = normalizeAuthorHandle(image.author);
     const authorSearch = authorSearchText(image.author_display_name, image.author);
     const authorDisplay = formatAuthorName(image.author_display_name, image.author);
-    const r2Url = `/api/r2/${encodeURIComponent(firstKey)}`;
+    const r2Url = `/api/r2/${firstKey.split('/').map(encodeURIComponent).join('/')}`;
     const previewUrl = getPreviewUrl(firstKey);
     const titleAttr = escapeAttr(image.title || '無標題');
     const descAttr = escapeAttr(image.description || '');

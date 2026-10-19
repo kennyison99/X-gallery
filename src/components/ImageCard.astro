@@ -28,7 +28,7 @@ const totalImages = keys.length;
 const origin = Astro.url.origin;
 const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('[::1]');
 const getPreviewUrl = (key: string) => {
-  const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
+  const mediaUrl = `/api/r2/${key.split('/').map(encodeURIComponent).join('/')}`;
   if (isLocal) return mediaUrl;
   return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
 };
@@ -62,7 +62,7 @@ const displayDate = image.updated_at
   <div class="card-media media-slider" data-total={totalImages}>
     <div class="slider-slides image-gallery-group">
       {keys.map((key, idx) => {
-        const mediaUrl = `/api/r2/${encodeURIComponent(key)}`;
+        const mediaUrl = `/api/r2/${key.split('/').map(encodeURIComponent).join('/')}`;
         const isVid = isVideoKey(key);
         return (
           <a 

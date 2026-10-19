@@ -61,7 +61,7 @@ async function fetchUnhashedMedia(cursor = 0, limit = 50) {
 }
 
 async function fetchImageBuffer(r2Key, retries = 2) {
-  const url = `${SITE_URL}/api/r2/${encodeURIComponent(r2Key)}`;
+  const url = `${SITE_URL}/api/r2/${r2Key.split('/').map(encodeURIComponent).join('/')}`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(url, {

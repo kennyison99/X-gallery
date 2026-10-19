@@ -4,8 +4,11 @@ import { MAX_CRAWL_FILE_BYTES, CRAWL_UPLOAD_PART_BYTES } from '../src/lib/crawl-
 
 export async function uploadMultipartFile(filePath, username, siteUrl, apiKey, fetchImpl = fetch) {
   const size = fs.statSync(filePath).size;
-  if (size <= 0 || size > MAX_CRAWL_FILE_BYTES) throw new Error('File exceeds the 1 GB upload limit or is empty');
-  const key = `${username}_${path.basename(filePath).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const cleanAuthor = username.trim().replace(/^@+/, '');
+  const rawFileName = path.basename(filePath).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const prefix = `${cleanAuthor}_`;
+  const cleanFileName = rawFileName.startsWith(prefix) ? rawFileName.slice(prefix.length) : rawFileName;
+  const key = `${cleanAuthor}/${cleanFileName}`;
   let uploadId = '';
   async function request(action, options = {}, partNumber) {
     const params = new URLSearchParams({ action, size: String(size), key });

@@ -131,7 +131,7 @@ export const POST: APIRoute = async ({ request }) => {
     const r2Keys: string[] = [];
     for (const file of validFiles) {
       const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const r2Key = `${Date.now()}-${cleanFileName}`;
+      const r2Key = `${authorInput.handle}/${Date.now()}-${cleanFileName}`;
 
       const fileArrayBuffer = await file.arrayBuffer();
       await env.BUCKET.put(r2Key, fileArrayBuffer, {

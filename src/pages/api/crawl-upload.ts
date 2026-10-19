@@ -91,7 +91,10 @@ export const POST: APIRoute = async ({ request }) => {
     } else {
       const validFiles = files.filter(f => f && f.size > 0);
       if (validFiles.length > 0) {
-        firstFileName = validFiles[0].name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const rawName = validFiles[0].name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const prefix = `${authorInput.handle}_`;
+        const cleanName = rawName.startsWith(prefix) ? rawName.slice(prefix.length) : rawName;
+        firstFileName = `${authorInput.handle}/${cleanName}`;
       }
     }
 
@@ -103,9 +106,16 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     // Check for duplicate: same author + same original filename pattern
-    const existingCheck = await env.DB.prepare(
+    let existingCheck = await env.DB.prepare(
       'SELECT id FROM images WHERE author = ? AND instr(r2_keys, ?) > 0'
     ).bind(authorInput.handle, firstFileName).first();
+
+    if (!existingCheck && firstFileName.includes('/')) {
+      const legacyKey = firstFileName.replace('/', '_');
+      existingCheck = await env.DB.prepare(
+        'SELECT id FROM images WHERE author = ? AND instr(r2_keys, ?) > 0'
+      ).bind(authorInput.handle, legacyKey).first();
+    }
 
     if (existingCheck) {
       return new Response(JSON.stringify({
@@ -156,8 +166,10 @@ export const POST: APIRoute = async ({ request }) => {
 
       // Upload all files to R2
       for (const file of validFiles) {
-        const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const r2Key = `${authorInput.handle}_${cleanFileName}`;
+        const rawFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const prefix = `${authorInput.handle}_`;
+        const cleanFileName = rawFileName.startsWith(prefix) ? rawFileName.slice(prefix.length) : rawFileName;
+        const r2Key = `${authorInput.handle}/${cleanFileName}`;
         const fileArrayBuffer = await file.arrayBuffer();
         await env.BUCKET.put(r2Key, fileArrayBuffer, {
           httpMetadata: { contentType: contentTypeForFilename(file.name, file.type || 'image/jpeg') }

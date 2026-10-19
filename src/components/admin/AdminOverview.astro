@@ -140,6 +140,7 @@ const totalVideoBytesSum = authorStats.reduce((sum, item) => sum + item.video_by
     <a href="#crawler" class="btn">管理爬蟲帳號</a>
     <a href="#auto-tag" class="btn">執行 Auto-tag</a>
     <button type="button" id="backfill-sizes-btn" class="btn">同步歷史容量</button>
+    <button type="button" id="migrate-folders-btn" class="btn">搬遷檔案至帳號資料夾</button>
   </div>
 </section>
 
@@ -280,6 +281,45 @@ const totalVideoBytesSum = authorStats.reduce((sum, item) => sum + item.video_by
     } finally {
       backfillBtn.disabled = false;
       backfillBtn.textContent = originalText;
+    }
+  });
+
+  // Add migrate folders button handler
+  const migrateBtn = document.getElementById('migrate-folders-btn') as HTMLButtonElement | null;
+  migrateBtn?.addEventListener('click', async () => {
+    if (!confirm('確定要將 R2 根目錄的歷史檔案搬移到各自帳號的資料夾（{account}/{file}）中嗎？\n這將在 R2 建立資料夾結構並同步更新資料庫記錄。處理期間請保持頁面開啟。')) return;
+
+    const originalText = migrateBtn.textContent;
+    migrateBtn.disabled = true;
+    migrateBtn.textContent = '搬遷中...';
+
+    try {
+      let cursor = 0;
+      let totalMigratedPosts = 0;
+      let totalMigratedKeys = 0;
+      while (true) {
+        migrateBtn.textContent = `搬遷中 (貼文: ${totalMigratedPosts}, 檔案: ${totalMigratedKeys})...`;
+        const res = await fetch('/admin/api/migrate-folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cursor, limit: 20 }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        totalMigratedPosts += Number(data.migratedPosts || 0);
+        totalMigratedKeys += Number(data.migratedKeys || 0);
+        if (data.done) break;
+        const nextCursor = Number(data.nextCursor);
+        if (!Number.isFinite(nextCursor) || nextCursor <= cursor) break;
+        cursor = nextCursor;
+      }
+      alert(`搬遷完成！共搬遷了 ${totalMigratedPosts} 篇貼文的 ${totalMigratedKeys} 個 R2 媒體檔案至帳號資料夾。`);
+      window.location.reload();
+    } catch (err: any) {
+      alert(`搬遷失敗：${err.message}`);
+    } finally {
+      migrateBtn.disabled = false;
+      migrateBtn.textContent = originalText;
     }
   });
 

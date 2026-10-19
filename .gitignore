@@ -42,3 +42,6 @@ task.md
 
 # Isolated implementation worktrees
 .worktrees/
+
+# Scratch and test scripts
+scripts/test-*.mjs

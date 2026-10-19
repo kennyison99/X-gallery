@@ -73,9 +73,11 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const cleanAuthor = author.trim().replace(/^@+/, '');
-    const r2Key = `${cleanAuthor}_${cleanFileName}`;
+    const rawFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const prefix = `${cleanAuthor}_`;
+    const cleanFileName = rawFileName.startsWith(prefix) ? rawFileName.slice(prefix.length) : rawFileName;
+    const r2Key = `${cleanAuthor}/${cleanFileName}`;
 
     const fileArrayBuffer = await file.arrayBuffer();
     await env.BUCKET.put(r2Key, fileArrayBuffer, {
