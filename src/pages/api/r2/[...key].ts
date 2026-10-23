@@ -24,7 +24,7 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
   const cache = typeof caches !== 'undefined' ? (caches as any).default : undefined;
   const rangeHeader = request.headers.get('range');
   const ifNoneMatch = request.headers.get('if-none-match');
-  const cacheKey = `https://r2-cache.internal/${encodeURIComponent(decodedKey)}`;
+  const cacheKey = `https://r2-cache.internal/${decodedKey}`;
 
   if (!rangeHeader && cache) {
     try {
@@ -112,9 +112,13 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
         headers: new Headers(headers),
       });
       const cachePromise = cache.put(new Request(cacheKey), responseToCache).catch(() => {});
-      const waitUntil = (locals as any)?.runtime?.ctx?.waitUntil;
-      if (typeof waitUntil === 'function') {
-        waitUntil.call((locals as any).runtime.ctx, cachePromise);
+      try {
+        const cfContext = (locals as any)?.cfContext;
+        if (cfContext && typeof cfContext.waitUntil === 'function') {
+          cfContext.waitUntil(cachePromise);
+        }
+      } catch {
+        // Ignore if cfContext is unavailable
       }
       return new Response(clientBody, { status: 200, headers });
     }

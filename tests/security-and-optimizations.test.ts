@@ -88,9 +88,11 @@ test('matchesIfNoneMatch supports strong and weak ETags', () => {
   assert.equal(matchesIfNoneMatch('"different"', '"abc123"'), false);
 });
 
-test('R2 proxy streams full objects without buffering via object.arrayBuffer()', () => {
+test('R2 proxy streams full objects without buffering via object.arrayBuffer() and uses locals.cfContext', () => {
   const r2Route = read('../src/pages/api/r2/[...key].ts');
   assert.doesNotMatch(r2Route, /object\.arrayBuffer\(/);
+  assert.doesNotMatch(r2Route, /locals.*runtime/);
+  assert.match(r2Route, /cfContext/);
   assert.match(r2Route, /object\.body\.tee\(\)/);
   assert.match(r2Route, /status:\s*304/);
 });
