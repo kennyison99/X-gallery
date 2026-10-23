@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
-import { createConditionalBumpDirectoryVersionStmt } from '../../../lib/directory-data';
+import { createConditionalBumpDirectoryVersionStmt, invalidateDirectoryKvCache } from '../../../lib/directory-data';
 
 export const POST: APIRoute = async ({ request }) => {
   if (!env || !env.DB) {
@@ -53,6 +53,10 @@ export const POST: APIRoute = async ({ request }) => {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    if (totalChanges > 0) {
+      await invalidateDirectoryKvCache((env as any).CACHE);
     }
 
     return new Response(JSON.stringify({ success: true, count: totalChanges }), {

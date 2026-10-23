@@ -7,7 +7,7 @@ import {
   isVideoKey,
 } from '../../../lib/storage';
 import { normalizeAuthorInput } from '../../../lib/admin-dashboard';
-import { createBumpDirectoryVersionStmt } from '../../../lib/directory-data';
+import { createBumpDirectoryVersionStmt, invalidateDirectoryKvCache } from '../../../lib/directory-data';
 import { classifyMediaKeys } from '../../../lib/media-classifier';
 
 export const DELETE: APIRoute = async ({ params }) => {
@@ -29,10 +29,10 @@ export const DELETE: APIRoute = async ({ params }) => {
   try {
     const imageId = parseInt(id, 10);
 
-    // Get r2_keys first to delete from storage
-    const image = await env.DB.prepare('SELECT r2_keys FROM images WHERE id = ?')
+    // Get r2_keys and stored byte counts first to delete from storage without N head() calls
+    const image = await env.DB.prepare('SELECT r2_keys, photo_bytes, video_bytes FROM images WHERE id = ?')
       .bind(imageId)
-      .first();
+      .first<{ r2_keys: string; photo_bytes?: number; video_bytes?: number }>();
 
     if (!image) {
       return new Response(JSON.stringify({ error: 'Image not found' }), {
@@ -42,30 +42,43 @@ export const DELETE: APIRoute = async ({ params }) => {
     }
 
     // Split keys and delete all images from R2
-    const keys = image.r2_keys.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+    const keys = (image.r2_keys || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
 
-    // Sum the size of each object before deleting so the storage counter
-    // can be decremented accurately.
-    let freedBytes = 0;
-    for (const key of keys) {
-      try {
-        const head = await env.BUCKET.head(key);
-        if (head) freedBytes += head.size;
-      } catch {
-        /* ignore head errors */
+    const storedBytes = Number(image.photo_bytes || 0) + Number(image.video_bytes || 0);
+    let freedBytes = storedBytes;
+    if (freedBytes === 0 && keys.length > 0) {
+      for (const key of keys) {
+        try {
+          const head = await env.BUCKET.head(key);
+          if (head) freedBytes += head.size;
+        } catch {
+          /* ignore head errors */
+        }
       }
-      await env.BUCKET.delete(key);
+    }
+
+    if (keys.length > 0) {
+      try {
+        await env.BUCKET.delete(keys.length === 1 ? keys[0] : keys);
+      } catch {
+        for (const key of keys) {
+          await env.BUCKET.delete(key).catch(() => {});
+        }
+      }
     }
 
     if (freedBytes > 0) {
       await addStorageBytes(-freedBytes);
     }
 
-    // Delete from D1 atomically with directory version bump
+    // Delete from D1 atomically with media_assets cleanup and directory version bump
     await env.DB.batch([
       createBumpDirectoryVersionStmt(env.DB),
+      env.DB.prepare('DELETE FROM media_assets WHERE image_id = ?').bind(imageId),
       env.DB.prepare('DELETE FROM images WHERE id = ?').bind(imageId),
     ]);
+
+    await invalidateDirectoryKvCache((env as any).CACHE);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' }
@@ -223,6 +236,13 @@ export const PUT: APIRoute = async ({ params, request }) => {
         env.DB.prepare('DELETE FROM image_tags WHERE image_id = ?').bind(imageId),
       ];
 
+      if (keysToDelete.length > 0) {
+        const keyPlaceholders = keysToDelete.map(() => '?').join(',');
+        batchStmts.push(
+          env.DB.prepare(`DELETE FROM media_assets WHERE r2_key IN (${keyPlaceholders})`).bind(...keysToDelete)
+        );
+      }
+
       if (uniqueTags.length > 0) {
         const uniqueTagsJson = JSON.stringify(uniqueTags);
         const linksJson = JSON.stringify(uniqueTags.map(tagName => ({ imageId, tagName })));
@@ -262,6 +282,7 @@ export const PUT: APIRoute = async ({ params, request }) => {
       }
     }
     await addStorageBytes(incomingBytes - deletedBytes);
+    await invalidateDirectoryKvCache((env as any).CACHE);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' }

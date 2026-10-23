@@ -153,6 +153,8 @@ const pageTitle = activeTag
       (card as HTMLElement).dataset.likeInitialized = 'true';
 
       likeBtn.addEventListener('click', async () => {
+        if ((likeBtn as HTMLElement).dataset.likePending === 'true') return;
+        (likeBtn as HTMLElement).dataset.likePending = 'true';
         const likedImages = JSON.parse(localStorage.getItem('liked-images') || '[]');
         const idNum = parseInt(imgId, 10);
         const isLiked = likedImages.includes(idNum);
@@ -174,7 +176,7 @@ const pageTitle = activeTag
           if (data.success) {
             likeCountSpan.textContent = data.likes;
             if (action === 'like') {
-              likedImages.push(idNum);
+              if (!likedImages.includes(idNum)) likedImages.push(idNum);
             } else {
               const idx = likedImages.indexOf(idNum);
               if (idx > -1) likedImages.splice(idx, 1);
@@ -196,6 +198,8 @@ const pageTitle = activeTag
           } else {
             likeBtn.classList.add('liked');
           }
+        } finally {
+          delete (likeBtn as HTMLElement).dataset.likePending;
         }
       });
     });
@@ -234,7 +238,6 @@ const pageTitle = activeTag
       btn.addEventListener('click', () => {
         buttons.forEach((button) => button.classList.remove('active'));
         btn.classList.add('active');
-        applyMediaFilter();
 
         const media = (btn as HTMLElement).dataset.mediaType;
         if (media === 'all' || media === 'photo' || media === 'video') {

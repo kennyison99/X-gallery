@@ -12,8 +12,9 @@ import {
   type MediaDuplicateFix,
 } from '../../lib/dedup-media';
 import { addStorageBytes } from '../../lib/storage';
-import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
+import { createBumpDirectoryVersionStmt, invalidateDirectoryKvCache } from '../../lib/directory-data';
 import { classifyMediaKeys } from '../../lib/media-classifier';
+import { verifySecret } from '../../lib/auth';
 
 const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 50;
@@ -37,13 +38,7 @@ function integerParam(value: string | null, fallback: number): number | null {
 }
 
 async function validApiKey(value: unknown): Promise<boolean> {
-  if (typeof value !== 'string' || !env.CRAWL_API_KEY) return false;
-  const encoder = new TextEncoder();
-  const [provided, expected] = await Promise.all([
-    crypto.subtle.digest('SHA-256', encoder.encode(value)),
-    crypto.subtle.digest('SHA-256', encoder.encode(env.CRAWL_API_KEY)),
-  ]);
-  return crypto.subtle.timingSafeEqual(provided, expected);
+  return verifySecret(value, env?.CRAWL_API_KEY);
 }
 
 async function headKeys(keys: string[]): Promise<Map<string, DedupObject>> {
@@ -174,11 +169,18 @@ async function applyMediaFix(requested: MediaDuplicateFix) {
     else photoBytes += size;
   });
 
-  await env.DB.batch([
+  const statements = [
     env.DB.prepare('UPDATE images SET r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
       .bind(remainingStr, photoCount, videoCount, photoBytes, videoBytes, row.id),
     createBumpDirectoryVersionStmt(env.DB),
-  ]);
+  ];
+  if (current.delete_keys.length > 0) {
+    const keyPlaceholders = current.delete_keys.map(() => '?').join(',');
+    statements.push(
+      env.DB.prepare(`DELETE FROM media_assets WHERE r2_key IN (${keyPlaceholders})`).bind(...current.delete_keys),
+    );
+  }
+  await env.DB.batch(statements);
   const deleted = await deleteObjects(current.delete_keys, objects);
   return { ...deleted, deletedCards: 0, fixedId: row.id };
 }
@@ -220,9 +222,18 @@ async function applyCardFix(requested: CardDuplicateFix) {
     else photoBytes += size;
   });
 
+  if (current.delete_keys.length > 0) {
+    const keyPlaceholders = current.delete_keys.map(() => '?').join(',');
+    statements.push(
+      env.DB.prepare(`DELETE FROM media_assets WHERE r2_key IN (${keyPlaceholders})`).bind(...current.delete_keys),
+    );
+  }
+
   statements.push(
     env.DB.prepare('UPDATE images SET likes = ?, published = ?, r2_keys = ?, photo_count = ?, video_count = ?, photo_bytes = ?, video_bytes = ?, media_count_version = 1 WHERE id = ?')
       .bind(maxLikes, maxPublished, remainingStr, photoCount, videoCount, photoBytes, videoBytes, current.keep_id),
+    env.DB.prepare(`DELETE FROM media_assets WHERE image_id IN (${deletePlaceholders})`)
+      .bind(...current.delete_ids),
     env.DB.prepare(`DELETE FROM image_tags WHERE image_id IN (${deletePlaceholders})`)
       .bind(...current.delete_ids),
     env.DB.prepare(`DELETE FROM images WHERE id IN (${deletePlaceholders})`)
@@ -286,6 +297,10 @@ export const POST: APIRoute = async ({ request }) => {
       deletedObjects += result.deleted;
       freedBytes += result.freedBytes;
       fixedIds.push(result.fixedId);
+    }
+
+    if (fixedIds.length > 0) {
+      await invalidateDirectoryKvCache((env as any).CACHE);
     }
 
     if (freedBytes > 0) {

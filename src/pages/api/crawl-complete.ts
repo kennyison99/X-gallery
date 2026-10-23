@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { verifySecret } from '../../lib/auth';
+import { invalidateDirectoryKvCache } from '../../lib/directory-data';
 
 /**
  * POST /api/crawl-complete
@@ -20,9 +22,9 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const apiKey = body.api_key as string | undefined;
+    const apiKey = (body.api_key as string | undefined) ?? request.headers.get('X-API-Key');
     const expectedKey = (env as any).CRAWL_API_KEY;
-    if (expectedKey && apiKey !== expectedKey) {
+    if (!(await verifySecret(apiKey, expectedKey))) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }
@@ -80,6 +82,10 @@ export const POST: APIRoute = async ({ request }) => {
       )
         .bind(runType, crawlMode, newImages, username.toLowerCase())
         .run();
+    }
+
+    if (newImages > 0) {
+      await invalidateDirectoryKvCache((env as any).CACHE);
     }
 
     return new Response(JSON.stringify({ success: true }), {

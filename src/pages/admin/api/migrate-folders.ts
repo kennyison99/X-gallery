@@ -1,6 +1,14 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { normalizeAuthorHandle } from '../../../lib/admin-dashboard';
+import {
+  extractApiKey,
+  hasCloudflareAccessAuth,
+  hasSameOrigin,
+  isLocalOrigin,
+  verifySecret,
+} from '../../../lib/auth';
+import { invalidateDirectoryKvCache } from '../../../lib/directory-data';
 
 interface MigrateRow {
   id: number;
@@ -16,10 +24,18 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
-  // Allow either same-origin requests or API key authenticated requests
-  const apiKey = request.headers.get('X-API-Key') || new URL(request.url).searchParams.get('api_key');
+  // Require either a valid CRAWL_API_KEY, local development origin, or Cloudflare Access + same-origin
+  const url = new URL(request.url);
+  const apiKey = extractApiKey(request, url);
   const expectedKey = (env as any).CRAWL_API_KEY;
-  if (apiKey && expectedKey && apiKey !== expectedKey) {
+  if (apiKey !== null) {
+    if (!(await verifySecret(apiKey, expectedKey))) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  } else if (!isLocalOrigin(url) && !(hasCloudflareAccessAuth(request) && hasSameOrigin(request, url))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -127,6 +143,7 @@ export const POST: APIRoute = async ({ request }) => {
       await env.DB.prepare(
         'UPDATE storage_stats SET directory_version = directory_version + 1 WHERE id = 1'
       ).run();
+      await invalidateDirectoryKvCache((env as any).CACHE);
     }
 
     const nextCursor = rows.at(-1)?.id ?? cursor;

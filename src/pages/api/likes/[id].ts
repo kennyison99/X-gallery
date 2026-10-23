@@ -29,14 +29,25 @@ export const POST: APIRoute = async ({ params, request }) => {
     }
 
     const imageId = parseInt(id, 10);
+    if (!Number.isInteger(imageId) || imageId <= 0) {
+      return new Response(JSON.stringify({ error: 'Invalid image ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     let result;
 
     if (action === 'unlike') {
-      result = await env.DB.prepare('UPDATE images SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END WHERE id = ? RETURNING likes')
+      result = await env.DB.prepare(
+        'UPDATE images SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END WHERE id = ? AND published = 1 RETURNING likes'
+      )
         .bind(imageId)
         .first();
     } else {
-      result = await env.DB.prepare('UPDATE images SET likes = likes + 1 WHERE id = ? RETURNING likes')
+      result = await env.DB.prepare(
+        'UPDATE images SET likes = likes + 1 WHERE id = ? AND published = 1 RETURNING likes'
+      )
         .bind(imageId)
         .first();
     }

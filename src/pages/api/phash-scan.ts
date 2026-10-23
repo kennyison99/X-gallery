@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
-import { createConditionalBumpDirectoryVersionStmt } from '../../lib/directory-data';
+import { createConditionalBumpDirectoryVersionStmt, invalidateDirectoryKvCache } from '../../lib/directory-data';
 import { chunkArray, isValidPHashHex } from '../../lib/phash-utils';
+import { verifySecret } from '../../lib/auth';
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 500;
@@ -32,14 +33,7 @@ function integerParam(value: string | null, fallback: number): number | null {
 }
 
 async function validApiKey(request: Request): Promise<boolean> {
-  const apiKey = request.headers.get('X-API-Key');
-  if (!apiKey || !env?.CRAWL_API_KEY) return false;
-  const encoder = new TextEncoder();
-  const [provided, expected] = await Promise.all([
-    crypto.subtle.digest('SHA-256', encoder.encode(apiKey)),
-    crypto.subtle.digest('SHA-256', encoder.encode(env.CRAWL_API_KEY)),
-  ]);
-  return crypto.subtle.timingSafeEqual(provided, expected);
+  return verifySecret(request.headers.get('X-API-Key'), env?.CRAWL_API_KEY);
 }
 
 export const GET: APIRoute = async ({ request, url }) => {
@@ -213,6 +207,10 @@ export const POST: APIRoute = async ({ request, url }) => {
         updateStmt,
       ]);
       totalUpdated += batchResults[1].meta.changes ?? 0;
+    }
+
+    if (totalUpdated > 0) {
+      await invalidateDirectoryKvCache((env as any).CACHE);
     }
 
     return json({

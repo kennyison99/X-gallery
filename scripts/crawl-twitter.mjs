@@ -10,7 +10,7 @@ import { uploadMultipartFile } from "./crawl-upload.mjs";
 import { MAX_CRAWL_FILE_BYTES, CRAWL_UPLOAD_PART_BYTES } from "../src/lib/crawl-upload-limits.mjs";
 import { ensureXtractor, runXtractor } from "./xtractor-lib.mjs";
 import { dedupeMediaItems, latestPostSignature, mediaIdFromUrl, newerThanLatest, samePostSignature } from "./media-items.mjs";
-import { transcodeVideoFile } from "./video-transcoder.mjs";
+import { transcodeVideoFile, runProcess } from "./video-transcoder.mjs";
 import { splitCrawlWork } from "./crawl-plan.mjs";
 
 const execAsync = promisify(exec);
@@ -27,18 +27,18 @@ const SITE_URL = (process.env.SITE_URL ?? "http://localhost:4321").replace(
 const CRAWL_API_KEY = process.env.CRAWL_API_KEY ?? "";
 const CRAWL_RUN_TYPE = process.env.CRAWL_RUN_TYPE === "manual" ? "manual" : "auto";
 
-function parseMaxFailedAccounts() {
-  for (let i = 0; i < process.argv.length; i++) {
-    const arg = process.argv[i];
+export function parseMaxFailedAccounts(argv = process.argv, env = process.env) {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
     if (arg.startsWith("--max-failed-accounts=") || arg.startsWith("--max-failures=")) {
       return Number(arg.split("=")[1]);
     }
-    if ((arg === "--max-failed-accounts" || arg === "--max-failures") && i + 1 < process.argv.length) {
-      return Number(process.argv[i + 1]);
+    if ((arg === "--max-failed-accounts" || arg === "--max-failures") && i + 1 < argv.length) {
+      return Number(argv[i + 1]);
     }
   }
-  if (process.env.MAX_FAILED_ACCOUNTS !== undefined && process.env.MAX_FAILED_ACCOUNTS !== "") {
-    return Number(process.env.MAX_FAILED_ACCOUNTS);
+  if (env.MAX_FAILED_ACCOUNTS !== undefined && String(env.MAX_FAILED_ACCOUNTS).trim() !== "") {
+    return Number(env.MAX_FAILED_ACCOUNTS);
   }
   return 0;
 }
@@ -161,8 +161,8 @@ async function checkUploadExists(username, postUrl) {
   return result.skipped ? result : null;
 }
 
-async function uploadImageGroup(filePaths, username, postUrl, description, createdAt, displayName = "") {
-  const existing = await checkUploadExists(username, postUrl);
+async function uploadImageGroup(filePaths, username, postUrl, description, createdAt, displayName = "", skipExistenceCheck = false) {
+  const existing = skipExistenceCheck ? null : await checkUploadExists(username, postUrl);
   if (existing) return existing;
 
   const r2Keys = [];
@@ -451,17 +451,36 @@ async function convertMediaFile(mediaPath, itemType) {
 
   const webpPath = mediaPath.replace(/\.[a-zA-Z0-9]+$/, ".webp");
   if (isGif) {
-    const cmd = `ffmpeg -y -i "${mediaPath}" -loop 0 -q:v 60 "${webpPath}"`;
-    await execAsync(cmd, { timeout: 60000 });
+    await runProcess("ffmpeg", ["-y", "-i", mediaPath, "-loop", "0", "-q:v", "60", webpPath], { timeoutMs: 60_000 });
   } else {
-    const convertCmd = `python -c "from PIL import Image; Image.open(r'''${mediaPath}''').save(r'''${webpPath}''', 'WEBP', quality=80)"`;
-    await execAsync(convertCmd);
+    await runProcess("ffmpeg", ["-y", "-i", mediaPath, "-q:v", "80", webpPath], { timeoutMs: 60_000 });
   }
   fs.unlinkSync(mediaPath);
   return webpPath;
 }
 
 export async function processTweetGroup({ key, tasks, username, metaByTweetId, accountNick, archive }) {
+  const isTweetId = /^\d+$/.test(key);
+  const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
+  const needsNetworkDownload = tasks.some(
+    (task) => !archive[task.mediaId] && !fs.existsSync(task.outputPath) && Boolean(task.url),
+  );
+  let precheckedPostUrl = false;
+  if (isTweetId && postUrl && needsNetworkDownload) {
+    try {
+      const existing = await checkUploadExists(username, postUrl);
+      precheckedPostUrl = true;
+      if (existing?.skipped) {
+        for (const task of tasks) {
+          archive[task.mediaId] = 1;
+        }
+        saveArchive(archive);
+        return { downloaded: 0, skipped: tasks.length, processed: 0, uploaded: 0, failed: 0 };
+      }
+    } catch (err) {
+      console.warn(`  ⚠️ Pre-download existence check failed for ${key}: ${err.message}`);
+    }
+  }
   const stats = { downloaded: 0, skipped: 0, processed: 0, uploaded: 0, failed: 0 };
   const downloadedTasks = [];
 
@@ -518,8 +537,6 @@ export async function processTweetGroup({ key, tasks, username, metaByTweetId, a
   }
 
   try {
-    const isTweetId = /^\d+$/.test(key);
-    const postUrl = isTweetId ? `https://x.com/${username}/status/${key}` : "";
     const meta = isTweetId ? metaByTweetId.get(key) : null;
     const uploadResult = await uploadImageGroup(
       finalFiles,
@@ -528,6 +545,7 @@ export async function processTweetGroup({ key, tasks, username, metaByTweetId, a
       meta?.description ?? "",
       meta?.createdAt ?? "",
       meta?.nick || accountNick,
+      precheckedPostUrl,
     );
     if (uploadResult?.skipped) {
       stats.skipped += finalFiles.length;
@@ -617,7 +635,9 @@ async function main() {
   if (work) {
     accounts = work.map(({ account }) => account);
   } else {
-    const accountsRes = await fetchWithTimeout(`${SITE_URL}/api/crawl-accounts`);
+    const accountsRes = await fetchWithTimeout(`${SITE_URL}/api/crawl-accounts`, {
+      headers: { "X-API-Key": CRAWL_API_KEY },
+    });
     if (!accountsRes.ok) throw new Error(`Failed to fetch accounts: HTTP ${accountsRes.status}`);
     ({ accounts } = await accountsRes.json());
   }

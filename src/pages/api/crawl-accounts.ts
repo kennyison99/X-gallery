@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { normalizeCrawlUsername } from '../../lib/crawl-accounts.ts';
-import { createBumpDirectoryVersionStmt } from '../../lib/directory-data.ts';
+import { createBumpDirectoryVersionStmt, invalidateDirectoryKvCache } from '../../lib/directory-data.ts';
 
 // GET — 取得所有爬取帳號
 export const GET: APIRoute = async () => {
@@ -182,6 +182,8 @@ export const PUT: APIRoute = async ({ request }) => {
         ),
         createBumpDirectoryVersionStmt(env.DB),
       ]);
+
+      await invalidateDirectoryKvCache((env as any).CACHE);
 
       return new Response(JSON.stringify({ success: true, username: newUsername }), {
         headers: { 'Content-Type': 'application/json' }

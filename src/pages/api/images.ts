@@ -13,7 +13,7 @@ import {
   fetchGalleryBatch,
 } from '../../lib/gallery-feed';
 
-import { getDirectoryData, createBumpDirectoryVersionStmt } from '../../lib/directory-data';
+import { getDirectoryData, createBumpDirectoryVersionStmt, invalidateDirectoryKvCache } from '../../lib/directory-data';
 import { classifyMediaKeys } from '../../lib/media-classifier';
 
 import { InvalidCursorError } from '../../lib/cursor';
@@ -204,6 +204,7 @@ export const POST: APIRoute = async ({ request }) => {
     );
 
     await env.DB.batch(batchStmts);
+    await invalidateDirectoryKvCache((env as any).CACHE);
 
     return new Response(JSON.stringify({ success: true, imageId }), {
       headers: { 'Content-Type': 'application/json' }

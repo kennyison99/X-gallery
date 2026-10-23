@@ -1,13 +1,14 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import { verifySecret } from '../../lib/auth';
 
-export const GET: APIRoute = async ({ url }) => {
+export const GET: APIRoute = async ({ request, url }) => {
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ error: 'DB binding is not configured' }), { status: 500 });
   }
 
-  const apiKey = url.searchParams.get('api_key');
-  if (!apiKey || apiKey !== env.CRAWL_API_KEY) {
+  const apiKey = request.headers.get('X-API-Key') ?? url.searchParams.get('api_key');
+  if (!(await verifySecret(apiKey, (env as any).CRAWL_API_KEY))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 
@@ -40,7 +41,8 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const { api_key, updates } = await request.json();
-    if (!api_key || api_key !== env.CRAWL_API_KEY) {
+    const providedKey = api_key ?? request.headers.get('X-API-Key');
+    if (!(await verifySecret(providedKey, (env as any).CRAWL_API_KEY))) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
 
@@ -49,7 +51,7 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     // Prepare batch statements
-    const statements = updates.map((u: any) => 
+    const statements = updates.map((u: any) =>
       env.DB.prepare("UPDATE images SET post_url = ? WHERE id = ?").bind(u.post_url, u.id)
     );
 

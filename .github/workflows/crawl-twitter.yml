@@ -46,12 +46,10 @@ jobs:
       plan_artifact: ${{ steps.plan_artifact.outputs.artifact-id }}
       xtractor_version: ${{ steps.xtractor_version.outputs.version }}
     env:
-      TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
       SITE_URL: ${{ secrets.SITE_URL }}
-      CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
       CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
       CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || inputs.retry_skipped_videos) && 'artifacts/skipped-video-recovery.json' || '' }}
-      MAX_FAILED_ACCOUNTS: ${{ inputs.max_failed_accounts != '' && inputs.max_failed_accounts || 5 }}
+      MAX_FAILED_ACCOUNTS: ${{ format('{0}', inputs.max_failed_accounts) != '' && format('{0}', inputs.max_failed_accounts) || '5' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -84,6 +82,8 @@ jobs:
         if: ${{ !inputs.fix_links }}
         id: detect
         env:
+          TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
           CRAWL_ALL: ${{ inputs.crawl_all }}
         run: |
           if [ -n "$CRAWL_RECOVERY_FILE" ]; then
@@ -115,6 +115,9 @@ jobs:
 
       - name: Run links repair script
         if: ${{ inputs.fix_links }}
+        env:
+          TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
         run: npm run fix-links
 
   crawl:
@@ -128,12 +131,10 @@ jobs:
       max-parallel: 2
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     env:
-      TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
       SITE_URL: ${{ secrets.SITE_URL }}
-      CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
       CRAWL_RUN_TYPE: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
       CRAWL_RECOVERY_FILE: ${{ (github.event_name == 'push' || inputs.retry_skipped_videos) && 'artifacts/skipped-video-recovery.json' || '' }}
-      MAX_FAILED_ACCOUNTS: ${{ inputs.max_failed_accounts != '' && inputs.max_failed_accounts || 5 }}
+      MAX_FAILED_ACCOUNTS: ${{ format('{0}', inputs.max_failed_accounts) != '' && format('{0}', inputs.max_failed_accounts) || '5' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -158,35 +159,6 @@ jobs:
           path: scripts/.xtractor-bin
           key: xtractor-bin-${{ runner.os }}-${{ runner.arch }}-${{ needs.detect.outputs.xtractor_version }}
 
-      - name: Set up Python 3.12
-        id: python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Restore installed Pillow environment
-        id: pillow_cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .crawl-venv
-          key: pillow-venv-v1-ubuntu24-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/crawl-requirements.txt') }}
-
-      - name: Install Pillow on cache miss
-        if: ${{ steps.pillow_cache.outputs.cache-hit != 'true' }}
-        run: |
-          python -m venv .crawl-venv
-          .crawl-venv/bin/python -m pip install -r scripts/crawl-requirements.txt
-
-      - name: Save installed Pillow environment
-        if: ${{ steps.pillow_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: .crawl-venv
-          key: ${{ steps.pillow_cache.outputs.cache-primary-key }}
-
-      - name: Activate cached Python environment
-        run: echo "$GITHUB_WORKSPACE/.crawl-venv/bin" >> "$GITHUB_PATH"
-
       - name: Set up FFmpeg
         run: |
           if ! command -v ffmpeg >/dev/null 2>&1; then
@@ -196,6 +168,8 @@ jobs:
 
       - name: Crawl assigned accounts
         env:
+          TWITTER_COOKIES: ${{ secrets.TWITTER_COOKIES }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
           SHARD: ${{ matrix.shard }}
         run: node scripts/crawl-twitter.mjs --plan=scripts/.crawl-plan.json --shard="$SHARD"
 
@@ -256,19 +230,6 @@ jobs:
         with:
           path: scripts/.xtractor-archive.json
           key: xtractor-archive-v1-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Run daily cleanup for pending review images
-        env:
-          SITE_URL: ${{ secrets.SITE_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -n "$SITE_URL" ] && [ -n "$CRON_SECRET" ]; then
-            curl --fail-with-body --show-error --max-time 60 -X POST "${SITE_URL}/api/cron-cleanup" \
-              -H "Content-Type: application/json" \
-              -H "X-Cron-Secret: ${CRON_SECRET}"
-          else
-            echo "Skipping cleanup: SITE_URL or CRON_SECRET is not configured"
-          fi
 
       - name: Require all crawl workers to succeed
         if: ${{ always() && !inputs.fix_links }}

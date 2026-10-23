@@ -76,6 +76,23 @@ const DIRECTORY_MEMORY_TTL_MS = 30_000;
 const directoryLoads = createSingleFlight();
 const overviewLoads = createSingleFlight();
 
+export async function invalidateDirectoryKvCache(
+  kv?: { delete?: (key: string) => Promise<void> } | null,
+): Promise<void> {
+  clearDirectoryMemoryCache();
+  if (!kv || typeof kv.delete !== 'function') return;
+  const keys = ['directory:v1:public', 'directory:v1:admin', ADMIN_OVERVIEW_KV_KEY];
+  await Promise.all(
+    keys.map(async (key) => {
+      try {
+        await kv.delete!(key);
+      } catch (error) {
+        console.error(`Directory KV delete failed for ${key}:`, error);
+      }
+    }),
+  );
+}
+
 export function clearDirectoryMemoryCache(): void {
   memoryCache.public = null;
   memoryCache.admin = null;

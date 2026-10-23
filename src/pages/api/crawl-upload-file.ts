@@ -7,6 +7,7 @@ import {
   wouldExceedStorage,
   addStorageBytes,
 } from '../../lib/storage';
+import { verifySecret } from '../../lib/auth';
 
 /**
  * POST /api/crawl-upload-file
@@ -24,20 +25,16 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     if (new URL(request.url).searchParams.has('action')) {
       const apiKey = request.headers.get('X-API-Key');
-      const expectedKey = env.CRAWL_API_KEY;
-      if (!apiKey || !expectedKey) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-      const encoder = new TextEncoder();
-      const [provided, expected] = await Promise.all([
-        crypto.subtle.digest('SHA-256', encoder.encode(apiKey)),
-        crypto.subtle.digest('SHA-256', encoder.encode(expectedKey)),
-      ]);
-      if (!crypto.subtle.timingSafeEqual(provided, expected)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      const expectedKey = (env as any).CRAWL_API_KEY;
+      if (!(await verifySecret(apiKey, expectedKey))) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
       return await handleCrawlMultipart(request, env.BUCKET, wouldExceedStorage, addStorageBytes);
     }
     const formData = await request.formData();
-    const apiKey = formData.get('api_key') as string | null;
+    const apiKey = (formData.get('api_key') as string | null) ?? request.headers.get('X-API-Key');
     const expectedKey = (env as any).CRAWL_API_KEY;
-    if (expectedKey && apiKey !== expectedKey) {
+    if (!(await verifySecret(apiKey, expectedKey))) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }

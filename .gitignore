@@ -45,3 +45,7 @@ task.md
 
 # Scratch and test scripts
 scripts/test-*.mjs
+scripts/uncommitted-checkpoint-*.json
+
+# Local audit dumps and tooling artifacts
+.codex/

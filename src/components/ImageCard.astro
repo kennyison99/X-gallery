@@ -88,8 +88,8 @@ const displayDate = image.updated_at
               <img
                 src={getPreviewUrl(key)}
                 alt={image.title || 'Twitter photo'}
-                loading={isLcp ? "eager" : "lazy"}
-                fetchpriority={isLcp ? "high" : "auto"}
+                loading={isLcp && idx === 0 ? "eager" : "lazy"}
+                fetchpriority={isLcp && idx === 0 ? "high" : "auto"}
                 class="gallery-image"
               />
             )}

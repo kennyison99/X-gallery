@@ -11,6 +11,7 @@ import { normalizeAuthorInput } from '../../lib/admin-dashboard';
 import { createBumpDirectoryVersionStmt } from '../../lib/directory-data';
 import { classifyMediaKeys } from '../../lib/media-classifier';
 import { createImageTagStatements } from '../../lib/image-tags';
+import { verifySecret } from '../../lib/auth';
 
 
 /**
@@ -30,10 +31,10 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     const formData = await request.formData();
     
-    // Simple API key authentication
-    const apiKey = formData.get('api_key') as string | null;
+    // Fail-closed constant-time API key authentication
+    const apiKey = (formData.get('api_key') as string | null) ?? request.headers.get('X-API-Key');
     const expectedKey = (env as any).CRAWL_API_KEY;
-    if (expectedKey && apiKey !== expectedKey) {
+    if (!(await verifySecret(apiKey, expectedKey))) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }
