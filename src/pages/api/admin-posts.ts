@@ -61,7 +61,7 @@ export const GET: APIRoute = async ({ url }) => {
   const getPreviewUrl = (key: string) => {
     const mediaUrl = `/api/r2/${key.split('/').map(encodeURIComponent).join('/')}`;
     if (isLocal) return mediaUrl;
-    return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
+    return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp&we`;
   };
 
   const params = parseAdminPostsParams(url);

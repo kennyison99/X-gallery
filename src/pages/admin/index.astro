@@ -496,7 +496,7 @@ try {
         const origin = window.location.origin;
         const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('[::1]');
         const mediaUrl = `/api/r2/${key.split('/').map(encodeURIComponent).join('/')}`;
-        img.src = isLocal ? mediaUrl : `https://wsrv.nl/?url=${encodeURIComponent(origin + mediaUrl)}&w=200&output=webp`;
+        img.src = isLocal ? mediaUrl : `https://wsrv.nl/?url=${encodeURIComponent(origin + mediaUrl)}&w=200&output=webp&we`;
         img.style.width = '60px';
         img.style.height = '60px';
         img.style.objectFit = 'cover';

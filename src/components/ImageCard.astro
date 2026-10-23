@@ -30,7 +30,7 @@ const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1') || 
 const getPreviewUrl = (key: string) => {
   const mediaUrl = `/api/r2/${key.split('/').map(encodeURIComponent).join('/')}`;
   if (isLocal) return mediaUrl;
-  return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp`;
+  return `https://wsrv.nl/?url=${encodeURIComponent(new URL(mediaUrl, origin).href)}&w=300&output=webp&we`;
 };
 
 // Detect video keys (by extension) so the card can render a <video> preview
